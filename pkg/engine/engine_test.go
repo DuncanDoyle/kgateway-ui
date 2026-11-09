@@ -71,11 +71,12 @@ func snapshotEdge(t *testing.T, attached int32, objs ...*unstructured.Unstructur
 		Synced: true, TakenAt: testutil.Now}
 }
 
-// config is the upstream engine configuration over snap with a 30 s metrics age limit.
-func config(snap *cache.Snapshot, m ctrlmetrics.Source, now func() time.Time) Config {
+// config is the upstream engine configuration over snap, serving m's metrics
+// for kgw.kgateway with a 30 s age limit.
+func config(snap *cache.Snapshot, m metricsSource, now func() time.Time) Config {
 	return Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: m,
-		Checks: health.Upstream(), MetricsMaxAge: 30 * time.Second, Now: now}
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Collected: served(m, 30*time.Second),
+		Checks: health.Upstream(), Now: now}
 }
 
 func hasFinding(rep health.Report, code, res, detail string) bool {

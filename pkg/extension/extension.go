@@ -18,25 +18,29 @@ import (
 	"regexp"
 
 	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
-	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
 
-// Registry holds everything the backend is built from.
+// Registry holds everything the backend is built from. Its hook fields (Scope,
+// Verifier, ProxyMode, RulesFor, Process, ProxyStats, Commands) are the hooks
+// of the default pack: kgateway in New, the core in NewCore (see WithPack).
 type Registry struct {
 	Kinds     []kinds.Descriptor
 	Detectors []install.Detector
 	Scope     install.ScopeProvider
 	// Verifier checks scope against the controller. Nil means the upstream
-	// verifier, which the app sizes from the metrics interval.
+	// verifier for kgateway installs, which the app sizes from the metrics
+	// interval; any other install gets none.
 	Verifier scopeverify.Verifier
 	Checks   []health.Check
 	// Authorizer decides per request what the caller may see (D-013).
@@ -55,10 +59,30 @@ type Registry struct {
 	// Commands fills in the next-step commands (design §8.5).
 	Commands diagnose.Commands
 
+	// pack names the default pack; "" is the core. settings, version, reported
+	// and experimentalOnly are its hooks that have no exported field.
+	pack             string
+	settings         func(install.Install) install.Settings
+	version          func(install.Install) string
+	reported         func(install.Install, collect.Snapshot) (string, bool)
+	experimentalOnly func(kinds.Served, install.Install) bool
+	conditions       health.ConditionTypes
+	// checkPack names the pack each check belongs to, by check name; a core check has none.
+	checkPack map[string]string
+	// impls are the hooks of the other packs, and of the core once a default pack is set, by name.
+	impls map[string]Impl
+	// features are each pack's UI features, by pack name.
+	features map[string][]string
+	// packs are the pack names in registration order; kindPack names the pack that owns a kind.
+	packs    []string
+	kindPack map[objects.GroupKind]string
+
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
 	// collectors are the WithCollectors registrations, in order.
 	collectors []Collector
+	// packCollectors are the packs' collector factories, in order.
+	packCollectors []packCollector
 	// capSources are the WithCapabilities registrations, in order.
 	capSources []func() []api.Capability
 	// prefixes holds the finding-code prefixes registered so far.
@@ -90,10 +114,11 @@ func WithKinds(d ...kinds.Descriptor) Option {
 	return func(r *Registry) { r.Kinds = kinds.Dedupe(append(r.Kinds, d...)) }
 }
 
-// WithDetectors adds install detectors. They are tried before the upstream
-// detector, so a downstream can claim Deployments the upstream one would also match.
+// WithDetectors adds install detectors for the default pack. They are tried
+// before the detectors already registered, so a downstream can claim
+// Deployments the upstream one would also match.
 func WithDetectors(d ...install.Detector) Option {
-	return func(r *Registry) { r.Detectors = append(append([]install.Detector{}, d...), r.Detectors...) }
+	return func(r *Registry) { r.Detectors = append(stamp(r.pack, d), r.Detectors...) }
 }
 
 // WithScopeProvider replaces the scope provider.
@@ -102,8 +127,9 @@ func WithScopeProvider(p install.ScopeProvider) Option { return func(r *Registry
 // WithScopeVerifier replaces the scope verifier.
 func WithScopeVerifier(v scopeverify.Verifier) Option { return func(r *Registry) { r.Verifier = v } }
 
-// WithChecks adds health checks; by convention their finding codes start with
-// prefix, such as "ACME-". A reserved or repeated prefix adds nothing and Registry.Err reports it.
+// WithChecks adds health checks to the default pack (kgateway in New, the
+// core in NewCore); by convention their finding codes start with prefix, such
+// as "ACME-". A reserved or repeated prefix adds nothing and Registry.Err reports it.
 func WithChecks(prefix string, c ...health.Check) Option {
 	return func(r *Registry) {
 		switch {
@@ -114,6 +140,9 @@ func WithChecks(prefix string, c ...health.Check) Option {
 		default:
 			r.prefixes[prefix] = true
 			r.Checks = append(r.Checks, c...)
+			for _, ch := range c {
+				r.checkPack[ch.Name()] = r.pack
+			}
 		}
 	}
 }
@@ -149,9 +178,10 @@ func WithAuthorizer(a api.Authorizer) Option { return func(r *Registry) { r.Auth
 // WithProxyModeResolver replaces the upstream GatewayParameters resolution.
 func WithProxyModeResolver(p proxymode.Resolver) Option { return func(r *Registry) { r.ProxyMode = p } }
 
-// WithComputedRules replaces rulesets.Select. A downstream distribution maps
-// its controller to a rule set; a build that is not the kgateway edition
-// receives "" as the version (D-018 §3).
+// WithComputedRules sets the rule-set choice of the default pack (in New,
+// the kgateway pack's rulesets.Select). A downstream distribution maps its
+// controller to a rule set; a build that is not the kgateway edition receives
+// its BaseVersion, "" when unknown (D-018 §3).
 func WithComputedRules(f func(controllerVersion string) computed.Selection) Option {
 	return func(r *Registry) { r.RulesFor = f }
 }
@@ -169,18 +199,28 @@ func WithProxyStatsSource(s proxystats.Source) Option { return func(r *Registry)
 // with its own commands. A method that returns "" hides that step.
 func WithCommands(c diagnose.Commands) Option { return func(r *Registry) { r.Commands = c } }
 
-// New returns the upstream registry with opts applied.
+// New returns the core plus the kgateway pack, with opts applied. The kinds
+// and checks keep the order of kinds.Upstream and health.Upstream.
 func New(opts ...Option) *Registry {
+	return NewCore(append([]Option{WithPack(kgatewayPack()), upstreamOrder}, opts...)...)
+}
+
+// upstreamOrder puts the kinds and checks in the base order, which API v1 kind
+// lists keep; the set is the same core-then-pack set.
+func upstreamOrder(r *Registry) { r.Kinds, r.Checks = kinds.Upstream(), health.Upstream() }
+
+// NewCore returns the core alone, with opts applied: Gateway API kinds, no
+// detectors, the core checks and no pack hooks.
+func NewCore(opts ...Option) *Registry {
 	r := &Registry{
-		Kinds:      kinds.Upstream(),
-		Detectors:  []install.Detector{install.UpstreamDetector{}},
-		Scope:      install.NamespaceSelectorScope{},
-		Checks:     health.Upstream(),
+		Kinds:      kinds.GatewayAPI(),
+		Checks:     health.Core(),
 		Authorizer: api.AllowAll{},
-		ProxyMode:  proxymode.GatewayParameters{},
-		RulesFor:   rulesets.Select,
-		Process:    process.Kube{},
 		Commands:   diagnose.Kubectl{},
+		impls:      map[string]Impl{},
+		features:   map[string][]string{},
+		kindPack:   map[objects.GroupKind]string{},
+		checkPack:  map[string]string{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}
 	for _, o := range opts {

@@ -306,8 +306,10 @@ func memoProbes(runs map[string]int) []health.Check {
 			}
 			return fmt.Sprint(rvs)
 		}),
-		probe("probe metrics", health.InputSet{Metrics: true}, func(ctx health.RunContext) string {
-			return fmt.Sprint(ctx.HasMetrics, ctx.Metrics.Metrics.Rejects, ctx.Metrics.Metrics.PerPod)
+		probe("probe metrics", health.InputSet{Collected: []string{ctrlmetrics.Key}}, func(ctx health.RunContext) string {
+			v, _ := ctx.Collected(ctrlmetrics.Key)
+			r, _, has := ctrlmetrics.Lookup(v, ctx.Install.ID())
+			return fmt.Sprint(has, r.Metrics.Rejects, r.Metrics.PerPod)
 		}),
 		probe("probe verify", health.InputSet{Verify: true}, func(ctx health.RunContext) string {
 			return fmt.Sprint(ctx.Verify.Available, len(ctx.Verify.Mismatches))
@@ -368,9 +370,9 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 	newSide := func(noMemo bool) *side {
 		s := &side{runs: map[string]int{}}
 		s.e = engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-			Scope: install.NamespaceSelectorScope{}, Verifier: scriptVerifier{verify}, Metrics: metrics,
-			Checks: append(health.Upstream(), memoProbes(s.runs)...), MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return now },
-			Collected: col.Snapshot, NoMemo: noMemo, RulesFor: func(string) computed.Selection { return rulesets.Select(ruleVersion) },
+			Scope: install.NamespaceSelectorScope{}, Verifier: scriptVerifier{verify},
+			Checks: append(health.Upstream(), memoProbes(s.runs)...), Now: func() time.Time { return now },
+			Collected: served(metrics, 30*time.Second, col.Snapshot), NoMemo: noMemo, RulesFor: func(string) computed.Selection { return rulesets.Select(ruleVersion) },
 			KindsChange: func() kinds.Change { return change }})
 		s.srv = httptest.NewServer(NewHandler(s.e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, nil))
 		t.Cleanup(s.srv.Close)
@@ -539,8 +541,8 @@ func TestReusedDiagnosisNamesCurrentProxyDeployment(t *testing.T) {
 	}
 	side := func(noMemo bool) (*engine.Engine, *httptest.Server) {
 		e := engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-			Scope: install.NamespaceSelectorScope{}, Verifier: scriptVerifier{&scopeverify.Result{Available: true}}, Metrics: metrics,
-			Checks: xds, Now: func() time.Time { return now }, NoMemo: noMemo})
+			Scope: install.NamespaceSelectorScope{}, Verifier: scriptVerifier{&scopeverify.Result{Available: true}},
+			Collected: served(metrics, 0, nil), Checks: xds, Now: func() time.Time { return now }, NoMemo: noMemo})
 		srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, nil))
 		t.Cleanup(srv.Close)
 		return e, srv

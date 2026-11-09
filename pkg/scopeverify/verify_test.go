@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil/metricstest"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -32,8 +33,8 @@ func inputWith(t *testing.T, now time.Time, managed map[ctrlmetrics.ManagedKey]f
 	snap := &cache.Snapshot{Objects: testutil.ObjectsByGVR(t, objs...), Synced: true,
 		Namespaces: []*corev1.Namespace{testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil)}}
 	return Input{Install: install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway"}, Scope: install.ParseSelectors(`[{"matchLabels":{"team":"a"}}]`)},
-		Snapshot: snap, Served: testutil.ServedUpstream(), HasMetrics: true, Now: now,
-		Metrics: ctrlmetrics.Result{CollectedAt: now, Metrics: ctrlmetrics.Metrics{Managed: managed, ManagedPresent: present}}}
+		Snapshot: snap, Served: testutil.ServedUpstream(), Now: now,
+		Collected: metricstest.Collected(now, 0, map[string]ctrlmetrics.Result{"kgw.kgateway": {CollectedAt: now, Metrics: ctrlmetrics.Metrics{Managed: managed, ManagedPresent: present}}})}
 }
 
 // Weights mirror the gauge: Gateway 1, route 1 per parentRef, policy 1.
@@ -71,8 +72,8 @@ func TestAbsentFamilyWithObjectsIsUnavailable(t *testing.T) {
 // Counts from an old scrape must not verify the current scope.
 func TestStaleMetricsAreUnavailable(t *testing.T) {
 	in := input(t, testutil.Now, matching, true)
-	in.Metrics.CollectedAt = testutil.Now.Add(-5 * time.Minute)
-	in.MetricsMaxAge = 30 * time.Second
+	in.Collected = metricstest.Collected(testutil.Now, 30*time.Second, map[string]ctrlmetrics.Result{"kgw.kgateway": {CollectedAt: testutil.Now.Add(-5 * time.Minute),
+		Metrics: ctrlmetrics.Metrics{Managed: matching, ManagedPresent: true}}})
 	if r := NewManagedCountVerifier(20 * time.Second).Verify(in); r.Available {
 		t.Fatalf("stale metrics must make the verifier unavailable: %+v", r)
 	}
@@ -109,7 +110,7 @@ func TestUnavailableRestartsPersistence(t *testing.T) {
 	off := map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "Gateway"}: 1, {Namespace: "shop", Resource: "HTTPRoute"}: 3, {Namespace: "shop", Resource: "TrafficPolicy"}: 1}
 	v.Verify(input(t, testutil.Now, off, true))
 	gap := input(t, testutil.Now.Add(10*time.Second), off, true)
-	gap.Metrics.Err = "connection refused"
+	gap.Collected = metricstest.Collected(gap.Now, 0, map[string]ctrlmetrics.Result{"kgw.kgateway": {CollectedAt: gap.Now, Err: "connection refused"}})
 	v.Verify(gap)
 	if r := v.Verify(input(t, testutil.Now.Add(25*time.Second), off, true)); len(r.Mismatches) != 0 {
 		t.Fatalf("persistence must restart after an unavailable period: %+v", r)
@@ -167,7 +168,7 @@ func TestRoutesAreCountedThroughViews(t *testing.T) {
 		want[k] = v
 	}
 	want[ctrlmetrics.ManagedKey{Namespace: "shop", Resource: "GRPCRoute"}] = 1
-	in.Metrics.Metrics.Managed = want
+	in.Collected = metricstest.Collected(in.Now, 0, map[string]ctrlmetrics.Result{"kgw.kgateway": {CollectedAt: in.Now, Metrics: ctrlmetrics.Metrics{Managed: want, ManagedPresent: true}}})
 	if r := NewManagedCountVerifier(20 * time.Second).Verify(in); !r.Available || len(r.Mismatches) != 0 {
 		t.Fatalf("%+v", r)
 	}

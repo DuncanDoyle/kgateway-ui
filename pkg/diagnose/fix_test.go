@@ -14,7 +14,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -79,9 +78,6 @@ func TestGrantNamesDistinct(t *testing.T) {
 }
 
 // noMetrics is a metrics source with no result.
-type noMetrics struct{}
-
-func (noMetrics) Get(string) (ctrlmetrics.Result, bool) { return ctrlmetrics.Result{}, false }
 
 // E3: a caller outside the server builds the fix from a Compute result with
 // the exported packages alone.
@@ -104,7 +100,7 @@ func TestFixFromComputeResult(t *testing.T) {
 	c.Start(ctx)
 	cat := kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}}, nil)
 	e := engine.New(engine.Config{Snapshots: c, Served: served, Detectors: []install.Detector{det}, Scope: install.NamespaceSelectorScope{},
-		Checks: health.Upstream(), Catalog: func() kinds.Catalog { return cat }, Metrics: noMetrics{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour)})
+		Checks: health.Upstream(), Catalog: func() kinds.Catalog { return cat }, Verifier: scopeverify.NewManagedCountVerifier(time.Hour)})
 	m := e.Compute()
 	for deadline := time.Now().Add(5 * time.Second); !m.Snapshot.Synced; m = e.Compute() {
 		if time.Now().After(deadline) {

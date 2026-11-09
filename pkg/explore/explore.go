@@ -28,6 +28,9 @@ type Input struct {
 	Views objects.Decoder
 	// Computed is the install's view A; nil computes no members or computed flags.
 	Computed *computed.Views
+	// Conditions are the install's route condition types beyond Gateway API's;
+	// nil means health.KgatewayConditions, as for health.Input.
+	Conditions *health.ConditionTypes
 }
 
 // RowID indexes Index.Routes, Index.Gateways or Index.ListenerSets, as the
@@ -118,7 +121,7 @@ type ParentLink struct {
 	Via        *objects.Ref
 	Attachment Attachment
 	// Cond is the deciding condition: the first current False among
-	// Accepted, ResolvedRefs and kgateway.dev/Programmed (design §7.3).
+	// Accepted, ResolvedRefs and the install's optional route types (design §7.3).
 	Cond *metav1.Condition
 	// Pending is why the status entry is not current, for a pending link.
 	Pending string
@@ -244,8 +247,8 @@ type Index struct {
 	ByListener map[ListenerKey][]Member
 	// Listeners holds every computed listener count.
 	Listeners map[ListenerKey]ListenerFacts
-	// RuleSet and RuleNote are view A's rule set and its selection label.
-	RuleSet, RuleNote string
+	// RuleSet, RuleLabel and RuleNote are view A's rule set, its display name and its selection label.
+	RuleSet, RuleLabel, RuleNote string
 	// DelegRows are view B's rows, sorted by (parent, rule, ref, child), each
 	// ref by (namespace, name, group, kind).
 	DelegRows []DelegRow

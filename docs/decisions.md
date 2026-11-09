@@ -1139,3 +1139,18 @@ Measured on the reference machine, 5 runs per world:
 
 **Consequences:** RBAC stays get/list/watch; the new surface is network egress from the UI pod to Gateway addresses. Saved test suites, re-runs and load testing stay out of scope (roadmap, Phase 8).
 
+
+## D-065 — The core-only proof runs in a private compatibility CI (2026-11-08, phase 5)
+**Status:** accepted (user, 2026-11-08)
+
+**Context:** D-061 asked for a CI smoke test of a core-only build, as proof the seam holds. Snellius is a kgateway UI and claims no other implementation (D-061). A public CI job against another implementation would read as a support claim.
+
+**Decision:**
+1. The proof runs only in a private compatibility CI, outside this repo. Its workflow checks out Snellius and runs a core-only smoke test on kind. Nothing for it runs in this repo's CI.
+2. Public docs name no implementation as a test target.
+3. The core must not assume Envoy. A controller with a non-Envoy data plane is in scope of the private check, so proxy stats, xDS rejects and Envoy names belong to the kgateway pack.
+4. This repo ships what the private CI needs, with no implementation names: a core-only build and a generic smoke test it can run against any cluster (Phase 5 design §12).
+
+**Alternatives:** a public CI job against another implementation: rejected by the user, since it reads as a support claim.
+
+**Consequences:** Setting up the private repo is a Phase 5 G6 task; creating it needs the user's go. A failure there is reported to this repo's maintainers by hand, not by an automated issue.

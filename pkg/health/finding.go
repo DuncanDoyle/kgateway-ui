@@ -9,7 +9,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -159,12 +158,7 @@ type Input struct {
 	// KindsChange is how the kinds served now differ from Served, which the cache watches.
 	KindsChange kinds.Change
 	// Catalog is every kind the API server serves; the zero Catalog knows none.
-	Catalog    kinds.Catalog
-	Metrics    ctrlmetrics.Result
-	HasMetrics bool
-	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
-	// interval); zero means no limit.
-	MetricsMaxAge time.Duration
+	Catalog kinds.Catalog
 	// FirstSeen returns when the engine first saw u's current generation; the
 	// grace period runs from it. Nil means u's creation time.
 	FirstSeen func(u *unstructured.Unstructured) time.Time
@@ -185,6 +179,35 @@ type Input struct {
 	GatewayAPI func(kgatewayMinor string) (bundle string, ok bool)
 	// Rules is the install's rule set; one without a PolicyTargeter raises no computed KGWUI-016.
 	Rules computed.Selection
+	// Conditions are the install's condition types beyond Gateway API's; nil
+	// means KgatewayConditions, as for a caller that builds Input itself.
+	Conditions *ConditionTypes
+}
+
+// ConditionTypes are an implementation's route condition types beyond
+// Gateway API's (Phase 5 design §9).
+type ConditionTypes struct {
+	// RouteOptional are judged on a route parent when present.
+	RouteOptional []string
+	// RouteRejected carry a replaced or dropped rule, KGWUI-015, when False.
+	RouteRejected []string
+}
+
+// KgatewayConditions are kgateway's: kgateway.dev/Programmed, and the
+// replaced rule on Accepted (2.3) or kgateway.dev/Programmed (2.4 on).
+func KgatewayConditions() ConditionTypes {
+	return ConditionTypes{RouteOptional: []string{kgatewayProgrammed}, RouteRejected: []string{"Accepted", kgatewayProgrammed}}
+}
+
+// kgatewayProgrammed is kgateway's route condition type.
+const kgatewayProgrammed = "kgateway.dev/Programmed"
+
+// conditions returns in.Conditions, or KgatewayConditions when it is unset.
+func (in Input) conditions() ConditionTypes {
+	if in.Conditions == nil {
+		return KgatewayConditions()
+	}
+	return *in.Conditions
 }
 
 // ProcessData is one install's controller and per-Gateway proxy processes

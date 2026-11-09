@@ -2,7 +2,10 @@
 // kgw24's set; cited source lines (V4) are v2.4.7, unchanged in behaviour at v2.5.0.
 package kgw25
 
-import "github.com/DuncanDoyle/snellius/pkg/computed"
+import (
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/viewa"
+)
 
 type rules struct{}
 
@@ -13,18 +16,21 @@ func New() computed.Rules { return rules{} }
 // Version implements computed.Rules.
 func (rules) Version() string { return "kgateway-2.5" }
 
+// Label implements computed.Labeler.
+func (rules) Label() string { return "kgateway 2.5" }
+
 // ReportsTargetNotFound implements computed.TargetStatusReporter: 2.5 controllers
 // write TargetNotFound on policy ancestors (#14709), so KGWUI-016 comes from status.
 func (rules) ReportsTargetNotFound() bool { return true }
 
-// Attachment implements computed.Rules: 2.3's view A plus the isolation note.
+// Attachment implements computed.Rules: the shared view A plus the isolation note.
 func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
-	res := attach(in)
+	res := viewa.Attach(in, viewA)
 	isolationNotes(in, &res)
 	return res
 }
 
-// Delegation implements computed.Rules.
+// Delegation implements computed.Delegator.
 func (rules) Delegation(in computed.DelegationInput) computed.DelegationResult {
 	return delegation(in)
 }

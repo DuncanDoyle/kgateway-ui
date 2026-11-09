@@ -14,6 +14,7 @@
         },
         "computed": {
           "by": "ui",
+          "label": "kgateway 2.4",
           "reason": "too-large",
           "rule": "delegation",
           "rules": "kgateway-2.4",

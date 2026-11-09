@@ -30,6 +30,7 @@ import (
 const (
 	notFoundInScope = "resource not found in this install's scope"
 	noDetailView    = "no detail view for this kind"
+	noDelegation    = "no delegation for this controller"
 )
 
 // detail is one detail request after its install was found.
@@ -250,7 +251,7 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 		v, st = objects.DecodeGateway(u), explore.RowState(ref, d.i.Health)
 	}
 	out := GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
-		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
+		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
 		Listeners: d.listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
 		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if cand == nil {
@@ -286,7 +287,7 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 	}
 	f := &fs[k]
 	dp.Rejecting = true
-	dp.NextSteps = append(dp.NextSteps, nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(d.p.Model, d.i), d.h.commands, d.v.visible()))...)
+	dp.NextSteps = append(dp.NextSteps, nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(d.p.Model, d.i), d.h.commandsOf(d.i.Resolved.Install), d.v.visible()))...)
 	ev, ok := f.Facts.(*health.XDSRejectsEvidence)
 	if !ok {
 		return dp, &proxies
@@ -326,15 +327,16 @@ func withheldOn(checks []health.CheckResult, gw objects.Ref) (*WithheldDTO, stri
 	return nil, health.LogsNotRead
 }
 
-// snapshot is gw's xDS snapshot from the install's last complete metrics read; nil without one.
+// snapshot is gw's xDS snapshot from the install's complete metrics entry in
+// the values the model read, stale or not; nil without one.
 func (d *detail) snapshot(gw objects.Ref) *SnapshotDTO {
-	for _, r := range d.p.Model.MetricsRead {
-		if r.ID != d.i.Resolved.ID() || !r.Present || r.Result.Err != "" {
-			continue
-		}
-		if s, ok := r.Result.Metrics.Snapshot[ctrlmetrics.GatewayKey{Namespace: gw.Namespace, Name: gw.Name}]; ok {
-			return &SnapshotDTO{By: "controller", Listeners: s.Listeners, Routes: s.Routes, Clusters: s.Clusters, Endpoints: s.Endpoints, Secrets: s.Secrets}
-		}
+	v, _ := d.p.Model.Collected.Get(ctrlmetrics.Key)
+	r, _, ok := ctrlmetrics.Lookup(v, d.i.Resolved.ID())
+	if !ok || r.Err != "" {
+		return nil
+	}
+	if s, ok := r.Metrics.Snapshot[ctrlmetrics.GatewayKey{Namespace: gw.Namespace, Name: gw.Name}]; ok {
+		return &SnapshotDTO{By: "controller", Listeners: s.Listeners, Routes: s.Routes, Clusters: s.Clusters, Endpoints: s.Endpoints, Secrets: s.Secrets}
 	}
 	return nil
 }
@@ -436,9 +438,9 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	parent := v.Parent.Ref()
 	out := ListenerSetDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, RuleSet: d.ix.RuleSet, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
+		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
 		RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
-	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && k.ExperimentalOnly(d.i.Resolved.KgatewayVersion()) {
+	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && d.i.Resolved.Experimental(k) {
 		out.ExperimentalHint = experimentalHint(k)
 	}
 	// The parent is read only when it opens: a hidden, absent or unadmitted
@@ -488,7 +490,7 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 		v, st = objects.DecodeHTTPRoute(u), explore.RowState(ref, d.i.Health)
 	}
 	out := RouteDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, RuleSet: d.ix.RuleSet, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
+		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok {
@@ -619,9 +621,10 @@ func (d *detail) filters(fs []objects.Filter) []FilterDTO {
 
 // backendRef is b, ref i of rule of route, on the wire. A name delegation
 // ref links its child; wildcard and label refs select, so they never link.
+// Without delegation every ref is an ordinary one.
 func (d *detail) backendRef(route objects.Ref, rule, i int, b objects.BackendRef) BackendRefDTO {
 	out := BackendRefDTO{Ref: LinkedRef{Ref: b.Ref, Link: LinkNone}, Port: b.Port, Weight: b.Weight, WeightDefaulted: b.WeightDefaulted, Filters: d.filters(b.Filters)}
-	if dl := b.Delegation; dl != nil {
+	if dl := b.Delegation; dl != nil && !d.i.Resolved.NoDelegation {
 		out.Delegation = &DelegationRefDTO{Mode: dl.Mode, Namespace: dl.Namespace, Name: dl.Name, Label: dl.Label}
 		if dl.Mode == objects.DelegationName {
 			child := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: dl.Namespace, Name: dl.Name}
@@ -888,10 +891,15 @@ func (d *detail) unreachedEdges(route objects.Ref, inherit bool, out *[]Effectiv
 // routeDelegation is GET …/routes/{group}/{kind}/{ns}/{name}/delegation:
 // the route's view B rows, filtered and paged in their fixed order (design
 // §7.1, §7.2). It opens like the route's detail page; rows of hidden
-// children are left out before the total (design §7.4 rule 3).
+// children are left out before the total (design §7.4 rule 3). An install
+// without delegation answers 404.
 func (h *handler) routeDelegation(w http.ResponseWriter, r *http.Request) {
 	d := h.startDetail(w, r)
 	if d == nil {
+		return
+	}
+	if d.i.Resolved.NoDelegation {
+		writeErr(w, http.StatusNotFound, noDelegation)
 		return
 	}
 	if r.PathValue("group") != objects.GatewayAPIGroup || r.PathValue("kind") != "HTTPRoute" {

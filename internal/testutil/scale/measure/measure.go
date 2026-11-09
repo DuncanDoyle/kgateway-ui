@@ -38,19 +38,19 @@ const Every = 10 * time.Second
 // LogRate is the controller log's marked lines per second (design §16.3).
 const LogRate = 50
 
-// Controller Pod of every scale world (scale.Live).
+// Install and controller Pod of every scale world (scale.Live).
 const (
-	ctrlUID  = "pod/kgw/kgateway-0"
-	ctrlName = "kgateway-0"
+	InstallID = "kgw.kgateway"
+	ctrlUID   = "pod/kgw/kgateway-0"
+	ctrlName  = "kgateway-0"
 )
 
 // World is the measurement world over a settled cache.
 type World struct {
 	Live *scale.LiveWorld
 	Tier scale.Tier
-	// Metrics serves the tier's controller capture for every install.
-	Metrics ctrlmetrics.Source
-	// Store holds the proxy stats; the engine reads Store.Snapshot.
+	// Store holds the tier's controller capture for InstallID, which never goes
+	// stale, and the proxy stats; the engine reads Store.Snapshot.
 	Store *collect.Store
 	// Stats scrapes the stub source; Installs feeds its rounds.
 	Stats    *proxystats.Collector
@@ -79,8 +79,8 @@ func New(tb testing.TB, tier scale.Tier, clk clock.WithTicker) *World {
 		tb.Fatal(err)
 	}
 	m.PerPod[0].UID, m.PerPod[0].Name = ctrlUID, ctrlName
-	w.Metrics = static{ctrlmetrics.Result{Metrics: m, CollectedAt: clk.Now()}}
 	w.Store = collect.New(w.Live.Signal, clk.Now)
+	ctrlmetrics.Publish(w.Store, ctrlmetrics.Results{ByInstall: map[string]ctrlmetrics.Result{InstallID: {Metrics: m, CollectedAt: clk.Now()}}})
 	src := &stubSource{worst: tier.IsWorst, n: map[string]int64{}}
 	w.Stats = proxystats.New(proxystats.Config{Source: src, Every: Every, Clock: clk, Installs: func() ([]proxystats.Install, *cache.Snapshot) {
 		w.mu.Lock()
@@ -245,11 +245,6 @@ func (w *World) awaitProbes(tb testing.TB, want map[string]int) {
 		}
 	}
 }
-
-// static serves one metrics result for every install.
-type static struct{ r ctrlmetrics.Result }
-
-func (s static) Get(string) (ctrlmetrics.Result, bool) { return s.r, true }
 
 // stubSource is proxystats.Kube's targets and interpretation over a fixed body,
 // whose reject counters grow on every fetch of a Pod.

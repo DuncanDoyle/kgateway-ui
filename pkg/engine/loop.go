@@ -1,27 +1,22 @@
 package engine
 
 import (
-	"cmp"
 	"context"
-	"encoding/binary"
-	"hash/fnv"
-	"math"
-	"slices"
 	"time"
 
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/snellius/pkg/cache"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 )
 
 // Source is the source fingerprint of a model (D-019 §2): the cache data it
-// was computed from, the identity of the metrics results it read, the
-// served-kinds change it saw and the collector values it read.
+// was computed from, the served-kinds change it saw and the collector values
+// it read, controller metrics included, with which of their parts were stale.
 type Source struct {
 	Cache cache.Fingerprint
-	// Metrics is encodeMetrics of the results read.
-	Metrics uint64
+	// Stale is the collected values' StalePrint at the source's instant, so
+	// metrics turning stale are never confirmed as current.
+	Stale uint64
 	// Kinds is the served-kinds change as kinds.Change.String().
 	Kinds string
 	// Collected is the collector store's print; zero without collectors.
@@ -32,7 +27,7 @@ type Source struct {
 
 // Equal reports whether s and o describe the same source data.
 func (s Source) Equal(o Source) bool {
-	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Catalog == o.Catalog && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
+	return s.Kinds == o.Kinds && s.Stale == o.Stale && s.Catalog == o.Catalog && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
 }
 
 // Published is one publication: a Model, the Source it was computed from and
@@ -71,122 +66,6 @@ type LoopEvent struct {
 	Published *Published
 }
 
-// encodeMetrics is the identity of the metrics results reads: FNV-64a over each
-// read's ID, Present and, if present, freshness at now, Err and every Metrics
-// entry (including Snapshot and PerPod) in key order. CollectedAt is left out, as in
-// ctrlmetrics.Result.SameContent; Model.Next's staleness deadline covers it.
-func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uint64 {
-	h := fnv.New64a()
-	var b [8]byte
-	u64 := func(v uint64) {
-		binary.LittleEndian.PutUint64(b[:], v)
-		_, _ = h.Write(b[:])
-	}
-	str := func(s string) {
-		u64(uint64(len(s))) // length prefix keeps adjacent strings apart
-		_, _ = h.Write([]byte(s))
-	}
-	flag := func(v bool) {
-		if v {
-			u64(1)
-		} else {
-			u64(0)
-		}
-	}
-	for _, r := range reads {
-		str(r.ID)
-		flag(r.Present)
-		if !r.Present {
-			continue
-		}
-		res := r.Result
-		flag(!res.Stale(now, maxAge))
-		str(res.Err)
-		flag(res.Metrics.ManagedPresent)
-		rejects := sortedKeys(res.Metrics.Rejects, func(a, b ctrlmetrics.GatewayKey) int {
-			return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-		})
-		u64(uint64(len(rejects)))
-		for _, k := range rejects {
-			str(k.Namespace)
-			str(k.Name)
-			u64(math.Float64bits(res.Metrics.Rejects[k]))
-		}
-		managed := sortedKeys(res.Metrics.Managed, func(a, b ctrlmetrics.ManagedKey) int {
-			return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Resource, b.Resource))
-		})
-		u64(uint64(len(managed)))
-		for _, k := range managed {
-			str(k.Namespace)
-			str(k.Resource)
-			u64(math.Float64bits(res.Metrics.Managed[k]))
-		}
-		snapshot := sortedKeys(res.Metrics.Snapshot, func(a, b ctrlmetrics.GatewayKey) int {
-			return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-		})
-		u64(uint64(len(snapshot)))
-		for _, k := range snapshot {
-			str(k.Namespace)
-			str(k.Name)
-			v := res.Metrics.Snapshot[k]
-			for _, n := range []int{v.Listeners, v.Routes, v.Clusters, v.Endpoints, v.Secrets} {
-				u64(uint64(n)) //nolint:gosec // a count; only its bits matter
-			}
-		}
-		u64(uint64(len(res.Metrics.PerPod)))
-		for _, p := range res.Metrics.PerPod {
-			str(p.UID)
-			str(p.Name)
-			flag(p.DroppedPresent)
-			u64(math.Float64bits(p.Dropped))
-			for _, series := range []map[ctrlmetrics.TypeKey]float64{p.Active, p.Total} {
-				keys := sortedKeys(series, func(a, b ctrlmetrics.TypeKey) int {
-					return cmp.Or(cmp.Compare(a.Gateway.Namespace, b.Gateway.Namespace), cmp.Compare(a.Gateway.Name, b.Gateway.Name), cmp.Compare(a.TypeURL, b.TypeURL))
-				})
-				u64(uint64(len(keys)))
-				for _, k := range keys {
-					str(k.Gateway.Namespace)
-					str(k.Gateway.Name)
-					str(k.TypeURL)
-					u64(math.Float64bits(series[k]))
-				}
-			}
-			str(p.BuildVersion)
-			flag(p.PerClientPresent)
-			withheld := sortedKeys(p.Withheld, func(a, b ctrlmetrics.GatewayKey) int {
-				return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-			})
-			u64(uint64(len(withheld)))
-			for _, k := range withheld {
-				str(k.Namespace)
-				str(k.Name)
-				u64(math.Float64bits(p.Withheld[k]))
-			}
-			bounded := sortedKeys(p.Bounded, func(a, b ctrlmetrics.ModeKey) int {
-				return cmp.Or(cmp.Compare(a.Gateway.Namespace, b.Gateway.Namespace), cmp.Compare(a.Gateway.Name, b.Gateway.Name), cmp.Compare(a.Mode, b.Mode))
-			})
-			u64(uint64(len(bounded)))
-			for _, k := range bounded {
-				str(k.Gateway.Namespace)
-				str(k.Gateway.Name)
-				str(k.Mode)
-				u64(math.Float64bits(p.Bounded[k]))
-			}
-		}
-	}
-	return h.Sum64()
-}
-
-// sortedKeys returns m's keys sorted by order.
-func sortedKeys[K comparable, V any](m map[K]V, order func(a, b K) int) []K {
-	keys := make([]K, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.SortFunc(keys, order)
-	return keys
-}
-
 // publish makes next current unless a value with a higher Model.Seq already is.
 func (e *Engine) publish(next *Published) {
 	for {
@@ -210,21 +89,15 @@ func (e *Engine) confirm(prev *Published, now time.Time) bool {
 	return e.cur.CompareAndSwap(prev, &Published{Model: prev.Model, Source: prev.Source, ConfirmedAt: now})
 }
 
-// liveSource is the Source the stores, the metrics, the kinds monitor and the
-// collector store would give a computation at now, for the installs p read metrics for.
-func (e *Engine) liveSource(p *Published, now time.Time) Source {
+// liveSource is the Source the stores, the kinds monitor and the collector
+// store would give a computation at now.
+func (e *Engine) liveSource(now time.Time) Source {
 	var src Source
 	if f, ok := e.cfg.Snapshots.(cache.Fingerprinter); ok {
 		src.Cache = f.Fingerprint()
 	} else {
 		src.Cache = e.cfg.Snapshots.Snapshot().Source
 	}
-	reads := make([]MetricsRead, len(p.Model.MetricsRead))
-	for i, r := range p.Model.MetricsRead {
-		res, has := e.cfg.Metrics.Get(r.ID)
-		reads[i] = MetricsRead{ID: r.ID, Result: res, Present: has}
-	}
-	src.Metrics = encodeMetrics(reads, now, e.cfg.MetricsMaxAge)
 	if e.cfg.KindsChange != nil {
 		src.Kinds = e.cfg.KindsChange().String()
 	}
@@ -232,7 +105,8 @@ func (e *Engine) liveSource(p *Published, now time.Time) Source {
 		src.Catalog = e.cfg.Catalog().Key()
 	}
 	if e.cfg.Collected != nil {
-		src.Collected = e.cfg.Collected().Print
+		col := e.cfg.Collected()
+		src.Collected, src.Stale = col.Print, col.StalePrint(now)
 	}
 	return src
 }
@@ -344,7 +218,7 @@ func (e *Engine) confirmTick(s *sched) {
 		e.emit(EvConfirmRefused, now, p)
 		return
 	}
-	if !e.liveSource(p, now).Equal(p.Source) {
+	if !e.liveSource(now).Equal(p.Source) {
 		s.trigger(now)
 		e.emit(EvConfirmRefused, now, p)
 		return

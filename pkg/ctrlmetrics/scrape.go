@@ -21,7 +21,6 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/snellius/pkg/install"
-	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 // Scraper fetches the /metrics payload of one controller pod.
@@ -92,6 +91,15 @@ func get(c *http.Client, req *http.Request) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
+// ScraperFor is the controller metrics scraper: the Pod IP in-cluster,
+// pods/proxy with the user's rights otherwise.
+func ScraperFor(kube kubernetes.Interface, inCluster bool) Scraper {
+	if inCluster {
+		return HTTPScraper{Client: NewHTTPClient()}
+	}
+	return PodProxyScraper{Kube: kube}
+}
+
 // PodProxyScraper scrapes through the API server's pods/proxy subresource
 // (local mode; uses the user's kubeconfig rights). It sends one GET over the
 // REST client's HTTP client without redirects; Request.Stream is not used, as it
@@ -150,12 +158,8 @@ func samePod(a, b PodMetrics) bool {
 // metrics identity hashes them.
 func sameBits(a, b float64) bool { return math.Float64bits(a) == math.Float64bits(b) }
 
-// Source returns the latest Result per install ID.
-type Source interface {
-	Get(id string) (Result, bool)
-}
-
-// Collector periodically scrapes every install's ready controller pods.
+// Collector scrapes installs' ready controller Pods: once with Collect, or
+// every interval with Run, which publishes Results under Key.
 type Collector struct {
 	scraper Scraper
 	// clock stamps results and drives Run's ticker.
@@ -163,17 +167,10 @@ type Collector struct {
 	// maxBody is the largest accepted body; podTimeout bounds one pod scrape.
 	maxBody    int64
 	podTimeout time.Duration
-	mu         sync.RWMutex
-	results    map[string]Result
 	// maxAge is the staleness limit of WithMaxAge; zero means none.
 	maxAge time.Duration
 	// onStored, if set, runs after each result's notify decision (tests).
 	onStored func(id string, r Result, notified bool)
-	// OnResult, if set, is notified after a stored result that is the install's
-	// first, differs in content from the previous one, or follows one that had
-	// gone stale. A result that only renews CollectedAt does not notify; the
-	// engine's staleness deadline reads it.
-	OnResult *trigger.Signal
 }
 
 // CollectorOption adjusts a Collector at construction.
@@ -182,8 +179,8 @@ type CollectorOption func(*Collector)
 // WithClock makes the collector stamp results and tick with clk (tests).
 func WithClock(clk clock.WithTicker) CollectorOption { return func(c *Collector) { c.clock = clk } }
 
-// WithMaxAge sets the staleness limit consumers use (3 × the metrics
-// interval), so a result after a stale one notifies.
+// WithMaxAge sets the staleness limit Run publishes as Results.MaxAge (3 × the
+// metrics interval), so a result after a stale one notifies.
 func WithMaxAge(d time.Duration) CollectorOption { return func(c *Collector) { c.maxAge = d } }
 
 // WithResultHook makes Run call f after each result's notify decision (tests).
@@ -193,7 +190,7 @@ func WithResultHook(f func(id string, r Result, notified bool)) CollectorOption 
 
 // NewCollector returns a Collector using s and the real clock unless an option says otherwise.
 func NewCollector(s Scraper, opts ...CollectorOption) *Collector {
-	c := &Collector{scraper: s, clock: clock.RealClock{}, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+	c := &Collector{scraper: s, clock: clock.RealClock{}, maxBody: maxBodyBytes, podTimeout: maxPodTimeout}
 	for _, o := range opts {
 		o(c)
 	}
@@ -260,13 +257,27 @@ func ready(p *corev1.Pod) bool {
 // Run collects every interval until ctx is done and returns nil then. It
 // returns an error if every <= 0. Installs are scraped concurrently, each pod
 // under a deadline of min(every/2, 5s); a tick waits for all installs.
-func (c *Collector) Run(ctx context.Context, every time.Duration, installs func() []install.Install) error {
+//
+// After each install's result Run publishes every install's latest result as
+// one Results under ValueKey, with no expiry. The fingerprint changes, so the
+// store notifies, when a result is the install's first, differs in content
+// from the previous one, or follows one that had gone stale; a result that
+// only renews CollectedAt keeps it.
+func (c *Collector) Run(ctx context.Context, every time.Duration, installs func() []install.Install,
+	publish func(key string, v any, fp uint64, ttl time.Duration),
+) error {
 	if every <= 0 {
 		return errors.New("ctrlmetrics: collection interval must be positive")
 	}
 	c.podTimeout = min(every/2, maxPodTimeout)
 	t := c.clock.NewTicker(every)
 	defer t.Stop()
+	var (
+		mu      sync.Mutex
+		results = map[string]Result{}
+		// recovered counts results after a stale one; it moves the fingerprint as content would.
+		recovered uint64
+	)
 	for {
 		var wg sync.WaitGroup
 		for _, in := range installs() {
@@ -274,15 +285,17 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 			go func() {
 				defer wg.Done()
 				r := c.Collect(ctx, in)
-				c.mu.Lock()
-				prev, had := c.results[in.ID()]
-				c.results[in.ID()] = r
-				c.mu.Unlock()
-				// A result after a stale one ends staleness, a change content alone would not show.
-				notify := !had || !prev.SameContent(r) || prev.Stale(r.CollectedAt, c.maxAge)
-				if notify {
-					c.OnResult.Notify()
+				mu.Lock()
+				defer mu.Unlock()
+				prev, had := results[in.ID()]
+				notify := !had || !prev.SameContent(r)
+				if had && !notify && prev.Stale(r.CollectedAt, c.maxAge) {
+					notify = true
+					recovered++
 				}
+				results[in.ID()] = r
+				out := Results{ByInstall: maps.Clone(results), MaxAge: c.maxAge}
+				publish(ValueKey, out, out.Fingerprint()^recovered, 0)
 				if c.onStored != nil {
 					c.onStored(in.ID(), r, notify)
 				}
@@ -295,12 +308,4 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 		case <-t.C():
 		}
 	}
-}
-
-// Get implements Source.
-func (c *Collector) Get(id string) (Result, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	r, ok := c.results[id]
-	return r, ok
 }

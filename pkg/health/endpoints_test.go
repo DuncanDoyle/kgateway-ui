@@ -59,7 +59,7 @@ func newEndpointsWorld() *endpointsWorld {
 func (e *endpointsWorld) input(t *testing.T, at time.Time) Input {
 	t.Helper()
 	in := e.w.input(t)
-	in.Now, in.MetricsMaxAge = at, 0
+	in.Now = at
 	in.Snapshot.Access[cache.ServicesGVR], in.Snapshot.Access[cache.EndpointSlicesGVR] = e.access, cache.Access{OK: true}
 	in.Snapshot.Services, in.Snapshot.EndpointSlices = e.svcs, e.slices
 	return in
@@ -70,7 +70,7 @@ func (e *endpointsWorld) run(t *testing.T, st *States, offsets ...time.Duration)
 	t.Helper()
 	var r Report
 	for _, d := range offsets {
-		r = Evaluate(e.input(t, testutil.Now.Add(d)), Upstream(), Runtime{States: st})
+		r = Evaluate(e.input(t, testutil.Now.Add(d)), Upstream(), freshMetrics(Runtime{States: st}))
 	}
 	return r
 }
@@ -295,7 +295,7 @@ func TestBackendEndpointsNotAvailable(t *testing.T) {
 				} else {
 					in.Snapshot.Access[cache.ServicesGVR] = *c.access
 				}
-				r = Evaluate(in, Upstream(), Runtime{States: st})
+				r = Evaluate(in, Upstream(), freshMetrics(Runtime{States: st}))
 			}
 			chk := checkNamed(r, endpointsCheckName)
 			if chk == nil || chk.OK || chk.Required || chk.Unavailable != c.want || chk.Error == "" {

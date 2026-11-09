@@ -22,7 +22,7 @@ import {
   routeCopy,
   routeStateDelegationCopy,
 } from "../../copy/explorer";
-import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
+import { hrefPath, pseudoRules, renderWithTheme, WithKgatewayPack } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { RoutePage } from "./RoutePage";
 import { RoutesPage } from "./RoutesPage";
@@ -111,14 +111,14 @@ const location = () => screen.getByTestId("location").textContent ?? "";
 
 function mount(path: string) {
   return renderWithTheme(
-    <>
+    <WithKgatewayPack>
       <Routes>
         <Route path="/i/:id/routes/:group/:kind/:ns/:name" element={<RoutePage />} />
         <Route path="/i/:id/routes" element={<RoutesPage />} />
         <Route path="*" element={<p>elsewhere</p>} />
       </Routes>
       <Where />
-    </>,
+    </WithKgatewayPack>,
     { path },
   );
 }
@@ -620,9 +620,11 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
     const rows = rowsOf(delegationGolden);
     serve(api({ name: "m", d: parentOf("m", rows), rows: (u) => ({ ...rowPage(rows, u), next: "n2" }) }));
     renderWithTheme(
-      <Routes>
-        <Route path="/i/:id/routes/:group/:kind/:ns/:name" element={<RoutePage />} />
-      </Routes>,
+      <WithKgatewayPack>
+        <Routes>
+          <Route path="/i/:id/routes/:group/:kind/:ns/:name" element={<RoutePage />} />
+        </Routes>
+      </WithKgatewayPack>,
       { path: `${page("shop/m")}?tab=delegation`, themeId: theme.id },
     );
     await tabLoaded();

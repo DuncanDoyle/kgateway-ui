@@ -18,11 +18,10 @@ import (
 )
 
 // processInput is w's Input, with proxyPods watched, and the process data
-// process.Kube reads from its snapshot. Metrics never go stale, so Next is the checks' own.
+// process.Kube reads from its snapshot.
 func processInput(t *testing.T, w *world, proxyPods ...*corev1.Pod) Input {
 	t.Helper()
 	in := w.input(t)
-	in.MetricsMaxAge = 0
 	in.Snapshot.ProxyPods, in.Snapshot.Access[cache.ProxyPodsGVR] = proxyPods, cache.Access{OK: true}
 	d := &ProcessData{Controller: process.Kube{}.Controller(in.Install, in.Snapshot), Proxies: map[objects.Ref]process.Set{}}
 	for _, gw := range in.Owned.Gateways {
@@ -88,13 +87,13 @@ func TestRestartWhileWatched(t *testing.T) {
 	w := healthyWorld()
 	st := NewStates()
 	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 0, State: running(testutil.Old.Time)})
-	if r := Evaluate(processInput(t, w), Upstream(), Runtime{States: st}); find(r, CodeProcessRestarting) != nil {
+	if r := Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{States: st})); find(r, CodeProcessRestarting) != nil {
 		t.Fatalf("019 before any restart: %+v", r.Findings)
 	}
 	at := testutil.Now.Add(-time.Minute)
 	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 1, State: running(at), LastTerminationState: exited("OOMKilled", 137, at)})
 	in := processInput(t, w)
-	r := Evaluate(in, Upstream(), Runtime{States: st})
+	r := Evaluate(in, Upstream(), freshMetrics(Runtime{States: st}))
 	f := find(r, CodeProcessRestarting)
 	if f == nil || f.Severity != SeverityWarning || f.Resource.String() != "kgw/kgateway" || f.Resource.Kind != "Deployment" {
 		t.Fatalf("want 019 on the controller Deployment, got %+v", r.Findings)
@@ -114,7 +113,7 @@ func TestRestartWhileWatched(t *testing.T) {
 		want bool
 	}{{15*time.Minute - time.Second, true}, {15*time.Minute + time.Second, false}} {
 		in.Now = at.Add(tc.d)
-		if got := find(Evaluate(in, Upstream(), Runtime{States: st}), CodeProcessRestarting) != nil; got != tc.want {
+		if got := find(Evaluate(in, Upstream(), freshMetrics(Runtime{States: st})), CodeProcessRestarting) != nil; got != tc.want {
 			t.Fatalf("at restart + %s: 019 %v, want %v", tc.d, got, tc.want)
 		}
 	}
@@ -129,7 +128,7 @@ func TestRecentTerminationIsARestart(t *testing.T) {
 		w.pods[0] = testutil.ControllerPod(w.ctrl, name, true)
 		w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 3, State: running(testutil.Now.Add(-2 * time.Minute)),
 			LastTerminationState: exited(name+"-reason", 1, testutil.Now.Add(-2*time.Minute))})
-		f := find(Evaluate(processInput(t, w), Upstream(), Runtime{}), CodeProcessRestarting)
+		f := find(Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{})), CodeProcessRestarting)
 		if f == nil || f.Facts.(*ProcessEvidence).Restarts != nil {
 			t.Fatalf("want 019 with no observed restart count, got %+v", f)
 		}
@@ -148,16 +147,16 @@ func TestReplacedControllerPodIsNotARestart(t *testing.T) {
 	st := NewStates()
 	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 2, State: running(testutil.Old.Time),
 		LastTerminationState: exited("Error", 1, testutil.Old.Time)})
-	Evaluate(processInput(t, w), Upstream(), Runtime{States: st})
+	Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{States: st}))
 	// The old Pod is terminating; its replacement starts fresh.
 	old := ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 0, State: exited("Completed", 0, testutil.Now.Add(-10*time.Second))})
 	fresh := ctrlStatus(testutil.ControllerPod(w.ctrl, "p2", true), corev1.ContainerStatus{State: running(testutil.Now.Add(-5 * time.Second))})
 	w.pods = []*corev1.Pod{old, fresh}
-	if r := Evaluate(processInput(t, w), Upstream(), Runtime{States: st}); find(r, CodeProcessRestarting) != nil {
+	if r := Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{States: st})); find(r, CodeProcessRestarting) != nil {
 		t.Fatalf("a replaced Pod raised 019: %+v", r.Findings)
 	}
 	w.pods = []*corev1.Pod{fresh}
-	Evaluate(processInput(t, w), Upstream(), Runtime{States: st})
+	Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{States: st}))
 	if m, _ := Load[*restartState](st.store(restartsCheckName), restartsKey); m == nil || len(m.counts) != 1 || len(m.seen) != 0 {
 		t.Fatalf("store keeps %+v, want only the live Pod", m)
 	} else if _, ok := m.counts[string(fresh.UID)]; !ok {
@@ -170,7 +169,7 @@ func TestControllerPanicNote(t *testing.T) {
 	w := healthyWorld()
 	at := testutil.Now.Add(-30 * time.Second)
 	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 1, State: running(at), LastTerminationState: exited("Error", 2, at)})
-	f := find(Evaluate(processInput(t, w), Upstream(), Runtime{}), CodeProcessRestarting)
+	f := find(Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{})), CodeProcessRestarting)
 	if f == nil || !strings.Contains(f.Detail, "A Go panic exits with code 2.") || strings.Contains(f.Detail, "kubectl") {
 		t.Fatalf("want the panic note, got %+v", f)
 	}
@@ -187,7 +186,7 @@ func TestNotReadyDetail(t *testing.T) {
 		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}}, LastTerminationState: exited("OOMKilled", 137, testutil.Old.Time)})
 	withProxy(w, 2, 0)
 	r := Evaluate(processInput(t, w, proxyPod("edge-0", false, corev1.ContainerStatus{
-		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}})), Upstream(), Runtime{})
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}})), Upstream(), freshMetrics(Runtime{}))
 	c, p := find(r, CodeControllerNotReady), find(r, CodeProxyNotReady)
 	if c == nil || c.Detail != "0/2 ready: CrashLoopBackOff, last exit OOMKilled" || len(c.Evidence) != 1 || c.Evidence[0].Name != "p" {
 		t.Fatalf("005 %+v", c)
@@ -207,7 +206,7 @@ func TestUnpullableImageOnNewGatewayIs006(t *testing.T) {
 	d := withProxy(w, 1, 0)
 	d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue, Reason: "ReplicaSetUpdated"}}
 	r := Evaluate(processInput(t, w, proxyPod("edge-0", false, corev1.ContainerStatus{
-		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull"}}})), Upstream(), Runtime{})
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull"}}})), Upstream(), freshMetrics(Runtime{}))
 	if f := find(r, CodeProxyNotReady); f == nil || f.Severity != SeverityError || f.Detail != "0/1 ready: ErrImagePull" {
 		t.Fatalf("want 006 with the waiting reason, got %+v", r.Findings)
 	}
@@ -225,7 +224,7 @@ func TestRolloutStuck(t *testing.T) {
 	d := withProxy(w, 1, 1)
 	d.Status.Conditions = pde
 	newPod, oldPod := proxyPod("edge-new", false, pulling), proxyPod("edge-old", true, corev1.ContainerStatus{State: running(testutil.Old.Time)})
-	r := Evaluate(processInput(t, w, newPod, oldPod), Upstream(), Runtime{})
+	r := Evaluate(processInput(t, w, newPod, oldPod), Upstream(), freshMetrics(Runtime{}))
 	f := find(r, CodeRolloutStuck)
 	if f == nil || f.Severity != SeverityWarning || f.Resource.String() != "infra/edge" || f.Resource.Kind != "Gateway" || find(r, CodeProxyNotReady) != nil {
 		t.Fatalf("want 021 on the Gateway and no 006, got %+v", r.Findings)
@@ -234,7 +233,7 @@ func TestRolloutStuck(t *testing.T) {
 		t.Fatalf("evidence %+v, deps %+v", f.Facts, f.Evidence)
 	}
 	d.Status.ReadyReplicas = 0
-	r = Evaluate(processInput(t, w, newPod), Upstream(), Runtime{})
+	r = Evaluate(processInput(t, w, newPod), Upstream(), freshMetrics(Runtime{}))
 	if find(r, CodeRolloutStuck) != nil || find(r, CodeProxyNotReady) == nil {
 		t.Fatalf("no ready replica: want 006 and no 021, got %+v", r.Findings)
 	}
@@ -244,7 +243,7 @@ func TestRolloutStuck(t *testing.T) {
 func TestProbeFailures(t *testing.T) {
 	w := healthyWorld()
 	in := processInput(t, w)
-	if r := Evaluate(in, Upstream(), Runtime{}); resultOf(r, probesCheckName).Unavailable != AvailOff || r.State == StateUnknown {
+	if r := Evaluate(in, Upstream(), freshMetrics(Runtime{})); resultOf(r, probesCheckName).Unavailable != AvailOff || r.State == StateUnknown {
 		t.Fatalf("events off: %+v, state %s", resultOf(r, probesCheckName), r.State)
 	}
 	first := testutil.Now.Add(-5 * time.Minute)
@@ -257,7 +256,7 @@ func TestProbeFailures(t *testing.T) {
 		ready, last := false, testutil.Now.Add(-time.Minute)
 		in.Process.Controller.Processes = []process.Process{{ID: "u", Name: "p", Ready: &ready,
 			Probe: &process.ProbeFailures{Type: "readiness", Count: tc.count, First: first, Last: last}}}
-		r := Evaluate(in, Upstream(), Runtime{})
+		r := Evaluate(in, Upstream(), freshMetrics(Runtime{}))
 		f := find(r, CodeProbeFailing)
 		if (f != nil) != tc.want {
 			t.Fatalf("%d failures: 020 %v, want %v", tc.count, f != nil, tc.want)
@@ -284,7 +283,7 @@ func TestLongGatewayNameWithoutOwnerHasProxy(t *testing.T) {
 		d.Name, d.OwnerReferences = process.SafeGatewayLabelValue(name), nil
 		d.Labels["gateway.networking.k8s.io/gateway-name"] = process.SafeGatewayLabelValue(name)
 		w.deploys[1] = d
-		if r := Evaluate(processInput(t, w), Upstream(), Runtime{}); has(r, CodeProxyNotReady, "", "") {
+		if r := Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{})); has(r, CodeProxyNotReady, "", "") {
 			t.Fatalf("%s: false 006: %+v", name, r.Findings)
 		}
 	}
@@ -305,7 +304,7 @@ func TestRolloutStuckBesideOneReady(t *testing.T) {
 	d := withProxy(w, 2, 1)
 	d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
 	r := Evaluate(processInput(t, w, proxyPod("edge-new", false, corev1.ContainerStatus{State: corev1.ContainerState{
-		Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}}), proxyPod("edge-old", true, corev1.ContainerStatus{State: running(testutil.Old.Time)})), Upstream(), Runtime{})
+		Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}}), proxyPod("edge-old", true, corev1.ContainerStatus{State: running(testutil.Old.Time)})), Upstream(), freshMetrics(Runtime{}))
 	if find(r, CodeRolloutStuck) == nil || find(r, CodeProxyNotReady) == nil {
 		t.Fatalf("want 006 and 021, got %+v", r.Findings)
 	}
@@ -317,7 +316,7 @@ func TestTerminatingPodIsNotARestart(t *testing.T) {
 	now := metav1.NewTime(testutil.Now)
 	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 2, State: exited("Error", 143, testutil.Now.Add(-5*time.Second))})
 	w.pods[0].DeletionTimestamp = &now
-	if r := Evaluate(processInput(t, w), Upstream(), Runtime{}); find(r, CodeProcessRestarting) != nil {
+	if r := Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{})); find(r, CodeProcessRestarting) != nil {
 		t.Fatalf("a terminating Pod raised 019: %+v", r.Findings)
 	}
 }
@@ -328,7 +327,7 @@ func TestAmbiguousProxyDeployment(t *testing.T) {
 	a, b := testutil.ProxyDeployment("infra", "edge", 1, 1), testutil.ProxyDeployment("infra", "edge", 1, 1)
 	a.OwnerReferences, b.OwnerReferences, b.Name = nil, nil, "edge-copy"
 	w.deploys = []*appsv1.Deployment{w.ctrl, a, b}
-	f := find(Evaluate(processInput(t, w), Upstream(), Runtime{}), CodeProxyNotReady)
+	f := find(Evaluate(processInput(t, w), Upstream(), freshMetrics(Runtime{})), CodeProxyNotReady)
 	if f == nil || f.Message != "More than one proxy Deployment matches this Gateway" || f.Severity != SeverityWarning {
 		t.Fatalf("006 %+v", f)
 	}
@@ -354,7 +353,7 @@ func TestProxyGapInResult(t *testing.T) {
 		in.Process = &ProcessData{Controller: process.Kube{}.Controller(in.Install, in.Snapshot), Proxies: map[objects.Ref]process.Set{}}
 		edge := objects.RefOf(in.Owned.Gateways[0])
 		in.Process.Proxies[edge] = process.Kube{}.Proxies(in.Install, edge, in.Snapshot)
-		r := Evaluate(in, Upstream(), Runtime{})
+		r := Evaluate(in, Upstream(), freshMetrics(Runtime{}))
 		for _, name := range []string{restartsCheckName, probesCheckName} {
 			c, wantDetail := resultOf(r, name), ""
 			if tc.why != "" {

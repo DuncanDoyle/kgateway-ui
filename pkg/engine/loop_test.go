@@ -95,11 +95,6 @@ func fprint(n int, a cache.Access) cache.Fingerprint {
 
 var accessOK = cache.Access{OK: true}
 
-// metricsFunc adapts a function to ctrlmetrics.Source.
-type metricsFunc func(id string) (ctrlmetrics.Result, bool)
-
-func (f metricsFunc) Get(id string) (ctrlmetrics.Result, bool) { return f(id) }
-
 // harness runs an engine loop over a fakeSource on a fake clock.
 type harness struct {
 	t      *testing.T
@@ -122,7 +117,7 @@ func newHarness(t *testing.T, mut func(*Config)) *harness {
 	src := &fakeSource{base: snapshot(t), print: fprint(1, accessOK), now: c.Now}
 	h := &harness{t: t, c: c, src: src, sig: trigger.New(), ev: make(chan LoopEvent, 4096)}
 	cfg := config(nil, metricsAt(testutil.Now), c.Now)
-	cfg.Snapshots, cfg.MetricsMaxAge, cfg.Triggers, cfg.Clock = src, 0, h.sig, c
+	cfg.Snapshots, cfg.Collected, cfg.Triggers, cfg.Clock = src, served(metricsAt(testutil.Now), 0), h.sig, c
 	cfg.OnLoop = func(e LoopEvent) {
 		select {
 		case h.ev <- e:
@@ -504,7 +499,7 @@ func stale(p *Published) bool {
 }
 
 func TestStrictMetricsDeadline(t *testing.T) {
-	h := newHarness(t, func(c *Config) { c.MetricsMaxAge = 30 * time.Second }) // CollectedAt C = testutil.Now
+	h := newHarness(t, func(c *Config) { c.Collected = served(metricsAt(testutil.Now), 30*time.Second) }) // CollectedAt C = testutil.Now
 	h.start(time.Hour)
 	h.c.Step(30*time.Second - Quiet)
 	h.await(EvConfirmed)
@@ -515,8 +510,9 @@ func TestStrictMetricsDeadline(t *testing.T) {
 	if !at.At.Equal(testutil.Now.Add(30*time.Second)) || stale(at.Published) {
 		t.Fatalf("a run at exactly C+30 s keeps metrics current: at %v stale %v", at.At, stale(at.Published))
 	}
-	if next := at.Published.Model.Next; !next.Strict || !next.At.Equal(testutil.Now.Add(30*time.Second)) {
-		t.Fatalf("the strict deadline must survive a run at its boundary: %+v", next)
+	// The checks wake just after C+30 s, as a strict deadline at C+30 s would.
+	if next := at.Published.Model.Next; !next.At.Equal(testutil.Now.Add(30*time.Second + time.Nanosecond)) {
+		t.Fatalf("the staleness deadline must survive a run at its boundary: %+v", next)
 	}
 	awaitThenStep(t, h.ev, EvArmed, h.c, time.Nanosecond)
 	after := h.await(EvPublished)
@@ -534,17 +530,18 @@ func (emptyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, 
 
 func TestMetricsResultTriggersOneRecompute(t *testing.T) {
 	col := ctrlmetrics.NewCollector(emptyScraper{})
-	h := newHarness(t, func(c *Config) { c.Metrics = col; col.OnResult = c.Triggers })
+	var store *collect.Store
+	h := newHarness(t, func(c *Config) { store = collect.New(c.Triggers, c.Clock.Now); c.Collected = store.Snapshot })
 	h.start(time.Hour)
-	if h.e.Current().Model.MetricsRead[0].Present {
+	if _, read := metricsOf(h.e.Current().Model, "kgw.kgateway"); read {
 		t.Fatal("no result before the first scrape")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = col.Run(ctx, time.Hour, h.e.Installs) }()
+	go func() { _ = col.Run(ctx, time.Hour, h.e.Installs, publishTo(store)) }()
 	h.await(EvTriggered)
 	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
-	if p := h.await(EvPublished).Published; !p.Model.MetricsRead[0].Present {
+	if _, read := metricsOf(h.await(EvPublished).Published.Model, "kgw.kgateway"); !read {
 		t.Fatal("the run must use the scraped result")
 	}
 	h.await(EvArmed)
@@ -570,93 +567,29 @@ func TestConfirmNeverRestoresOlderModel(t *testing.T) {
 	}
 }
 
-func TestMetricsIdentityCoversContent(t *testing.T) {
-	at := testutil.Now
-	res := func(rejects float64) ctrlmetrics.Result {
-		return ctrlmetrics.Result{CollectedAt: at, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: rejects},
-			Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "httproutes"}: 3, {Namespace: "infra", Resource: "gateways"}: 1}, ManagedPresent: true}}
-	}
-	enc := func(r ctrlmetrics.Result, present bool) uint64 {
-		return encodeMetrics([]MetricsRead{{ID: "kgw.kgateway", Result: r, Present: present}}, at, 0)
-	}
-	if enc(res(0), true) == enc(res(1), true) {
-		t.Fatal("same CollectedAt, different Rejects must encode differently")
-	}
-	if enc(ctrlmetrics.Result{}, false) == enc(ctrlmetrics.Result{}, true) {
-		t.Fatal("absent and present empty results must encode differently")
-	}
-	a, b := res(1), res(1) // separate maps: iteration order must not matter
-	if enc(a, true) != enc(b, true) {
-		t.Fatal("equal results must encode equally")
-	}
-	later := res(1)
-	later.CollectedAt = at.Add(10 * time.Second)
-	if enc(later, true) != enc(res(1), true) {
-		t.Fatal("CollectedAt is not part of the identity")
-	}
-	pod := func(n float64, present bool) ctrlmetrics.Result {
-		r := res(1)
-		r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u", Name: "p", Dropped: n, DroppedPresent: present}}
-		return r
-	}
-	if enc(pod(2, true), true) == enc(pod(3, true), true) || enc(pod(0, true), true) == enc(pod(0, false), true) {
-		t.Fatal("the dropped counter and its presence must be part of the identity")
-	}
-	perClient := func(mutate func(p *ctrlmetrics.PodMetrics)) uint64 {
-		r := res(1)
-		r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u", Name: "p"}}
-		mutate(&r.Metrics.PerPod[0])
-		return enc(r, true)
-	}
-	nack := ctrlmetrics.GatewayKey{Namespace: "infra", Name: "nack"}
-	plain := perClient(func(*ctrlmetrics.PodMetrics) {})
-	for name, mutate := range map[string]func(p *ctrlmetrics.PodMetrics){
-		"build version": func(p *ctrlmetrics.PodMetrics) { p.BuildVersion = "v2.5.0" },
-		"presence":      func(p *ctrlmetrics.PodMetrics) { p.PerClientPresent = true },
-		"withheld":      func(p *ctrlmetrics.PodMetrics) { p.Withheld = map[ctrlmetrics.GatewayKey]float64{nack: 1} },
-		"bounded": func(p *ctrlmetrics.PodMetrics) {
-			p.Bounded = map[ctrlmetrics.ModeKey]float64{{Gateway: nack, Mode: "warm_release"}: 1}
-		},
-	} {
-		if perClient(mutate) == plain {
-			t.Errorf("%s must be part of the identity", name)
-		}
-	}
-	errRes := res(0)
-	errRes.Err = "no ready controller pod to scrape"
-	if enc(errRes, true) == enc(res(0), true) {
-		t.Fatal("Err must be part of the identity")
-	}
-	snap := res(0)
-	snap.Metrics.Snapshot = map[ctrlmetrics.GatewayKey]ctrlmetrics.SnapshotResources{{Namespace: "infra", Name: "edge"}: {Routes: 1}}
-	if enc(snap, true) == enc(res(0), true) {
-		t.Fatal("the snapshot must be part of the identity")
-	}
-}
-
 func TestMetricsFingerprintIsEvidenceRead(t *testing.T) {
 	gw := ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}
-	mk := func(rejects float64) ctrlmetrics.Result {
-		return ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{gw: rejects}, ManagedPresent: true}}
+	mk := func(rejects float64) collect.Snapshot {
+		r := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{gw: rejects}, ManagedPresent: true}}
+		return served(metricsFunc(func(string) (ctrlmetrics.Result, bool) { return r, true }), 0)()
 	}
 	a, b := mk(1), mk(0)
 	var gets atomic.Int64
 	h := newHarness(t, func(c *Config) {
-		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) {
+		c.Collected = func() collect.Snapshot {
 			if gets.Add(1) == 1 {
-				return a, true
+				return a
 			}
-			return b, true
-		})
+			return b
+		}
 	})
 	h.start(time.Hour)
 	p := h.e.Current()
 	if gets.Load() != 1 {
-		t.Fatalf("Compute must read metrics once per install, read %d times", gets.Load())
+		t.Fatalf("Compute must read the collected values once, read %d times", gets.Load())
 	}
-	if !hasFinding(p.Model.Installs[0].Health, health.CodeXDSRejected, "", "") || p.Source.Metrics != encodeMetrics(p.Model.MetricsRead, p.Model.ComputedAt, 0) ||
-		p.Source.Metrics != encodeMetrics([]MetricsRead{{ID: p.Model.MetricsRead[0].ID, Result: a, Present: true}}, p.Model.ComputedAt, 0) {
-		t.Fatal("health and the source must both use A")
+	if !hasFinding(p.Model.Installs[0].Health, health.CodeXDSRejected, "", "") || p.Source.Collected != a.Print || p.Model.Collected.Print != a.Print {
+		t.Fatal("health, the model and the source must all use A")
 	}
 	h.c.Step(ConfirmEvery)
 	h.await(EvConfirmRefused)
@@ -708,7 +641,7 @@ func TestAllGreenSchedulesNoGraceRecompute(t *testing.T) {
 	agree := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true,
 		Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 1, {Namespace: "shop", Resource: "HTTPRoute"}: 1}}}
 	h := newHarness(t, func(c *Config) {
-		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return agree, true })
+		c.Collected = served(metricsFunc(func(string) (ctrlmetrics.Result, bool) { return agree, true }), 0)
 	})
 	h.src.base = snapshotEdge(t, 1, route)
 	h.start(time.Hour)
@@ -792,12 +725,27 @@ func (b bodyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser,
 const managedBody = "# TYPE kgateway_resources_managed gauge\nkgateway_resources_managed{namespace=\"shop\",parent=\"edge\",resource=\"HTTPRoute\"} 3\n"
 
 // scraping is a real collector on its own fake clock, which starts at
-// testutil.Now like the engine's, acknowledging each result's notify decision.
+// testutil.Now like the engine's, acknowledging each result's notify
+// decision. It publishes to store, which notifies the engine's triggers.
 type scraping struct {
-	col  *ctrlmetrics.Collector
-	sc   bodyScraper
-	cc   *clocktesting.FakeClock
-	acks chan ctrlmetrics.Result
+	col   *ctrlmetrics.Collector
+	sc    bodyScraper
+	cc    *clocktesting.FakeClock
+	acks  chan ctrlmetrics.Result
+	store *collect.Store
+}
+
+// wire makes c read s's store, which notifies c's triggers.
+func (s *scraping) wire(c *Config) {
+	s.store = collect.New(c.Triggers, s.cc.Now)
+	c.Collected = s.store.Snapshot
+}
+
+// publishTo publishes a collector's values to store under the collector's name.
+func publishTo(store *collect.Store) func(key string, v any, fp uint64, ttl time.Duration) {
+	return func(key string, v any, fp uint64, ttl time.Duration) {
+		store.Publish(ctrlmetrics.CollectorName+"/"+key, v, fp, ttl)
+	}
 }
 
 // newScraping returns a collector of body with staleness limit maxAge (zero: none).
@@ -816,7 +764,7 @@ func (s *scraping) start(t *testing.T, every time.Duration, installs func() []in
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		_ = s.col.Run(ctx, every, installs)
+		_ = s.col.Run(ctx, every, installs, publishTo(s.store))
 	}()
 	var once sync.Once
 	stop = func() {
@@ -929,7 +877,7 @@ func startScraping(t *testing.T, h *harness, s *scraping, every time.Duration) (
 	h.c.Step(time.Second)
 	p := h.await(EvPublished)
 	h.await(EvArmed)
-	if !p.Published.Model.MetricsRead[0].Present {
+	if _, read := metricsOf(p.Published.Model, "kgw.kgateway"); !read {
 		t.Fatal("the first result must be read")
 	}
 	return stop, p
@@ -940,7 +888,7 @@ func startScraping(t *testing.T, h *harness, s *scraping, every time.Duration) (
 // and never shows metrics stale.
 func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
 	s := newScraping(managedBody, 30*time.Second)
-	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, 30*time.Second; s.col.OnResult = c.Triggers })
+	h := newHarness(t, s.wire)
 	h.start(time.Hour)
 	_, p := startScraping(t, h, s, 10*time.Second)
 	d := idleDrive{ev: h.ev, eng: h.c, s: s, safety: time.Hour, every: 10 * time.Second}
@@ -951,10 +899,10 @@ func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
 }
 
 // Minor 2: once the collector stops, the first run after the last scrape's
-// strict max-age boundary shows metrics stale.
+// max-age boundary shows metrics stale; the tick at that step is refused.
 func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
 	s := newScraping(managedBody, 30*time.Second)
-	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, 30*time.Second; s.col.OnResult = c.Triggers })
+	h := newHarness(t, s.wire)
 	h.start(time.Hour)
 	stop, p := startScraping(t, h, s, 10*time.Second)
 	d := idleDrive{ev: h.ev, eng: h.c, s: s, safety: time.Hour, every: 10 * time.Second}
@@ -970,10 +918,39 @@ func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
 	}
 }
 
+// Review 5.2 #1: when the published model's metrics go stale, the confirm tick
+// does not renew ConfirmedAt, so a read before the recompute (the API serves
+// Current) never sees old data with a new timestamp.
+func TestStaleMetricsAreNeverConfirmed(t *testing.T) {
+	s := newScraping(managedBody, 30*time.Second)
+	h := newHarness(t, s.wire)
+	h.start(time.Hour)
+	stop, p := startScraping(t, h, s, 10*time.Second) // read the scrape at +0 s
+	stop()
+	last := p.Published
+	for h.c.Now().Before(testutil.Now.Add(30 * time.Second)) {
+		h.c.Step(time.Second)
+		e := h.await(EvConfirmed)
+		h.await(EvArmed)
+		last = e.Published
+	}
+	h.c.Step(time.Second)                            // +31 s: the scrape at +0 s is stale
+	e := testutil.Recv(t, h.ev, "the tick at +31 s") // PF14: the tick goes first
+	if e.Kind != EvConfirmRefused {
+		t.Fatalf("the tick at +31 s: event %d, want a refused confirmation", e.Kind)
+	}
+	if cur := h.e.Current(); cur.Model != last.Model || !cur.ConfirmedAt.Equal(last.ConfirmedAt) || !e.At.After(cur.ConfirmedAt) {
+		t.Fatalf("read after the stale tick: model %p confirmed %v; want %p as confirmed at %v", cur.Model, cur.ConfirmedAt, last.Model, last.ConfirmedAt)
+	}
+	if after := h.await(EvPublished); !stale(after.Published) {
+		t.Fatal("the recompute after the refused tick must show metrics stale")
+	}
+}
+
 // (b): a scrape with changed content triggers one recompute; unchanged ones do not.
 func TestMetricsContentChangeTriggersRecompute(t *testing.T) {
 	s := newScraping(managedBody, 0)
-	h := newHarness(t, func(c *Config) { c.Metrics = s.col; s.col.OnResult = c.Triggers })
+	h := newHarness(t, s.wire)
 	h.start(time.Hour)
 	startScraping(t, h, s, 10*time.Second)
 	h.runs = 0
@@ -990,7 +967,8 @@ func TestMetricsContentChangeTriggersRecompute(t *testing.T) {
 	h.await(EvTriggered)
 	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
 	p := h.await(EvPublished).Published
-	if got := p.Model.MetricsRead[0].Result.Metrics.Managed[ctrlmetrics.ManagedKey{Namespace: "shop", Resource: "HTTPRoute"}]; got != 4 {
+	if r, _ := metricsOf(p.Model, "kgw.kgateway"); r.Metrics.Managed[ctrlmetrics.ManagedKey{Namespace: "shop", Resource: "HTTPRoute"}] != 4 {
+		got := r.Metrics.Managed[ctrlmetrics.ManagedKey{Namespace: "shop", Resource: "HTTPRoute"}]
 		t.Fatalf("the run must read the changed content, managed = %v", got)
 	}
 	if h.runs != 1 {
@@ -1004,7 +982,7 @@ func TestConfirmIgnoresCollectedAtOnly(t *testing.T) {
 	r := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
 	cur.Store(&r)
 	h := newHarness(t, func(c *Config) {
-		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return *cur.Load(), true })
+		c.Collected = served(metricsFunc(func(string) (ctrlmetrics.Result, bool) { return *cur.Load(), true }), 0)
 	})
 	h.start(time.Hour)
 	renewed := r
@@ -1051,8 +1029,7 @@ func TestStaleToFreshRefusesConfirmation(t *testing.T) {
 	r := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
 	cur.Store(&r)
 	h := newHarness(t, func(c *Config) {
-		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return *cur.Load(), true })
-		c.MetricsMaxAge = 30 * time.Second
+		c.Collected = served(metricsFunc(func(string) (ctrlmetrics.Result, bool) { return *cur.Load(), true }), 30*time.Second)
 	})
 	h.start(time.Hour)
 	for range 30 {
@@ -1086,7 +1063,7 @@ func TestStaleToFreshRefusesConfirmation(t *testing.T) {
 func TestDelayedCollectorRecoversFresh(t *testing.T) {
 	const maxAge, every = 30 * time.Second, 10 * time.Second
 	s := newScraping(managedBody, maxAge)
-	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge; s.col.OnResult = c.Triggers })
+	h := newHarness(t, s.wire)
 	h.start(time.Hour)
 	_, p := startScraping(t, h, s, every)
 	d := idleDrive{ev: h.ev, eng: h.c, s: s, safety: time.Hour, every: every}

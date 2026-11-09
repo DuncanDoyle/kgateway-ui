@@ -40,6 +40,16 @@ export interface NavEntry {
 /** Renders extra detail for findings whose code starts with a registered prefix. */
 export type FindingRenderer = (f: Finding) => ReactNode;
 
+/**
+ * One implementation pack's web half (Phase 5 design §10). Its copy applies once /meta lists the pack; its
+ * contributions unless /meta leaves it out, and they still show per install from server-sent features.
+ */
+export interface WebPack {
+  name: string;
+  vocabulary?: Partial<Vocabulary>;
+  contributions?: Contributions;
+}
+
 /** Everything a downstream app can contribute to the shell (D-003). */
 export interface ShellExtension {
   brand?: Brand;
@@ -53,6 +63,8 @@ export interface ShellExtension {
   vocabulary?: Partial<Vocabulary>;
   /** In-page slots: detail tabs, side sections, finding actions and install panels. */
   contributions?: Contributions;
+  /** Implementation packs; the extension's own vocabulary and contributions come after theirs. */
+  packs?: WebPack[];
   /** Base URL of the findings reference "Learn more" opens, e.g. a build's own copy of docs/findings.md; "#kgwui-0nn" is appended. */
   findingsDocUrl?: string;
 }
@@ -103,7 +115,7 @@ export const defaultBrand: Brand = {
 };
 
 /** The extension merged with the upstream defaults; the vocabulary is complete. */
-export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary" | "findingsDocUrl">> & {
+export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary" | "findingsDocUrl" | "packs">> & {
   vocabulary: Vocabulary;
   findingsDocUrl?: string;
 };

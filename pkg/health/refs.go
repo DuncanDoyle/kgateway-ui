@@ -116,7 +116,11 @@ func asList(v any) []any { l, _ := v.([]any); return l }
 
 // delegationRoute reports whether route u delegates or is a delegation child:
 // a delegation cycle is RefNotPermitted too, so no ref can be singled out.
+// Without delegation no route is either.
 func (in Input) delegationRoute(u *unstructured.Unstructured, refs []writtenRef) bool {
+	if in.Install.NoDelegation {
+		return false
+	}
 	if slices.ContainsFunc(refs, func(r writtenRef) bool { return r.delegation }) {
 		return true
 	}
@@ -271,6 +275,12 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 		attributable = attributable && !in.listenerPolicyCARefs(u)
 	} else {
 		refs = routeBackendRefs(u)
+		if in.Install.NoDelegation {
+			// Without delegation a backendRef to an HTTPRoute is an ordinary ref.
+			for i := range refs {
+				refs[i].delegation = false
+			}
+		}
 		attributable = !in.delegationRoute(u, refs)
 	}
 	// field holds the refs the condition can be about: 014 every cross-namespace
@@ -303,7 +313,7 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 			ev.Candidates = append(ev.Candidates, r.RefLocation)
 		}
 		if listener == "" {
-			delegationCondition(&f, u, cond)
+			in.delegationCondition(&f, u, cond)
 		}
 	}
 	// Explanations 2 and 3 are 013's: a 014 keeps the grant diagnosis (§7.3).

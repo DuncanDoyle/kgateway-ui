@@ -210,8 +210,9 @@ func delegationOnly(u *unstructured.Unstructured) bool {
 
 // delegationCondition rewords a route's ResolvedRefs=False/BackendNotFound
 // when only delegation can cause it (D-021 item 9); code and severity stay.
-func delegationCondition(f *Finding, u *unstructured.Unstructured, c metav1.Condition) {
-	if c.Type != "ResolvedRefs" || c.Reason != "BackendNotFound" || !delegationOnly(u) {
+// An install without delegation keeps the controller's wording.
+func (in Input) delegationCondition(f *Finding, u *unstructured.Unstructured, c metav1.Condition) {
+	if in.Install.NoDelegation || c.Type != "ResolvedRefs" || c.Reason != "BackendNotFound" || !delegationOnly(u) {
 		return
 	}
 	f.Message, f.Detail = DelegationNoChildMessage, DelegationNoChildDetail+"; "+f.Detail

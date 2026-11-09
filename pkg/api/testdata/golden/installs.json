@@ -8,6 +8,12 @@
       ],
       "displayName": "kgw/kgateway",
       "edition": "kgateway",
+      "features": [
+        "delegation",
+        "computed",
+        "dataplane",
+        "processes"
+      ],
       "groupRows": 3,
       "health": {
         "counts": {

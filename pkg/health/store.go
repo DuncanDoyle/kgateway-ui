@@ -16,8 +16,6 @@ type InputSet struct {
 	Kinds []objects.GroupKind
 	// Owned is the install's assignment: every served kind and Namespaces.
 	Owned bool
-	// Metrics is the install's controller metrics result.
-	Metrics bool
 	// Verify is the scope verifier result.
 	Verify bool
 	// Computed are the install's computed views.
@@ -37,9 +35,10 @@ type InputSet struct {
 }
 
 // AllInputs declares every input a Phase 1 or 2 check may read: Owned,
-// Metrics, Verify, Computed, KindsChange and Clock. It names no collector keys.
+// Verify, Computed, KindsChange and Clock. It names no collector keys, so
+// controller metrics (ctrlmetrics.Key) are declared separately.
 func AllInputs() InputSet {
-	return InputSet{Owned: true, Metrics: true, Verify: true, Computed: true, KindsChange: true, Clock: true}
+	return InputSet{Owned: true, Verify: true, Computed: true, KindsChange: true, Clock: true}
 }
 
 // Store is a check's state across recomputes for one install. The engine owns
@@ -148,7 +147,7 @@ type memo struct {
 	out uint64
 	// keep are the finding IDs the run returned or retained; their since entries survive a skip.
 	keep map[string]bool
-	// times prints the metrics' and collected values' times, which the input print leaves out;
+	// times prints the collected values' times, which the input print leaves out;
 	// a wake may derive from them, so a memo with a wake is reused only while they hold.
 	times uint64
 }
@@ -158,23 +157,30 @@ type memo struct {
 type stamp uint64
 
 // eachRef calls f with each reference time a check declaring set may stamp:
-// Now, TakenAt, the metrics' and each declared collected value's time.
+// Now, TakenAt, the install's part of the first declared collected.Stamped
+// value, and each declared collected value's time.
 func eachRef(in Input, set InputSet, col collect.Snapshot, f func(bit stamp, t time.Time)) {
 	f(1, in.Now)
 	if in.Snapshot != nil {
 		f(1<<1, in.Snapshot.TakenAt)
 	}
-	if set.Metrics && in.HasMetrics {
-		f(1<<2, in.Metrics.CollectedAt)
-	}
+	stamped := false
 	for i, k := range set.Collected[:min(len(set.Collected), MaxStampedCollected)] {
-		if v, ok := col.Get(k); ok {
-			f(1<<(3+i), v.At)
+		v, ok := col.Get(k)
+		if !ok {
+			continue
 		}
+		if s, isStamped := v.Data.(collect.Stamped); isStamped && !stamped && v.State == collect.OK {
+			if at, has := s.StampFor(in.Install.ID()); has {
+				f(1<<2, at)
+				stamped = true
+			}
+		}
+		f(1<<(3+i), v.At)
 	}
 }
 
-// timesPrint prints the metrics' and declared collected values' times.
+// timesPrint prints the declared collected values' times.
 func timesPrint(in Input, set InputSet, col collect.Snapshot) uint64 {
 	var h uint64
 	eachRef(in, set, col, func(bit stamp, t time.Time) {

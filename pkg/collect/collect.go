@@ -196,3 +196,38 @@ func (s Snapshot) Get(key string) (Value, bool) {
 	v, ok := s.Values[key]
 	return v, ok
 }
+
+// Aging is implemented by a value's Data whose parts go stale on their own,
+// such as one scrape per install. StalePrint names the parts stale at now.
+type Aging interface {
+	StalePrint(now time.Time) uint64
+}
+
+// Stamped is implemented by a value's Data that times each install's part.
+// A check may stamp its result with that time; a memoized result is restamped from it.
+type Stamped interface {
+	StampFor(install string) (time.Time, bool)
+}
+
+// StalePrint covers which parts of s's OK Aging values are stale at now, in
+// key order, so a part turning stale changes it; zero when none can.
+func (s Snapshot) StalePrint(now time.Time) uint64 {
+	var keys []string
+	for k, v := range s.Values {
+		if _, ok := v.Data.(Aging); ok && v.State == OK {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return 0
+	}
+	slices.Sort(keys)
+	h := fnv.New64a()
+	var b [8]byte
+	for _, k := range keys {
+		_, _ = h.Write([]byte(k))
+		binary.LittleEndian.PutUint64(b[:], s.Values[k].Data.(Aging).StalePrint(now))
+		_, _ = h.Write(b[:])
+	}
+	return h.Sum64()
+}

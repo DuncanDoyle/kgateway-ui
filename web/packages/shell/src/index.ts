@@ -31,6 +31,7 @@ export {
   useCapabilityState,
   useHealth,
   useInstalls,
+  useKindCategory,
   useListFilter,
   useMeta,
   useOverview,
@@ -50,6 +51,7 @@ export { linkTarget, objectPath } from "./explore/objectPath";
 export { HealthBadge } from "./health/HealthBadge";
 export { HealthIcon } from "./health/HealthIcon";
 export { severityToState, stateLabel } from "./health/state";
+export { kgatewayWebPack } from "./kgateway/webPack";
 export { defaultPages } from "./pages/defaultPages";
 export { FindingRow, resourcePath } from "./pages/install/FindingRow";
 export { CopyNameButton } from "./resource/CopyNameButton";
@@ -72,6 +74,7 @@ export type {
   NavEntry,
   RouteContribution,
   ShellExtension,
+  WebPack,
 } from "./shell/extension";
 export { useInstallId, useShellExtension, useVocabulary } from "./shell/extension";
 export { DetailColumns, layout } from "./shell/layout";

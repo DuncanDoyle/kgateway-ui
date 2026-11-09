@@ -347,6 +347,24 @@ func TestPinnedInstallIsPassedAsFlag(t *testing.T) {
 	}
 }
 
+// Class-only installs are off by default, so a kgateway user sees no new installs.
+func TestClassOnlyInstallsPassedAsFlag(t *testing.T) {
+	deploy := func(args ...string) string {
+		ds := kind(render(t, args...), "Deployment")
+		if len(ds) != 1 {
+			t.Fatalf("want 1 Deployment, got %d", len(ds))
+		}
+		b, _ := yaml.Marshal(ds[0])
+		return string(b)
+	}
+	if s := deploy(); strings.Contains(s, "--class-only-installs") {
+		t.Errorf("class-only installs must be off by default:\n%s", s)
+	}
+	if s := deploy("--set", "installs.classOnly=true"); !strings.Contains(s, "--class-only-installs=true") {
+		t.Fatalf("class-only flag missing:\n%s", s)
+	}
+}
+
 func TestPodIsHardened(t *testing.T) {
 	ds := kind(render(t), "Deployment")
 	if len(ds) != 1 {

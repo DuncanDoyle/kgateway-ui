@@ -22,11 +22,24 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 )
 
-// Upstream returns the upstream checks (design §5.2, Phase 3 §9.3).
+// Upstream returns every check, core and kgateway, in their run order (design §5.2, Phase 3 §9.3).
 func Upstream() []Check {
 	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{},
 		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}, endpointsCheck{},
 		withheldCheck{}}
+}
+
+// Core returns the checks that read only Gateway API status, the cluster and
+// process data, in Upstream's order (Phase 5 design §6).
+func Core() []Check {
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, unwatchedCheck{}, ambiguityCheck{}, backendCheck{},
+		restartsCheck{}, probesCheck{}, rolloutsCheck{}, progressCheck{}, endpointsCheck{}}
+}
+
+// Kgateway returns the checks that read kgateway metrics, proxy stats, version
+// tables or computed views, in Upstream's order (Phase 5 design §6).
+func Kgateway() []Check {
+	return []Check{xdsCheck{}, verifyCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, withheldCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
@@ -144,8 +157,11 @@ func (c scopeCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		return unavailable(in, c.Name(), in.Install.Scope.Err)
 	}
 	r := ok(c.Name(), true, in.Now)
-	if in.Install.Scope.Source == install.SourceDeploymentTemplate {
+	switch in.Install.Scope.Source {
+	case install.SourceDeploymentTemplate:
 		r.Detail = "scope from Deployment template; no controller Pod running"
+	case install.SourceAssumed:
+		r.Detail = "Scope assumed: all namespaces. Snellius cannot read this controller's discovery settings"
 	}
 	return nil, r
 }
@@ -167,6 +183,9 @@ func (controllerCheck) Inputs() InputSet {
 func (c controllerCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	d := in.Install.Deployment
+	if d == nil {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, in.Now)
+	}
 	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
 		if in.Process != nil {
@@ -214,7 +233,7 @@ var (
 	listenerRequired = []string{"Accepted", "Programmed"}
 	listenerOptional = []string{"ResolvedRefs"}
 	routeRequired    = []string{"Accepted", "ResolvedRefs"}
-	routeOptional    = []string{"kgateway.dev/Programmed"}
+	routeOptional    = []string{kgatewayProgrammed}
 	policyRequired   = []string{"Accepted"}
 	policyOptional   = []string{"Attached"}
 )
@@ -247,7 +266,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string, owner []string) {
 		f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
 			Message: message(cond), Detail: detail(cond, extra), Since: since(cond), Key: append(slices.Clip(owner), cond.Type)}
-		delegationCondition(&f, u, cond)
+		in.delegationCondition(&f, u, cond)
 		fs = append(fs, f)
 	}
 	// One KGWUI-003 per (resource, parentRef); parent is the zero value for
@@ -432,7 +451,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				pendingFor(r.Obj, p, noControllerStatus+" for "+extra, FreshnessNeverWritten, 0)
 				continue
 			}
-			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, nil)
+			evaluate(r.Obj, p, st.Conditions, routeRequired, in.conditions().RouteOptional, extra, nil)
 		}
 	}
 	// Routes whose parent does not exist. A parent of a kind the cache cannot
@@ -550,9 +569,15 @@ func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required
 }
 
 // RoutePending returns why one status.parents entry of route u is not
-// current under the rules the resource status check applies, or "" when it is.
+// current under the rules the resource status check applies to a kgateway
+// install, or "" when it is. RoutePendingFor takes the install's own types.
 func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 	return pendingReason(u, cs, routeRequired, routeOptional)
+}
+
+// RoutePendingFor is RoutePending for an install whose condition types are ct.
+func RoutePendingFor(u *unstructured.Unstructured, cs []metav1.Condition, ct ConditionTypes) string {
+	return pendingReason(u, cs, routeRequired, ct.RouteOptional)
 }
 
 // GatewayPending is RoutePending for a Gateway or ListenerSet status block.
@@ -568,13 +593,13 @@ func PolicyPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 	return pendingReason(u, cs, policyRequired, policyOptional)
 }
 
-// experimentalKind returns u's served kind when kgateway watches it, at its
-// served version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
+// experimentalKind returns u's served kind when the install's controller watches
+// it, at its served version, only with experimental Gateway API features on.
 func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bool) {
 	gvk := u.GroupVersionKind()
 	for _, k := range in.Served {
 		if k.Group == gvk.Group && k.Kind == gvk.Kind {
-			return k, k.ExperimentalOnly(in.Install.KgatewayVersion())
+			return k, in.Install.Experimental(k)
 		}
 	}
 	return kinds.Served{}, false
@@ -695,6 +720,9 @@ func (proxyCheck) Inputs() InputSet {
 // Deployment that exists is judged the same either way.
 func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	if in.Install.ProxySelector == nil {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, in.Snapshot.TakenAt)
+	}
 	var fs []Finding
 	inGrace := 0
 	for _, gw := range in.Owned.Gateways {

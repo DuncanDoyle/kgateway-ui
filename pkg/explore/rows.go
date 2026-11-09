@@ -24,7 +24,8 @@ const (
 	pendingParentMissing = "Parent not found"
 )
 
-// programmedType is kgateway's route programming condition (2.4).
+// programmedType is kgateway's route programming condition (2.4). Only the
+// gateway-rejecting set reads it: KGWUI-001 is a kgateway-pack finding.
 const programmedType = "kgateway.dev/Programmed"
 
 // aux is what Build needs about a row until the index is filled. It is
@@ -59,12 +60,18 @@ type builder struct {
 	disagreements map[objects.Ref]int
 	// rejecting are the Gateways with an active KGWUI-001; nil when none.
 	rejecting map[objects.Ref]bool
+	// conds are the install's condition types beyond Gateway API's.
+	conds health.ConditionTypes
 }
 
 // Build builds the index of one install. It is pure: the same input gives
 // the same rows in the same order, whatever the snapshot's order.
 func Build(in Input) *Index {
-	b := &builder{in: in, dec: in.Views, lsGW: map[objects.Ref]*objects.Ref{}, ownedGW: map[objects.Ref]bool{}, parents: map[objects.GroupKind]bool{}}
+	b := &builder{in: in, dec: in.Views, lsGW: map[objects.Ref]*objects.Ref{}, ownedGW: map[objects.Ref]bool{}, parents: map[objects.GroupKind]bool{},
+		conds: health.KgatewayConditions()}
+	if in.Conditions != nil {
+		b.conds = *in.Conditions
+	}
 	if b.dec == nil {
 		b.dec = objects.Direct{}
 	}
@@ -294,7 +301,7 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 		r.Flags |= FlagPending
 		return l
 	}
-	if why := health.RoutePending(r.Obj, st.Conditions); why != "" {
+	if why := health.RoutePendingFor(r.Obj, st.Conditions, b.conds); why != "" {
 		l.Attachment, l.Pending = AttachmentPending, why
 		r.Flags |= FlagPending
 		return l
@@ -308,20 +315,29 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 	} else {
 		l.Attachment = AttachmentNotAccepted
 		r.Flags |= FlagNotAccepted
-		if acc.Reason == "RouteRuleReplaced" || acc.Reason == "RouteRuleDropped" {
-			r.Flags |= FlagNotProgrammed // 2.3 reports these through Accepted
+		if (acc.Reason == "RouteRuleReplaced" || acc.Reason == "RouteRuleDropped") && slices.Contains(b.conds.RouteRejected, "Accepted") {
+			r.Flags |= FlagNotProgrammed // a replaced or dropped rule, reported through Accepted (kgateway 2.3)
 		}
 	}
 	if c := objects.FindCondition(cs, "ResolvedRefs"); c.Status == metav1.ConditionFalse {
 		r.Flags |= FlagRefsUnresolved
 	}
-	if c := objects.FindCondition(cs, programmedType); c != nil && c.Status == metav1.ConditionFalse {
-		r.Flags |= FlagNotProgrammed
+	for _, t := range b.conds.RouteOptional {
+		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
+			r.Flags |= FlagNotProgrammed
+		}
 	}
 	if b.rejecting != nil && (b.rejecting[l.Target] || l.Via != nil && b.rejecting[*l.Via]) && isTrue(cs, programmedType) {
 		r.Flags |= FlagGatewayRejecting
 	}
-	for _, t := range []string{"Accepted", "ResolvedRefs", programmedType} {
+	// The deciding condition: the first False among Accepted, ResolvedRefs and the optional types.
+	for _, t := range [2]string{"Accepted", "ResolvedRefs"} {
+		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
+			l.Cond = c
+			return l
+		}
+	}
+	for _, t := range b.conds.RouteOptional {
 		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
 			l.Cond = c
 			break
@@ -514,7 +530,7 @@ func (b *builder) index(ix *Index) {
 		uses, targets = uses[:0], targets[:0]
 		a := &b.aux[i]
 		if r.View != nil {
-			a.targets = objects.BackendTargets(r.View)
+			a.targets = objects.BackendTargetsAs(r.View, !b.in.Install.NoDelegation)
 		}
 		for _, t := range a.targets {
 			if j := slices.Index(targets, t.Ref); j >= 0 {
@@ -678,7 +694,7 @@ func (b *builder) views(ix *Index) {
 	if v == nil {
 		return
 	}
-	ix.RuleSet, ix.RuleNote = v.RuleSet, v.Note
+	ix.RuleSet, ix.RuleLabel, ix.RuleNote = v.RuleSet, v.Label, v.Note
 	a := &v.Attachment
 	// Route rows take the first indexes; the map holds resources and Namespaces.
 	n := &interner{ix: ix, routes: map[objects.GroupKind]bool{}, at: map[objects.Ref]int32{}, seen: map[depKey]DepSet{}, offSeen: map[depKey]DepSet{},

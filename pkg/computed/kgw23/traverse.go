@@ -850,3 +850,6 @@ func withDep(deps []objects.Ref, r objects.Ref) []objects.Ref {
 	out = append(out, r)
 	return append(out, deps[i:]...)
 }
+
+// compareRef orders refs by group, kind, namespace and name.
+func compareRef(a, b objects.Ref) int { return a.Compare(b) }

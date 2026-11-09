@@ -8,7 +8,7 @@ import { installPath } from "./paths";
 /** "/" → the single (or pinned) install, else the cluster landing (design §6.4). */
 export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding">) {
   const { data, error } = useInstalls();
-  const { data: meta } = useMeta();
+  const { data: meta, error: metaError } = useMeta();
   const vocab = useVocabulary();
   // Loaded installs stay in use after a failed poll; the landing shows the error over them.
   if (!data) {
@@ -17,6 +17,8 @@ export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding
       return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
     return <PageState kind="loading" title="Loading installs…" />;
   }
+  // The empty state's copy depends on the server's packs, so it waits for /meta.
+  if (data.length === 0 && !meta && !metaError) return <PageState kind="loading" title="Loading installs…" />;
   if (data.length === 0) {
     return (
       <PageState

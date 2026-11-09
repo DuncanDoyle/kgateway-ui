@@ -1,6 +1,10 @@
 package rulesets
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+)
 
 // Selection follows the controller minor (rules §2).
 func TestSelect(t *testing.T) {
@@ -57,4 +61,27 @@ func TestGatewayCRDHasAllowedListeners(t *testing.T) {
 			t.Errorf("%s %s: %v %v, want %v %v", tc.channel, tc.bundle, has, known, tc.has, tc.known)
 		}
 	}
+}
+
+// Each kgateway set has a display label; a set without one is labelled by its ID.
+func TestSelectionLabel(t *testing.T) {
+	for v, want := range map[string]string{"2.3.1": "kgateway 2.3", "2.4.7": "kgateway 2.4", "2.5.0": "kgateway 2.5"} {
+		if got := Select(v).Label(); got != want {
+			t.Errorf("%s: %q, want %q", v, got, want)
+		}
+	}
+	if got := (computed.Selection{Rules: unlabelled{}}).Label(); got != "custom-1" {
+		t.Errorf("unlabelled: %q", got)
+	}
+	if got := (computed.Selection{}).Label(); got != "" {
+		t.Errorf("no rule set: %q", got)
+	}
+}
+
+// unlabelled is a rule set without computed.Labeler.
+type unlabelled struct{}
+
+func (unlabelled) Version() string { return "custom-1" }
+func (unlabelled) Attachment(computed.AttachmentInput) computed.AttachmentResult {
+	return computed.AttachmentResult{}
 }

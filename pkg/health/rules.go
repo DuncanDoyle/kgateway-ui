@@ -3,6 +3,7 @@ package health
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -57,9 +58,10 @@ var (
 )
 
 // ruleReplacedReason reports whether cond is a current RouteRuleReplaced or
-// RouteRuleDropped: on Accepted on 2.3, on kgateway.dev/Programmed on 2.4.
-func ruleReplacedReason(cond metav1.Condition) bool {
-	return cond.Status == metav1.ConditionFalse && (cond.Type == "Accepted" || cond.Type == "kgateway.dev/Programmed") &&
+// RouteRuleDropped on one of rejected's types: kgateway's are Accepted on 2.3
+// and kgateway.dev/Programmed on 2.4.
+func ruleReplacedReason(cond metav1.Condition, rejected []string) bool {
+	return cond.Status == metav1.ConditionFalse && slices.Contains(rejected, cond.Type) &&
 		(cond.Reason == "RouteRuleReplaced" || cond.Reason == "RouteRuleDropped")
 }
 
@@ -67,7 +69,7 @@ func ruleReplacedReason(cond metav1.Condition) bool {
 // condition another code keeps. owner is the parent's key. wake asks for a
 // recompute when the hint becomes due.
 func (in Input) ruleFinding(u *unstructured.Unstructured, cond metav1.Condition, extra string, owner []string, wake func(time.Time)) (Finding, bool) {
-	if !ruleReplacedReason(cond) {
+	if !ruleReplacedReason(cond, in.conditions().RouteRejected) {
 		return Finding{}, false
 	}
 	ev := &RuleReplacedEvidence{Reason: cond.Reason, Message: computed.ClipDisplay(cond.Message, computed.MaxStatusBytes)}

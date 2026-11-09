@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
 	clienttesting "k8s.io/client-go/testing"
@@ -44,6 +45,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/overview"
@@ -69,15 +71,17 @@ func okMetrics(ids ...string) fakeMetrics {
 
 // setup configures startWith. Zero values are the defaults.
 type setup struct {
-	served    []kinds.Served     // nil: every upstream kind
-	pinned    string             // pinned install ID
-	metrics   ctrlmetrics.Source // nil: okMetrics("kgw.kgateway")
-	immediate bool               // report scope mismatches on the second computation (persistence 0, not 1 h)
-	authz     Authorizer         // nil: AllowAll
+	served    []kinds.Served // nil: every upstream kind
+	pinned    string         // pinned install ID
+	metrics   metricsSource  // nil: okMetrics("kgw.kgateway")
+	immediate bool           // report scope mismatches on the second computation (persistence 0, not 1 h)
+	authz     Authorizer     // nil: AllowAll
 	// prepare runs on the fake clients before the cache starts (failure injection).
 	prepare func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset)
 	// wrapDynamic, when set, wraps the dynamic client the cache reads.
 	wrapDynamic func(dynamic.Interface) dynamic.Interface
+	// wrapKube, when set, wraps the typed client the cache reads.
+	wrapKube func(kubernetes.Interface) kubernetes.Interface
 	// late objects are created after the engine has first seen the rest, so their
 	// generation is first seen at testutil.Now: inside the grace period.
 	late []*unstructured.Unstructured
@@ -112,6 +116,10 @@ type setup struct {
 	collected func() collect.Snapshot
 	// catalog is the served-kind catalog; nil knows none.
 	catalog func() kinds.Catalog
+	// hooks are the engine's per-install pack hooks; nil keeps the kgateway hooks for every install.
+	hooks func(install.Install) engine.Hooks
+	// classOnly adds class-only installs.
+	classOnly bool
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -239,17 +247,22 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if s.wrapDynamic != nil {
 		dyn = s.wrapDynamic(dyn)
 	}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
+	var cacheKube kubernetes.Interface = kube
+	if s.wrapKube != nil {
+		cacheKube = s.wrapKube(kube)
+	}
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: cacheKube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
 		Events: s.optional, CRDs: s.optional, Metadata: meta, Endpoints: s.endpoints})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
-		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
-		DelegationBounds: s.bounds, Collected: s.collected, Catalog: s.catalog})
+		Verifier: scopeverify.NewManagedCountVerifier(persist), Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
+		Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
+		DelegationBounds: s.bounds, Collected: served(s.metrics, 30*time.Second, s.collected), Catalog: s.catalog, HooksFor: s.hooks, ClassOnly: s.classOnly})
 	deadline := time.Now().Add(5 * time.Second)
-	for !e.Compute().Snapshot.Synced {
+	// Optional watches do not hold back Synced; each must also have read or failed (setup Go doc).
+	for snap := e.Compute().Snapshot; !snap.Synced || !optionalRead(snap); snap = e.Compute().Snapshot {
 		if time.Now().After(deadline) {
 			t.Fatal("not synced")
 		}
@@ -262,9 +275,27 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if m := e.Compute(); !s.disputes {
 		consistentWithViews(t, m)
 	}
-	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, s.opts...))
+	// Every detected install is kgateway's, as in extension.New; with class-only installs, only the stamped ones.
+	features := func(install.Install) []string { return kgateway.Features() }
+	base := []HandlerOption{WithPacks(kgateway.Name)}
+	if s.classOnly {
+		features = packFeatures
+		base = append(base, WithInstallKinds(packKinds))
+	}
+	opts := append(append(base, WithInstallFeatures(features)), s.opts...)
+	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, opts...))
 	t.Cleanup(srv.Close)
 	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, meta: meta, clk: clk}
+}
+
+// optionalRead reports whether every optional watch in snap has read or failed.
+func optionalRead(snap *cache.Snapshot) bool {
+	for _, gvr := range []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.EventsGVR, cache.CRDsGVR, cache.ServicesGVR, cache.EndpointSlicesGVR} {
+		if a, ok := snap.Access[gvr]; ok && !a.OK && a.Err == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // createAndWait creates u through the fake dynamic client and waits until the cache holds it.
@@ -307,9 +338,9 @@ func startWith(t *testing.T, s setup, objs ...runtime.Object) (*engine.Engine, *
 }
 
 // start is startWith with the common settings.
-func start(t *testing.T, served []kinds.Served, pinned string, m ctrlmetrics.Source, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
+func start(t *testing.T, kinds []kinds.Served, pinned string, m metricsSource, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
 	t.Helper()
-	return startWith(t, setup{served: served, pinned: pinned, metrics: m}, objs...)
+	return startWith(t, setup{served: kinds, pinned: pinned, metrics: m}, objs...)
 }
 
 func get[T any](t *testing.T, srv *httptest.Server, path string, wantStatus int) T {

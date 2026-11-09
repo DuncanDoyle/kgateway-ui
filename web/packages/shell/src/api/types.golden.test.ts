@@ -461,7 +461,7 @@ const headerKeys = {
 } as const;
 const header = shape<InstallHeader>(headerKeys, { readiness, scope });
 const summary = shape<InstallSummary>(
-  { ...headerKeys, health: "!", groupRows: "!", computedAt: "!", confirmedAt: "?" },
+  { ...headerKeys, health: "!", groupRows: "!", computedAt: "!", confirmedAt: "?", features: "?" },
   {
     readiness,
     scope,
@@ -545,6 +545,7 @@ const metaShape = shape<MetaResponse>(
     kinds: "!",
     views: "?",
     filters: "?",
+    packs: "?",
     capabilityStates: "?",
   },
   { kinds: kind, views: groupKind, capabilityStates: capability },
@@ -564,7 +565,7 @@ const pageKeys = {
 const page = (items: Shape) => shape<Page<unknown>>(pageKeys, { items });
 // View A (sub-phase 2.3).
 const computed = shape<Computed>(
-  { by: "!", rules: "!", rule: "?", state: "!", coverage: "?", reason: "?", note: "?" },
+  { by: "!", rules: "!", label: "?", rule: "?", state: "!", coverage: "?", reason: "?", note: "?" },
   {},
   {
     by: { ui: 1 },
@@ -715,6 +716,7 @@ const listenerSetDetail = shape<ListenerSetDetail>(
     health: "!",
     candidate: "?",
     ruleSet: "?",
+    ruleSetLabel: "?",
     parent: "!",
     parentFound: "!",
     conditions: "!",
@@ -851,6 +853,7 @@ const routeDetail = shape<RouteDetail>(
     health: "!",
     candidate: "?",
     ruleSet: "?",
+    ruleSetLabel: "?",
     hostnames: "!",
     annotations: "!",
     parentRefs: "!",
@@ -1078,6 +1081,7 @@ const gatewayDetail = shape<GatewayDetail>(
     health: "!",
     candidate: "?",
     ruleSet: "?",
+    ruleSetLabel: "?",
     conditions: "!",
     addresses: "!",
     listeners: "!",

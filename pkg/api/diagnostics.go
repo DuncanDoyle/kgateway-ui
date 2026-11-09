@@ -10,6 +10,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -28,6 +29,12 @@ const hiddenTitle = "Details hidden"
 // WithCommands sets the next-step commands; the default is diagnose.Kubectl.
 func WithCommands(c diagnose.Commands) HandlerOption {
 	return func(cfg *handlerConfig) { cfg.commands = c }
+}
+
+// WithInstallCommands sets each install's next-step commands, such as its
+// pack's; a nil result keeps WithCommands'.
+func WithInstallCommands(f func(install.Install) diagnose.Commands) HandlerOption {
+	return func(cfg *handlerConfig) { cfg.commandsFor = f }
 }
 
 // xdsPlain is health.XDSRejectsEvidence without its methods.
@@ -330,7 +337,7 @@ func (h *handler) groupRow(v *view, l linker, g *diagnose.Group, fs []health.Fin
 		}
 	}
 	row.Since = wirePtr(since)
-	row.NextSteps = nextSteps(diagnose.Steps(*g, fs, in, h.commands, v.visible()))
+	row.NextSteps = nextSteps(diagnose.Steps(*g, fs, in, h.commandsOf(in.Install.Install), v.visible()))
 	row.Grant = grantShape(v, g, &fs[top])
 	return row
 }

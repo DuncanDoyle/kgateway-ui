@@ -43,12 +43,15 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed/kgw24"
 	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/overview"
+	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
@@ -64,6 +67,13 @@ func (s *stubScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser
 }
 
 var ui = fstest.MapFS{"index.html": {Data: []byte("x")}}
+
+// metrics is install id's entry in the published controller metrics value.
+func (a *App) metrics(id string) (ctrlmetrics.Result, bool) {
+	v, _ := a.collected.Snapshot().Get(ctrlmetrics.Key)
+	r, _, ok := ctrlmetrics.Lookup(v, id)
+	return r, ok
+}
 
 // start builds and starts the app over fake clients and serves its handler.
 func start(t *testing.T, objs []runtime.Object, extra []kinds.Descriptor, o Options, sc *stubScraper, opts ...extension.Option) (*App, *httptest.Server) {
@@ -404,7 +414,7 @@ func TestFirstMetricsCollectionFollowsDiscovery(t *testing.T) {
 	a, _ := start(t, []runtime.Object{testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true)}, nil,
 		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, sc)
 	eventually(t, "the controller was never scraped after discovery", func() bool { return sc.calls.Load() > 0 })
-	eventually(t, "no metrics result for the install", func() bool { _, ok := a.collector.Get("kgw.kgateway"); return ok })
+	eventually(t, "no metrics result for the install", func() bool { _, ok := a.metrics("kgw.kgateway"); return ok })
 }
 
 // slowPods holds the Pod list until release closes, so the Deployment is
@@ -486,7 +496,7 @@ func TestMetricsCollectionWaitsForASettledDiscovery(t *testing.T) {
 		t.Fatal("no model with the install was published before the Pods were listed")
 	}
 	var r ctrlmetrics.Result
-	eventually(t, "no metrics result for the install", func() bool { var ok bool; r, ok = a.collector.Get("kgw.kgateway"); return ok })
+	eventually(t, "no metrics result for the install", func() bool { var ok bool; r, ok = a.metrics("kgw.kgateway"); return ok })
 	if r.Err != "" || sc.calls.Load() == 0 {
 		t.Fatalf("the first collection must scrape the install's pod: err=%q calls=%d", r.Err, sc.calls.Load())
 	}
@@ -495,14 +505,25 @@ func TestMetricsCollectionWaitsForASettledDiscovery(t *testing.T) {
 // The scope verifier must wait 2 × and metrics expire after 3 × the metrics
 // interval (design §4.4); zero would disable either guard.
 func TestBuildDerivesMetricsTimingsFromTheInterval(t *testing.T) {
-	dyn, kube := testutil.Clients(t)
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
 	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
-	a, err := Build(c, Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui}, extension.New())
+	a, err := Build(c, Options{PollInterval: 20 * time.Millisecond, MetricsInterval: 7 * time.Second, UI: ui}, extension.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.cfg.MetricsMaxAge != 21*time.Second {
-		t.Fatalf("MetricsMaxAge must be 3 × the metrics interval, got %v", a.cfg.MetricsMaxAge)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	var res ctrlmetrics.Results
+	eventually(t, "no metrics value", func() bool {
+		v, _ := a.collected.Snapshot().Get(ctrlmetrics.Key)
+		var ok bool
+		res, ok = v.Data.(ctrlmetrics.Results)
+		return ok
+	})
+	if res.MaxAge != 21*time.Second {
+		t.Fatalf("the metrics max age must be 3 × the metrics interval, got %v", res.MaxAge)
 	}
 	v, ok := a.cfg.Verifier.(*scopeverify.ManagedCountVerifier)
 	if !ok || v.Persist() != 14*time.Second {
@@ -866,7 +887,7 @@ func TestAppRecomputesOnObjectChange(t *testing.T) {
 	// wait for them, then for a quiet loop.
 	eventually(t, "never synced and scraped", func() bool {
 		p := a.Engine.Current()
-		_, scraped := a.collector.Get("kgw.kgateway")
+		_, scraped := a.metrics("kgw.kgateway")
 		return a.cache.Settled() && p != nil && p.Model.Snapshot.Synced && scraped
 	})
 	for quiet := false; !quiet; {
@@ -1243,9 +1264,12 @@ func TestCollectedFreshnessAtTheAPI(t *testing.T) {
 		}
 		// Settled: two ticks in a row confirm a model with the install, its metrics and v1.
 		ready := func(p *engine.Published) bool {
-			reads := p.Model.MetricsRead
-			return p.Model.Snapshot.Synced && len(p.Model.Installs) == 1 && len(reads) > 0 &&
-				!slices.ContainsFunc(reads, func(r engine.MetricsRead) bool { return !r.Present }) && p.Source.Collected == a.collected.Snapshot().Print
+			if !p.Model.Snapshot.Synced || len(p.Model.Installs) != 1 {
+				return false
+			}
+			v, _ := p.Model.Collected.Get(ctrlmetrics.Key)
+			_, _, read := ctrlmetrics.Lookup(v, p.Model.Installs[0].Resolved.ID())
+			return read && p.Source.Collected == a.collected.Snapshot().Print
 		}
 		for confirmed := 0; confirmed < 2; {
 			f.await(engine.EvArmed)
@@ -1559,6 +1583,54 @@ func TestCommandsSeamReachesTheAPI(t *testing.T) {
 	}
 }
 
+// packCommands names its own tool in the previous-log step.
+type packCommands struct{ diagnose.Kubectl }
+
+func (packCommands) PreviousLog(pod objects.Ref, _ string) string { return "acme previous " + pod.Name }
+
+// acmeUpstream claims the upstream controller for the pack "acme".
+type acmeUpstream struct{ install.UpstreamDetector }
+
+func (acmeUpstream) Name() string { return "acme" }
+
+// A second pack's Commands reach the next steps of the installs it claims.
+func TestPackCommandsReachTheAPI(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	ctrl := testutil.ControllerPod(d, "kgateway-0", true)
+	// A recent exit with code 2 raises 019 with a previous-log step.
+	crashed := metav1.NewTime(time.Now().Add(-time.Minute))
+	ctrl.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "kgateway", RestartCount: 1, Ready: true,
+		State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: crashed}},
+		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 2, FinishedAt: crashed}}}}
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), d, ctrl)
+	acme := extension.Pack{Name: "acme", Detectors: []install.Detector{acmeUpstream{}}, Impl: extension.Impl{Process: process.Kube{}, Commands: packCommands{}}}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, extension.New(extension.WithPack(acme)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var g api.GroupRow
+	eventually(t, "no restart group", func() bool {
+		var dg api.Diagnostics
+		if getJSON(t, srv, "/api/v1/installs/kgw.kgateway/diagnostics", &dg) != http.StatusOK {
+			return false
+		}
+		i := slices.IndexFunc(dg.Groups, func(g api.GroupRow) bool { return g.Code == health.CodeProcessRestarting })
+		if i >= 0 {
+			g = dg.Groups[i]
+		}
+		return i >= 0
+	})
+	if len(g.NextSteps) != 1 || g.NextSteps[0].Command != "acme previous kgateway-0" {
+		t.Fatalf("steps %+v, want the acme pack's command", g.NextSteps)
+	}
+}
+
 // growingDiscovery serves base plus lists added while the app runs, through
 // ServerGroupsAndResources too.
 type growingDiscovery struct {
@@ -1674,6 +1746,144 @@ func TestEndpointsWatchFailureIsNotSignalUnavailable(t *testing.T) {
 				if f.Code == health.CodeSignalUnavailable && (strings.Contains(f.Message, "services") || strings.Contains(f.Message, "endpointslices")) {
 					t.Errorf("unexpected KGWUI-008: %+v", f)
 				}
+			}
+		})
+	}
+}
+
+// A registry from extension.NewCore builds and serves with class-only
+// installs on: the other controller is an install, and /meta lists no
+// kgateway kind (Phase 5 design §12.1).
+func TestCoreRegistryServesClassOnlyInstalls(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("infra", nil), testutil.Namespace("shop", nil),
+		testutil.GatewayClass("other", "example.com/gateway", true), testutil.Gateway("infra", "edge", "other", nil),
+		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, "example.com/gateway")))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, ClassOnlyInstalls: true}, extension.NewCore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var insts []api.InstallSummary
+	eventually(t, "class-only install never appeared", func() bool {
+		insts = nil
+		return getJSON(t, srv, "/api/v1/installs", &insts) == http.StatusOK && len(insts) == 1
+	})
+	if insts[0].ID != "example.com~2Fgateway" || insts[0].Scope == nil || insts[0].Scope.Source != install.SourceAssumed {
+		t.Fatalf("install %+v", insts[0])
+	}
+	var meta api.MetaResponse
+	getJSON(t, srv, "/api/v1/meta", &meta)
+	if len(meta.Kinds) == 0 || slices.ContainsFunc(meta.Kinds, func(k kinds.Served) bool { return k.Group == kinds.KgatewayGroup }) {
+		t.Fatalf("meta kinds %+v, want Gateway API kinds only", meta.Kinds)
+	}
+	// Without a rule set the pages serve status only.
+	base := "/api/v1/installs/example.com~2Fgateway"
+	for _, path := range []string{base + "/gateways/infra/edge", base + "/routes/gateway.networking.k8s.io/HTTPRoute/shop/r"} {
+		if code := getJSON(t, srv, path, nil); code != http.StatusOK {
+			t.Errorf("GET %s: %d", path, code)
+		}
+	}
+}
+
+// The app lists each install's pack features: all four for kgateway, none for
+// a class-only install (Phase 5 design §10).
+func TestInstallFeaturesReachTheAPI(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d, testutil.ControllerPod(d, "kgateway-0", true),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/gateway", true))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, ClassOnlyInstalls: true}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var insts []api.InstallSummary
+	eventually(t, "two installs never appeared", func() bool {
+		insts = nil
+		return getJSON(t, srv, "/api/v1/installs", &insts) == http.StatusOK && len(insts) == 2
+	})
+	want := []string{api.FeatureDelegation, api.FeatureComputed, api.FeatureDataPlane, api.FeatureProcesses}
+	if co, k := insts[0], insts[1]; co.ID != "example.com~2Fgateway" || len(co.Features) != 0 || !slices.Equal(k.Features, want) {
+		t.Fatalf("installs %+v, want class-only without features and kgateway with %v", insts, want)
+	}
+}
+
+// The app's /meta names its packs, and a class-only install's overview has
+// no kgateway kind tiles; NewCore's /meta names none (Phase 5 design §10).
+func TestPacksAndInstallKindsReachTheAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reg   *extension.Registry
+		packs []string
+	}{{"default", extension.New(), []string{"kgateway"}}, {"core", extension.NewCore(), []string{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+			dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true),
+				testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/gateway", true))
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, ClassOnlyInstalls: true}, tc.reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			var meta api.MetaResponse
+			eventually(t, "meta never synced", func() bool {
+				meta = api.MetaResponse{}
+				return getJSON(t, srv, "/api/v1/meta", &meta) == http.StatusOK && meta.Synced
+			})
+			if !slices.Equal(meta.Packs, tc.packs) || meta.Packs == nil {
+				t.Fatalf("packs %#v, want %v", meta.Packs, tc.packs)
+			}
+			var ov api.OverviewResponse
+			eventually(t, "class-only overview", func() bool {
+				ov = api.OverviewResponse{}
+				return getJSON(t, srv, "/api/v1/installs/example.com~2Fgateway/overview", &ov) == http.StatusOK && len(ov.Counts) > 0
+			})
+			if slices.ContainsFunc(ov.Counts, func(c overview.Count) bool { return c.Group == kinds.KgatewayGroup }) {
+				t.Errorf("class-only counts %+v carry kgateway kinds", ov.Counts)
+			}
+		})
+	}
+}
+
+// Build rejects pack collectors it could not start: an invalid name, or a
+// name two packs share (only one of them would run).
+func TestBuildRejectsBadPackCollectors(t *testing.T) {
+	col := func(name string) func(extension.CollectorEnv) extension.Collector {
+		return func(extension.CollectorEnv) extension.Collector { return &fakeCollector{name: name} }
+	}
+	pack := func(name, collector string) extension.Pack {
+		return extension.Pack{Name: name, Collectors: []func(extension.CollectorEnv) extension.Collector{col(collector)}}
+	}
+	for _, tc := range []struct {
+		name string
+		reg  *extension.Registry
+		want string
+	}{
+		{"shared name", extension.NewCore(extension.WithPack(pack("one", "widgets")), extension.WithPack(pack("two", "widgets"))), `"widgets"`},
+		{"invalid name", extension.NewCore(extension.WithPack(pack("one", "Bad Name"))), `"Bad Name"`},
+		{"a kgateway collector's name", extension.New(extension.WithPack(pack("two", "controller-metrics"))), `"controller-metrics"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dyn, kube := testutil.ClientsWith(t, nil)
+			_, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: time.Second, MetricsInterval: time.Hour, UI: ui}, tc.reg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Build error %v, want one naming %s", err, tc.want)
 			}
 		})
 	}

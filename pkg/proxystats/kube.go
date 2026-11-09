@@ -43,6 +43,16 @@ type Kube struct {
 	Port int32
 }
 
+// KubeFor is the Kube source: the Pod IP in-cluster, pods/proxy with the
+// user's rights otherwise (D-037).
+func KubeFor(kube kubernetes.Interface, inCluster bool) Kube {
+	k := Kube{Client: NewHTTPClient()}
+	if !inCluster {
+		k.Kube = kube
+	}
+	return k
+}
+
 // Targets implements Source: the running, non-terminating Pods of gw's proxy
 // Deployment. Without the Deployment or the proxy Pod watch, as for a
 // self-managed Gateway, they are not observed.

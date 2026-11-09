@@ -2,9 +2,9 @@ import type { SerializedStyles } from "@emotion/react";
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useGatewayDetail, useListenerSets } from "../../api/exploreHooks";
-import { useListFilter } from "../../api/hooks";
+import { useFeatureCheck, useListFilter } from "../../api/hooks";
 import type { LinkedRef, ListenerSetRow } from "../../api/types";
-import { columnCopy, detailCopy, gatewayCopy } from "../../copy/explorer";
+import { columnCopy, dataPlaneCopy, detailCopy, gatewayCopy } from "../../copy/explorer";
 import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
@@ -41,6 +41,10 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
   const id = useInstallId();
   const { ns = "", name = "" } = useParams();
   const { data, error } = useGatewayDetail(id, ns, name);
+  // A controller without a data plane or process view gets one line instead of those sections (design §10).
+  const has = useFeatureCheck(id);
+  const dataPlane = has("dataplane") !== false;
+  const processes = has("processes") !== false;
   const ref = useMemo<LinkedRef>(
     () => ({ group: GW, kind: "Gateway", namespace: ns, name, link: "detail" }),
     [ns, name],
@@ -67,7 +71,14 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
   // While /meta loads the selector keeps its place (ready false), so the route sections never move.
   const pick: ListenerPick | undefined =
     supported !== false && data
-      ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
+      ? {
+          listeners: data.listeners,
+          selected,
+          onSelect,
+          ready: !!supported,
+          ruleSet: data.ruleSet ?? "",
+          ruleSetLabel: data.ruleSetLabel,
+        }
       : undefined;
   // From 1600 px the conditions sit beside the structure; below, above it.
   const wide = useTwoColumns();
@@ -100,8 +111,14 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
             </Facts>
           </Section>
           {/* Sent for a Gateway the install owns; it arrives with the detail, so nothing below moves. */}
-          {data.dataPlane ? <DataPlaneSection installId={id} dataPlane={data.dataPlane} /> : null}
-          {data.proxies ? <ProxiesSection gateway={ref} proxies={data.proxies} /> : null}
+          {dataPlane && data.dataPlane ? <DataPlaneSection installId={id} dataPlane={data.dataPlane} /> : null}
+          {processes && data.proxies ? <ProxiesSection gateway={ref} proxies={data.proxies} /> : null}
+          {dataPlane || processes ? null : (
+            <Section aria-labelledby="gw-dataplane">
+              <h2 id="gw-dataplane">{dataPlaneCopy.title}</h2>
+              <Muted>{dataPlaneCopy.notAvailable}</Muted>
+            </Section>
+          )}
           <Section aria-labelledby="gw-listeners">
             <h2 id="gw-listeners">
               {gatewayCopy.listeners} <span className="note">{data.listeners.length}</span>

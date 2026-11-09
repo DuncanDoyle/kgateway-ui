@@ -32,6 +32,9 @@ type InstallSummary struct {
 	// ConfirmedAt is when the model was last confirmed to match the cluster
 	// (D-019); clients apply the stale rule to it.
 	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
+	// Features are the install's UI features (Feature*); always sent, so an
+	// absent list means an older server (Phase 5 design §10).
+	Features []string `json:"features"`
 }
 
 // HealthSummary is the state and per-severity counts.
@@ -66,6 +69,9 @@ type MetaResponse struct {
 	Kinds []kinds.Served `json:"kinds"`
 	// Views are the group/kinds with a detail view; informational only.
 	Views []objects.GroupKind `json:"views,omitempty"`
+	// Packs names the implementation packs this server runs, such as
+	// "kgateway"; always sent, so an absent list means an older server.
+	Packs []string `json:"packs"`
 	// Filters lists, per list, the filters added after v1, so a client sends
 	// one only when this backend applies it (design §7.2).
 	Filters map[string][]string `json:"filters,omitempty"`

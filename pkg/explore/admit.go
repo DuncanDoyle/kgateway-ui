@@ -119,7 +119,8 @@ func (b *builder) admit(ix *Index) map[objects.Ref]Admission {
 		for _, t := range a.targets {
 			refer(r.Ref, t.Ref)
 		}
-		if r.View != nil {
+		// Without delegation a name ref is an ordinary target, referred above.
+		if r.View != nil && !b.in.Install.NoDelegation {
 			for _, rule := range r.View.Rules {
 				for _, br := range rule.BackendRefs {
 					if dl := br.Delegation; dl != nil && dl.Mode == objects.DelegationName {

@@ -114,6 +114,8 @@ export interface InstallSummary extends InstallHeader {
   groupRows: number;
   computedAt: string;
   confirmedAt?: string;
+  /** The install's UI features, e.g. "delegation"; absent from older servers, which have them all (design §10). */
+  features?: string[];
 }
 export interface Access {
   ok: boolean;
@@ -173,6 +175,8 @@ export interface MetaResponse {
   kinds: ServedKind[];
   /** The group/kinds with a detail view; informational, links come from LinkedRef.link. */
   views?: { group: string; kind: string }[];
+  /** The implementation packs the server runs, e.g. "kgateway"; absent from older servers, which run them all. */
+  packs?: string[];
   /** Filters added after v1, per list (2.3: routes has listener). */
   filters?: Record<string, string[]>;
   /** Extension capabilities with their state, by name; omitted when there are none. */

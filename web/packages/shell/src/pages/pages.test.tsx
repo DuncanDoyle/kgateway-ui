@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import metaGolden from "../../../../../pkg/api/testdata/golden/meta.json";
 import { POLL_MS } from "../api/hooks";
 import type { Finding, InstallSummary, ScopeSummary } from "../api/types";
 import { defaultBrand, ShellExtensionContext } from "../shell/extension";
@@ -327,6 +328,7 @@ const lookupName = "Routes that send traffic here";
 
 it("a Backend YAML view links to Routes filtered by backend=gateway.kgateway.dev/Backend/ns/name", async () => {
   stubApi({
+    "/api/v1/meta": metaGolden.body,
     "/api/v1/installs/kgw.kgateway/resources/gateway.kgateway.dev/Backend/shop/be1": {
       apiVersion: "gateway.kgateway.dev/v1alpha1",
       kind: "Backend",
@@ -341,6 +343,44 @@ it("a Backend YAML view links to Routes filtered by backend=gateway.kgateway.dev
   expect(url.searchParams.getAll("backend")).toEqual(["gateway.kgateway.dev/Backend/shop/be1"]);
   // PF26: the link has hover, active and focus-visible styles.
   for (const pseudo of [":hover", ":active", ":focus-visible"]) expect(pseudoRules(link, pseudo).join("")).not.toBe("");
+});
+
+const servedKind = (group: string, kind: string, category: string) => ({
+  group,
+  kind,
+  category,
+  version: "v1",
+  versions: ["v1"],
+  resource: `${kind.toLowerCase()}s`,
+  displayName: `${kind}s`,
+  namespaced: true,
+});
+
+it("the backend lookup and icon follow the /meta kind category, not the group", async () => {
+  // A downstream kind served as a backend gets both; a kgateway Backend served under another category gets neither.
+  stubApi({
+    "/api/v1/meta": {
+      ...metaGolden.body,
+      kinds: [servedKind("example.com", "Pool", "backend"), servedKind("gateway.kgateway.dev", "Backend", "policy")],
+    },
+    "/api/v1/installs/kgw.kgateway/resources/example.com/Pool/shop/p1": { kind: "Pool", metadata: { name: "p1" } },
+    "/api/v1/installs/kgw.kgateway/resources/gateway.kgateway.dev/Backend/shop/be1": {
+      kind: "Backend",
+      metadata: { name: "be1" },
+    },
+  });
+  const pool = resource("/i/kgw.kgateway/r/example.com/Pool/shop/p1");
+  const link = await screen.findByRole("link", { name: lookupName });
+  expect(new URL(link.getAttribute("href") ?? "", "http://ui").searchParams.getAll("backend")).toEqual([
+    "example.com/Pool/shop/p1",
+  ]);
+  expect(document.querySelector("[data-object-header] .lucide-server")).not.toBeNull();
+  pool.unmount();
+  resource("/i/kgw.kgateway/r/gateway.kgateway.dev/Backend/shop/be1");
+  await screen.findByText(/spec|be1/);
+  await waitFor(() => expect(screen.getAllByText("be1").length).toBeGreaterThan(0));
+  expect(screen.queryByRole("link", { name: lookupName })).toBeNull();
+  expect(document.querySelector("[data-object-header] .lucide-server")).toBeNull();
 });
 
 it("a Backend outside the install's scope offers no reverse lookup", async () => {

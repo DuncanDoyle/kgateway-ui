@@ -387,7 +387,7 @@ func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Mode
 	w := measure.New(t, tier, fc)
 	e := engine.New(engine.Config{Snapshots: staticSnap{w.Live.Cache.Snapshot()}, Served: testutil.ServedUpstream(),
 		Detectors: []install.Detector{install.UpstreamDetector{}}, Scope: install.NamespaceSelectorScope{},
-		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: w.Metrics, Collected: w.Store.Snapshot,
+		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Collected: w.Store.Snapshot,
 		Checks: health.Upstream(), Now: fc.Now})
 	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(current(e)) })
 	// Scrapes around testutil.Now, past every window and 5 min later, so windows, holds,
@@ -728,9 +728,9 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	}
 	ev := make(chan engine.LoopEvent, 1<<16)
 	cfg := engine.Config{Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
 		// Static metrics never go stale here, as a scraped cluster's do not.
-		Checks: health.Upstream(), MetricsMaxAge: 0,
+		Collected: served(okMetrics("kgw.kgateway"), 0, nil), Checks: health.Upstream(),
 		OnLoop: func(e engine.LoopEvent) {
 			select {
 			case ev <- e:
@@ -744,7 +744,7 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 		// The 3.2 measurement world on the real clock moved to its fixtures' time, its stats scraped every 10 s.
 		clk := measure.ShiftedTo(testutil.Now)
 		mw = measure.New(t, tier, clk)
-		w, cfg.Metrics, cfg.Collected, cfg.Clock = mw.Live, mw.Metrics, mw.Store.Snapshot, clk
+		w, cfg.Collected, cfg.Clock = mw.Live, mw.Store.Snapshot, clk
 	} else {
 		w = scale.Live(t, tier, nil)
 	}

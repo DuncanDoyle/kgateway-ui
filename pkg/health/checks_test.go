@@ -78,23 +78,25 @@ func (w *world) input(t *testing.T) Input {
 	}
 	in, _ := install.UpstreamDetector{}.Detect(w.ctrl)
 	in.Pods = w.pods
-	res := install.Resolved{Install: in, Scope: install.ParseSelectors(w.scope)}
+	res := install.Resolved{Install: in, Scope: install.ParseSelectors(w.scope), ExperimentalOnly: install.UpstreamExperimentalOnly}
 	if w.fromPod {
 		res.Scope = install.NamespaceSelectorScope{}.Scope(in)
 	}
 	a := install.Assign(snap, served, []install.Resolved{res}, nil)
 	hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
-		MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, Platform: w.platform}
-	if w.metrics != nil {
-		hi.Metrics, hi.HasMetrics = *w.metrics, true
-	}
+		Verify: scopeverify.Result{Available: true}, Platform: w.platform}
 	hi.FirstSeen, hi.Computed = w.firstSeen, w.computed
 	return hi
 }
 
 func (w *world) report(t *testing.T) Report {
 	t.Helper()
-	return Evaluate(w.input(t), Upstream(), Runtime{})
+	return Evaluate(w.input(t), Upstream(), w.runtime(Runtime{}))
+}
+
+// runtime is rt with w's controller metrics for its install.
+func (w *world) runtime(rt Runtime) Runtime {
+	return withMetrics(rt, "kgw.kgateway", w.metrics, testMaxAge)
 }
 
 // has reports whether r has a finding with code on res; an empty sev or res matches any.
@@ -517,9 +519,9 @@ func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
 	a := install.Assign(snap, served, insts, nil)
 	for _, res := range insts {
 		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
-			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
-			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}}
-		r := Evaluate(hi, Upstream(), Runtime{})
+			Verify: scopeverify.Result{Available: true}}
+		met := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
+		r := Evaluate(hi, Upstream(), withMetrics(Runtime{}, res.ID(), &met, testMaxAge))
 		if r.State != StateHealthy || len(r.Findings) != 0 {
 			t.Fatalf("%s: state=%s findings=%+v", res.ID(), r.State, r.Findings)
 		}
@@ -743,5 +745,46 @@ func TestReadinessWordingFollowsWorkloads(t *testing.T) {
 				t.Fatalf("want %q and %q, got %q and %q", tc.ctrl, tc.prox, got[CodeControllerNotReady], got[CodeProxyNotReady])
 			}
 		})
+	}
+}
+
+// Core and Kgateway split Upstream: together they hold every check once, and
+// each half is in a valid order on its own.
+func TestCoreAndKgatewaySplitUpstream(t *testing.T) {
+	names := func(cs []Check) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range cs {
+			out[c.Name()] = true
+		}
+		return out
+	}
+	core, kgw := Core(), Kgateway()
+	for n := range names(kgw) {
+		if names(core)[n] {
+			t.Errorf("check %q is in both halves", n)
+		}
+	}
+	if !reflect.DeepEqual(names(append(core, kgw...)), names(Upstream())) || len(core)+len(kgw) != len(Upstream()) {
+		t.Fatal("Core and Kgateway together must be Upstream")
+	}
+	for _, cs := range [][]Check{core, append(core, kgw...)} {
+		if err := ValidateOrder(cs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, want := range []string{"xDS rejects", "scope matches controller", "computed views", "withheld config", skewCheckName} {
+		if !names(kgw)[want] {
+			t.Errorf("%q must be a kgateway check", want)
+		}
+	}
+}
+
+// An assumed scope is OK and says why it is assumed (Phase 5 design §5.3).
+func TestScopeCheckAssumed(t *testing.T) {
+	in := healthyWorld().input(t)
+	in.Install.Scope = install.Scope{Mode: install.ScopeAll, Source: install.SourceAssumed}
+	_, r := scopeCheck{}.Run(RunContext{Input: in})
+	if !r.OK || r.Detail != "Scope assumed: all namespaces. Snellius cannot read this controller's discovery settings" {
+		t.Fatalf("assumed scope: %+v", r)
 	}
 }

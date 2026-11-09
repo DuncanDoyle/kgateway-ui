@@ -35,6 +35,7 @@ helm install ui ./deploy/helm/snellius -n snellius --create-namespace \
 | `image.tag` | `""` | Image tag; defaults to the chart `appVersion`. Required for a local-path install. |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `install.pin` | `""` | Pin the UI to one controller install: an install ID (e.g. `kgw.kgateway`) or `namespace/name`. Empty shows all installs. |
+| `installs.classOnly` | `false` | Also show one install per GatewayClass `controllerName` that no detector recognises, from Gateway API status alone. |
 | `delegation.edgeCap` | `0` | Selected delegation edges computed per install, passed as `--delegation-edge-cap`; `0` keeps the binary's default (10000). A higher cap needs a higher `resources.limits.memory`. |
 | `diagnostics.events` | `true` | Watch Warning Events for controller and proxy Pods. Off drops the `events` rule; checks that need it report "not available". |
 | `diagnostics.crds` | `true` | Watch Gateway API CRD metadata (bundle version and channel). Off drops the `customresourcedefinitions` rule. |

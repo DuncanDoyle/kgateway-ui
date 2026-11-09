@@ -18,6 +18,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },

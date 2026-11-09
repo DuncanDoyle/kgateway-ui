@@ -242,6 +242,9 @@
         ]
       }
     ],
+    "packs": [
+      "kgateway"
+    ],
     "platform": "Test",
     "synced": true,
     "version": "<build version>",

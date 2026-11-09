@@ -15,7 +15,7 @@ import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
 import { TrailRefsProvider, useReportTrailRefs, useTrailRefsCollector } from "../../shell/Breadcrumbs";
-import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
+import { Slot, useShownDetailTabs, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
 import { DetailColumns, layout, useTwoColumns } from "../../shell/layout";
 import { OBJECT_HEADER_H, ObjectHeader } from "../../shell/ObjectHeader";
@@ -81,8 +81,8 @@ const TABS = [
   { id: "overview", label: detailCopy.overview },
   { id: "yaml", label: detailCopy.yaml },
 ];
-// Page tab ids are reserved even where a page omits its tab, so a contribution never takes one over.
-const CORE_TAB_IDS = [...TABS.map((t) => t.id), "delegation"];
+// Core tab ids are reserved, so a contribution never takes one over.
+const CORE_TAB_IDS = TABS.map((t) => t.id);
 
 /** A page's own tab after Overview and YAML, e.g. the route's Delegation tab (`?tab=delegation`). */
 export interface ExtraTab {
@@ -134,17 +134,17 @@ export function DetailFrame({
   const vocab = useVocabulary();
   const [params, update] = useUrlParams();
   const coreIds = useMemo(() => [...CORE_TAB_IDS, ...(extraTabs ?? []).map((t) => t.id)], [extraTabs]);
-  const contributed = useDetailTabContributions(refValue, coreIds);
+  const asked = params.get("tab");
+  const contributed = useShownDetailTabs(installId, refValue, data, coreIds, asked);
   const sections = useSideSectionContributions(refValue);
   const tabs = useMemo(
     () => [...TABS, ...[...(extraTabs ?? []), ...contributed].map(({ id, label }) => ({ id, label }))],
     [extraTabs, contributed],
   );
-  const asked = params.get("tab");
   const tab = tabs.find((t) => t.id === asked)?.id ?? "overview";
   const extra = extraTabs?.find((t) => t.id === tab);
   const own = contributed.find((t) => t.id === tab);
-  const ctx = { installId, ref: refValue };
+  const ctx = { installId, ref: refValue, detail: data };
   const sideId = useId();
   const objectKey = `${installId}|${refParam(refValue)}`;
   const errorTitle = listCopy.cannotLoad(noun);

@@ -9,7 +9,13 @@ import { pseudoRules, renderWithTheme } from "../test/render";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
 import { ComputedBadge, computedTooltip, joinSentences } from "./ComputedBadge";
 
-const base: Computed = { by: "ui", rules: "kgateway-2.4", rule: "hostname-intersection", state: "checked" };
+const base: Computed = {
+  by: "ui",
+  rules: "kgateway-2.4",
+  label: "kgateway 2.4",
+  rule: "hostname-intersection",
+  state: "checked",
+};
 const tip = "Computed by the UI from kgateway 2.4's attachment rules: hostname intersection";
 const badge = () => screen.getByTestId("computed-badge");
 const icons = () =>
@@ -106,8 +112,18 @@ it("names the listener-count rule and falls back to the raw ids for unknown rule
   expect(computedTooltip({ ...base, rule: "listener-count" })).toBe(
     "Computed by the UI from kgateway 2.4's attachment rules: routes per listener",
   );
-  expect(computedTooltip({ ...base, rules: "other", rule: "x-rule" })).toBe(
+  expect(computedTooltip({ ...base, rules: "other", label: "other", rule: "x-rule" })).toBe(
     "Computed by the UI from other's rules: x-rule",
+  );
+});
+
+it("names the rule set by the server's label; an ID without one is shown as sent", () => {
+  expect(computedTooltip({ ...base, rules: "acme-7", label: "Acme 7" })).toBe(
+    "Computed by the UI from Acme 7's attachment rules: hostname intersection",
+  );
+  const { label: _, ...unlabelled } = base;
+  expect(computedTooltip(unlabelled)).toBe(
+    "Computed by the UI from kgateway-2.4's attachment rules: hostname intersection",
   );
 });
 

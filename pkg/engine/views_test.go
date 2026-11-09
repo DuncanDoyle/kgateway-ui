@@ -27,7 +27,7 @@ func resolved(id, version string, scope install.Scope, pod *corev1.Pod, controll
 	if pod != nil {
 		in.Pods = []*corev1.Pod{pod}
 	}
-	return install.Resolved{Install: in, Scope: scope, Settings: install.ReadSettings(in)}
+	return install.Resolved{Install: in, Scope: scope, Settings: install.ReadSettings(in), ExperimentalOnly: install.UpstreamExperimentalOnly}
 }
 
 // viewSnapshot is a synced snapshot of objs with readable Namespaces nss.
@@ -212,6 +212,27 @@ func TestRuleSetFromBaseVersion(t *testing.T) {
 		in := attachmentInput(m.Resolved, m.Owned, snap, testutil.ServedUpstream(), newDecodeCache())
 		if len(in.Routes) != 2 || in.Routes[1].ExperimentalOnly != tc.tcpExp {
 			t.Errorf("base %q: TCPRoute experimental-only %+v, want %v", tc.base, in.Routes, tc.tcpExp)
+		}
+	}
+}
+
+// The experimental classification is the install's pack hook: an install
+// without one gets no experimental-only kind, at any controller version.
+func TestAttachmentInputExperimentalPerInstall(t *testing.T) {
+	ref := testutil.GwRef("infra", "a")
+	listener := []objects.Listener{{Name: "tcp", Port: 9000, Protocol: "TCP", AllowedRoutes: objects.AllowedRoutes{Namespaces: objects.RouteNamespaces{From: "All"}}}}
+	snap := viewSnapshot(t, []*corev1.Namespace{testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)},
+		testutil.GatewayClass("class-a", testutil.Controller, true), testutil.GatewayWithListeners("infra", "a", "class-a", listener), tcpRoute("shop", "tcp", ref))
+	served := testutil.ServedUpstream()
+	for _, never := range []bool{false, true} {
+		a := resolved("a", "v2.3.11", install.Scope{Mode: install.ScopeAll}, nil, testutil.Controller)
+		if never {
+			a.ExperimentalOnly = nil
+		}
+		asg := install.Assign(snap, served, []install.Resolved{a}, objects.Direct{})
+		in := attachmentInput(a, asg.PerInstall["a"], snap, served, newDecodeCache())
+		if len(in.Routes) != 1 || in.Routes[0].ExperimentalOnly == never {
+			t.Fatalf("hook marks none %v: routes %+v", never, in.Routes)
 		}
 	}
 }

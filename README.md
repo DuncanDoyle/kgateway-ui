@@ -58,6 +58,7 @@ Flags:
 - `--poll-interval`: maximum time between model recomputes, the safety timer (default 30s). The model recomputes on object, access, metrics and served-kind changes; `2s` restores the earlier fixed cadence as a floor.
 - `--metrics-interval`: controller metrics scrape interval (default 10s).
 - `--delegation-edge-cap`: selected delegation edges computed per install (default 10000; 0 keeps the default). Past the cap, parents read "too large to compute". A higher cap needs a higher memory limit.
+- `--class-only-installs`: also show one install per GatewayClass `controllerName` that no detector recognises, from Gateway API status alone (default off; chart value `installs.classOnly`).
 
 `make test`, `make lint` and `make e2e` run the Go tests, the linters and the kind end-to-end suite. `make help` lists all targets.
 
@@ -159,11 +160,13 @@ A one-shot caller, such as a CLI or a test, builds its own configuration with `p
 The frontend renders `Shell` from `@snellius/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
-import { defaultPages, renderWhenFontsReady, Shell, type ShellExtension } from "@snellius/shell";
+import { defaultPages, kgatewayWebPack, renderWhenFontsReady, Shell, type ShellExtension } from "@snellius/shell";
 
 const acme: ShellExtension = {
   // Product identity in the header
   brand: { productName: "acme", logo: null },
+  // The backend serves kgateway (extension.New): its copy and Delegation tab, shown where /meta lists the pack
+  packs: [kgatewayWebPack],
   // Render extra detail for findings from acme's own checks
   findingRenderers: { "ACME-": (f) => <span>{f.message}</span> },
   // Platform copy; entries left out keep the Kubernetes defaults
@@ -186,6 +189,17 @@ An app that embeds `Shell` must render it with `renderWhenFontsReady(root, eleme
 
 A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntries` and `findingsDocUrl`. "Learn more" on a finding links the release tag's [docs/findings.md](docs/findings.md) when `/api/v1/meta` reports a release version, else `main`; a build with its own version sets `findingsDocUrl` to its own copy. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing. `CorePages.DiagnosticsSection` replaces the install page's Needs attention and Processes block; it gets the install ID, the diagnostics and whether they are stale.
 
+### Packs and the core
+
+The backend is a Gateway API core plus implementation packs. A pack (`extension.Pack`) bundles one implementation's kinds, detectors, checks, collectors and per-install hooks (`extension.Impl`). The detector that claims an install picks its pack, and that pack's checks and hooks run only on its installs.
+
+- `extension.New(opts...)` is the core plus the kgateway pack; `app.Run` uses it. The `With…` options above set the kgateway pack's hooks.
+- `extension.NewCore(opts...)` is the core alone: Gateway API kinds, the core checks and no detectors. `extension.WithPack` adds a pack, which must bring every hook it needs. Serve a registry with `app.RunWith(ctx, kubeconfig, opts, reg)`.
+- `cmd/snellius-core` serves the core alone, with class-only installs on. `make build-core` and `make image-core` build it.
+- `go test -tags compat ./test/compat/...` smoke-tests a running core-only build against any controller; [its Go doc](test/compat/compat.go) lists the `COMPAT_*` inputs. `web/e2e/compat.spec.ts` is its Playwright half.
+
+**Class-only installs.** A GatewayClass `controllerName` that no detector claims can become an install of its own. Its ID is the controller name with each byte outside `A-Z a-z 0-9 . -` written as `~` and two hex digits: `example.com/gateway` becomes `example.com~2Fgateway`. It is read from Gateway API status alone. Its scope is all namespaces, assumed, and only the core checks run. It has no version, computed views, delegation, data plane or processes. The default binary shows class-only installs only with `--class-only-installs` (chart value `installs.classOnly`, off by default).
+
 ## Upgrading from kgateway-ui
 
 Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new names. v0.4.0 stays available under the old names. The UI holds no state, so a reinstall is cheap.
@@ -201,6 +215,83 @@ Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new n
 Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v1 and the finding anchors do not change.
 
 ## Upgrade notes
+
+### v0.6.0: generic Gateway API core (Phase 5)
+
+Nothing changes in the UI or API v1 for kgateway installs. Go callers meet two deliberate breaks: controller metrics leave `engine.Config` and `health.Input`, and `computed.Rules` loses `Delegation`. Both are below.
+
+#### Additions
+
+- `extension.NewCore`, `extension.WithPack`, `extension.Pack` and `extension.Impl`, and `app.RunWith` ([Packs and the core](#packs-and-the-core)). `extension.New` keeps its meaning: the core plus the kgateway pack.
+- Class-only installs, behind `--class-only-installs` and the chart value `installs.classOnly` (off by default).
+- API v1, additive: `features` on each install, `packs` in `/api/v1/meta`, and `label` and `ruleSetLabel` beside a computed fact's rule set.
+- The legacy `With…` options set the default pack's hooks. A pack added with `WithPack` must bring the hooks it needs.
+
+#### Frontend: register the kgateway web pack
+
+The Delegation tab and the kgateway copy (such as "No kgateway install found") moved out of the shell's defaults into `kgatewayWebPack`. A downstream app whose backend serves kgateway adds it, or its route pages lose the Delegation tab and `?tab=delegation` opens Overview:
+
+```tsx
+import { kgatewayWebPack, type ShellExtension } from "@snellius/shell";
+
+const acme: ShellExtension = {
+  // Shown where /api/v1/meta lists the "kgateway" pack; an older server runs every pack
+  packs: [kgatewayWebPack],
+};
+```
+
+Each install's surfaces now follow its `features` from `/api/v1/installs`: the Delegation tab needs `delegation`, computed badges `computed`, the data plane and Processes sections `dataplane` and `processes`.
+
+#### Controller metrics on the collector seam
+
+Controller metrics are now a value of the kgateway pack's `controller-metrics` collector, under `ctrlmetrics.Key`. Checks, the scope verifier and the reported version read them from the collected values only.
+
+For downstream builds and one-shot callers, these names are removed:
+
+| Removed | Use instead |
+|---|---|
+| `engine.Config.Metrics`, `ctrlmetrics.Static`, `ctrlmetrics.Source` | `ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(…))`, with `setup.Config.Collected` |
+| `engine.Config.MetricsMaxAge` | `ctrlmetrics.Results.MaxAge`, set by `CollectOnce` and the collector |
+| `engine.Model.MetricsRead`, `engine.MetricsRead` | `Model.Collected` and `ctrlmetrics.Lookup` |
+| `engine.Source.Metrics` | `Source.Collected` |
+| `health.Input.Metrics`, `HasMetrics`, `MetricsMaxAge`; `InputSet.Metrics` | declare `ctrlmetrics.Key` in `Inputs().Collected`, then `ctrlmetrics.Lookup` on `ctx.Collected(ctrlmetrics.Key)` |
+| `scopeverify.Input.Metrics`, `HasMetrics`, `MetricsMaxAge` | `scopeverify.Input.Collected` |
+| `ctrlmetrics.Collector.Get`, `Collector.OnResult` | `Collector.Run` takes a publish function; the store notifies |
+
+- `health.AllInputs()` no longer declares metrics.
+- A pack's checks run only on the installs it claimed; a class-only install runs the core checks. `WithChecks` adds checks to the default pack, kgateway in `extension.New`. `Registry.ChecksFor` lists an install's checks.
+- `extension.Impl` gains `Reported` (the version the controller reports) and `Conditions` (route condition types beyond Gateway API's). A pack without `RulesFor` gives its installs no rule set: no computed views and no delegation.
+- The pack's collector names, `controller-metrics`, `proxy-stats` and `controller-logs`, stay reserved. `WithCollectors` cannot take them.
+- A one-shot caller collects once. The `ctrlmetrics` Go doc has the full sequence:
+
+```go
+// After setup.Build, a settled cache and one Snapshot (see the setup Go doc)
+insts, _ := install.Discover(snap, reg.Detectors)
+insts = slices.DeleteFunc(insts, func(i install.Install) bool { return i.Impl != "kgateway" })
+ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, ctrlmetrics.PodProxyScraper{Kube: kube}, insts, setup.MetricsMaxAge(interval)))
+// Compute over that same snapshot
+cfg.Engine.Snapshots = fixedSnapshot{snap}
+model := engine.New(cfg.Engine).Compute()
+```
+
+#### Delegation as an optional rule set capability
+
+For Go callers:
+
+- `computed.Rules` no longer has `Delegation`. Views B and C come from the optional `computed.Delegator`. A caller that holds a `computed.Rules` asserts it first, or uses `Selection.Delegator()`, which is nil without one:
+
+```go
+// Before: res := rules.Delegation(in)
+var res computed.DelegationResult
+if d, ok := rules.(computed.Delegator); ok {
+	res = d.Delegation(in)
+}
+```
+
+- A rule set without `Delegator` keeps view A, its cross-check and KGWUI-012. It has no views B and C, no KGWUI-011, and `GET …/delegation` answers 404. A backendRef to an HTTPRoute is then an ordinary ref, and `install.Resolved.NoDelegation` is set.
+- A class-only install never has a rule set, whatever its hooks: status attachment only, no computed facts.
+- A rule set that wraps a kgateway set must forward `Delegation` to keep delegation, as it forwards `ReportsTargetNotFound`.
+- View A is shared in `pkg/computed/viewa`; `viewa.Attach` takes the set's route kinds per listener protocol.
 
 ### v0.5.1 (sub-phase 4.3)
 

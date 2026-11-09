@@ -22,6 +22,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -34,6 +35,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -94,6 +96,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -106,6 +109,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"

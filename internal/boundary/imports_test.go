@@ -34,6 +34,7 @@ var allowed = map[string]string{
 	"pkg/cache/services.go":         "Services and EndpointSlices, cut down at the informer",
 	"pkg/ctrllogs/stream.go":        "follows controller Pod logs",
 	"pkg/ctrlmetrics/scrape.go":     "scrapes controller Pods",
+	"pkg/extension/pack.go":         "wraps detectors, which detect controller Deployments; gives pack collectors the client",
 	"pkg/health/checks.go":          "controller and proxy Deployment readiness",
 	"pkg/install/assign.go":         "Namespace objects for scope",
 	"pkg/install/install.go":        "Install carries the controller Deployment and Pods",
@@ -49,6 +50,12 @@ var allowed = map[string]string{
 // allow that use a forbidden import or the discovery client; stale lists
 // allow entries that no longer need to be there.
 func violations(root string, allow map[string]string) (bad, stale []string, err error) {
+	return walk(root, allow, func(rel string, f *ast.File) []string { return offending(f, strings.HasPrefix(rel, "pkg/kinds/")) })
+}
+
+// walk runs check on each non-test Go file under root. bad lists the files
+// outside allow it reports; stale lists allow entries it no longer reports.
+func walk(root string, allow map[string]string, check func(rel string, f *ast.File) []string) (bad, stale []string, err error) {
 	used := map[string]bool{}
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -69,7 +76,7 @@ func violations(root string, allow map[string]string) (bad, stale []string, err 
 		if err != nil {
 			return err
 		}
-		uses := offending(f, strings.HasPrefix(rel, "pkg/kinds/"))
+		uses := check(rel, f)
 		if len(uses) == 0 {
 			return nil
 		}
@@ -164,6 +171,106 @@ func TestBoundaryCheckCatchesViolations(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := []string{"pkg/core/disc.go: kinds.DiscoveryClient", "pkg/core/new.go: k8s.io/api/core/v1"}; !slices.Equal(bad, want) {
+		t.Errorf("bad: got %q, want %q", bad, want)
+	}
+	if !slices.Equal(stale, []string{"pkg/gone.go"}) {
+		t.Errorf("stale: got %q", stale)
+	}
+}
+
+const module = "github.com/DuncanDoyle/snellius/"
+
+// packPkgs are the kgateway pack's packages (Phase 5 design §4.1); a "/" suffix
+// names a prefix.
+var packPkgs = []string{"pkg/kgateway", "pkg/ctrlmetrics", "pkg/ctrllogs", "pkg/proxystats", "pkg/scopeverify", "pkg/proxymode",
+	"pkg/computed/rulesets", "pkg/computed/kgw/"}
+
+// inPack reports whether path, relative to the module, is in a pack package.
+func inPack(path string) bool {
+	return slices.ContainsFunc(packPkgs, func(p string) bool {
+		if prefix, ok := strings.CutSuffix(p, "/"); ok {
+			return strings.HasPrefix(path, prefix)
+		}
+		return path == p || strings.HasPrefix(path, p+"/")
+	})
+}
+
+// packAllowed are the core files that import a pack package, with the reason.
+// It only shrinks; a new entry needs a reviewed reason.
+var packAllowed = map[string]string{
+	"pkg/api/details.go":         "the Gateway data plane detail reads the controller metrics entry (§7.2); the Gateway CRD feature table",
+	"pkg/app/app.go":             "wiring: runs the pack collectors and reports their capabilities",
+	"pkg/engine/engine.go":       "compatibility surface (§11): Config's verifier, proxy mode and kgateway defaults without HooksFor",
+	"pkg/engine/memo.go":         "prints the scope verification result in health.Input (§11)",
+	"pkg/extension/extension.go": "wiring: the Registry hook fields and options (§11)",
+	"pkg/extension/kgateway.go":  "wiring: builds the kgateway pack's collectors",
+	"pkg/extension/pack.go":      "wiring: assembles the kgateway pack",
+	"pkg/health/checks.go":       "the proxy check's self-managed KGWUI-010 and its optional deployer-error enrichment",
+	"pkg/health/finding.go":      "compatibility surface (§11): health.Input's proxy mode and scope verification",
+	"pkg/health/process.go":      "the restart and rollout checks' optional controller-log enrichment (§6)",
+	"pkg/health/proxystats.go":   "pack checks housed in pkg/health: KGWUI-025 and 026",
+	"pkg/health/withheld.go":     "pack checks housed in pkg/health: KGWUI-024",
+	"pkg/health/xds.go":          "pack checks housed in pkg/health: KGWUI-001",
+	"pkg/setup/setup.go":         "wiring: the kgateway pack's interval-sized scope verifier",
+}
+
+// packImports lists the pack packages a core file under pkg/ imports.
+func packImports(rel string, f *ast.File) []string {
+	if !strings.HasPrefix(rel, "pkg/") || inPack(filepath.ToSlash(filepath.Dir(rel))) {
+		return nil
+	}
+	var out []string
+	for _, imp := range f.Imports {
+		p, _ := strconv.Unquote(imp.Path.Value)
+		if rest, ok := strings.CutPrefix(p, module); ok && inPack(rest) {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
+// Core code names no kgateway-pack package unless its file is listed with a
+// reason (Phase 5 design §13): wiring, the compatibility surface, or a pack
+// check still housed in pkg/health.
+func TestCoreImportsNoPackPackage(t *testing.T) {
+	bad, stale, err := walk(filepath.Join("..", ".."), packAllowed, packImports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range bad {
+		t.Errorf("%s\n\tcore code must not import a kgateway-pack package; move the use into the pack, or add a reviewed packAllowed entry", b)
+	}
+	for _, s := range stale {
+		t.Errorf("%s no longer imports a pack package; remove its packAllowed entry (the list only shrinks)", s)
+	}
+}
+
+// The pack check catches a core import, ignores pack packages, test files and
+// code outside pkg/, and reports a stale entry.
+func TestPackBoundaryCatchesViolations(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, src string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	imp := func(pkg, path string) string { return "package " + pkg + "\n\nimport _ \"" + module + path + "\"\n" }
+	write("pkg/core/a.go", imp("core", "pkg/kgateway"))
+	write("pkg/core/b.go", imp("core", "pkg/computed/kgw24"))
+	write("pkg/core/c_test.go", imp("core", "pkg/ctrlmetrics"))
+	write("pkg/core/d.go", imp("core", "pkg/computed/viewa"))
+	write("pkg/ctrllogs/e.go", imp("ctrllogs", "pkg/ctrlmetrics"))
+	write("pkg/computed/kgw99/f.go", imp("kgw99", "pkg/computed/rulesets"))
+	write("cmd/x/main.go", imp("main", "pkg/kgateway"))
+	bad, stale, err := walk(root, map[string]string{"pkg/gone.go": "removed"}, packImports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"pkg/core/a.go: pkg/kgateway", "pkg/core/b.go: pkg/computed/kgw24"}; !slices.Equal(bad, want) {
 		t.Errorf("bad: got %q, want %q", bad, want)
 	}
 	if !slices.Equal(stale, []string{"pkg/gone.go"}) {

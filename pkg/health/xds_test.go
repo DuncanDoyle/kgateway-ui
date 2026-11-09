@@ -72,9 +72,9 @@ func xdsAt(t *testing.T, w *world, st *States, now time.Time) Report {
 	in := processInput(t, w)
 	in.Now = now
 	if w.metrics != nil {
-		in.Metrics.CollectedAt = now
+		w.metrics.CollectedAt = now
 	}
-	return Evaluate(in, Upstream(), Runtime{States: st})
+	return Evaluate(in, Upstream(), withMetrics(Runtime{States: st}, in.Install.ID(), w.metrics, 0))
 }
 
 func xdsOn(r Report, gw string) *Finding {

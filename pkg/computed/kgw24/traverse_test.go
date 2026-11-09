@@ -101,7 +101,9 @@ func world(bs ...*hr) computed.DelegationInput {
 	return in
 }
 
-func delegate(in computed.DelegationInput) computed.DelegationResult { return New().Delegation(in) }
+func delegate(in computed.DelegationInput) computed.DelegationResult {
+	return New().(computed.Delegator).Delegation(in)
+}
 
 // row finds a row or fails.
 func row(t *testing.T, res computed.DelegationResult, p *hr, rule, ref int, c *hr) computed.Row {
@@ -738,11 +740,11 @@ func inputOf(tb testing.TB, objs []*unstructured.Unstructured) computed.Delegati
 
 func benchmarkDelegation(b *testing.B, t scale.Tier) {
 	in := delegationInput(b, t)
-	res := New().Delegation(in)
+	res := New().(computed.Delegator).Delegation(in)
 	b.ReportMetric(float64(len(res.Rows)), "rows")
 	b.ReportAllocs()
 	for b.Loop() {
-		New().Delegation(in)
+		New().(computed.Delegator).Delegation(in)
 	}
 }
 

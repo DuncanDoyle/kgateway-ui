@@ -20,6 +20,7 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
@@ -152,26 +153,28 @@ func TestHTTPScraperEmptyPodIPIsError(t *testing.T) {
 }
 
 func TestRunRejectsNonPositiveInterval(t *testing.T) {
-	if err := NewCollector(fakeScraper{}).Run(context.Background(), 0, nil); err == nil {
+	if err := NewCollector(fakeScraper{}).Run(context.Background(), 0, nil, nil); err == nil {
 		t.Fatal("want error for a zero interval")
 	}
 }
 
 // Run scrapes installs concurrently, so one hung install does not starve the
-// other, while Get is called concurrently (run with -race).
-func TestRunConcurrentWithGet(t *testing.T) {
+// other, while the store is read concurrently (run with -race).
+func TestRunConcurrentWithReads(t *testing.T) {
 	d := testutil.ControllerDeployment("kgw", "kgateway", "kgateway:v2.4.7", 1, 1)
 	good := install.Install{Namespace: "kgw", Name: "good", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
 	hung := install.Install{Namespace: "kgw", Name: "hung", Pods: testutil.PodList(testutil.ControllerPod(d, "h", true)), MetricsPort: 9092}
 	c := NewCollector(blockingScraper{"a": sample})
+	store := collect.New(nil, time.Now)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
 	go func() {
-		done <- c.Run(ctx, 40*time.Millisecond, func() []install.Install { return []install.Install{hung, good} })
+		done <- c.Run(ctx, 40*time.Millisecond, func() []install.Install { return []install.Install{hung, good} }, publishTo(store))
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if r, ok := c.Get("kgw.good"); ok && r.Err == "" {
+		v, _ := store.Snapshot().Get(Key)
+		if r, _, ok := Lookup(v, "kgw.good"); ok && r.Err == "" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -210,9 +213,17 @@ type stored struct {
 	notified bool
 }
 
+// publishTo publishes the collector's values to store under the collector's name.
+func publishTo(store *collect.Store) func(key string, v any, fp uint64, ttl time.Duration) {
+	return func(key string, v any, fp uint64, ttl time.Duration) {
+		store.Publish(CollectorName+"/"+key, v, fp, ttl)
+	}
+}
+
 // runHooked runs a collector of body every 10 s on a fake clock with max age
-// maxAge; each result's decision arrives on the returned channel.
-func runHooked(t *testing.T, body *atomic.Pointer[string], maxAge time.Duration) (*Collector, *clocktesting.FakeClock, <-chan stored) {
+// maxAge, publishing to a store that notifies the returned signal; each
+// result's decision arrives on the returned channel.
+func runHooked(t *testing.T, body *atomic.Pointer[string], maxAge time.Duration) (*trigger.Signal, *clocktesting.FakeClock, <-chan stored) {
 	t.Helper()
 	d := testutil.ControllerDeployment("kgw", "kgateway", "kgateway:v2.4.7", 1, 1)
 	in := install.Install{Namespace: "kgw", Name: "kgateway", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
@@ -220,17 +231,20 @@ func runHooked(t *testing.T, body *atomic.Pointer[string], maxAge time.Duration)
 	clk := testutil.FakeClock()
 	c := NewCollector(scraperFunc(func() string { return *body.Load() }), WithClock(clk), WithMaxAge(maxAge),
 		WithResultHook(func(_ string, r Result, notified bool) { acks <- stored{r, notified} }))
-	c.OnResult = trigger.New()
+	sig := trigger.New()
+	store := collect.New(sig, clk.Now)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- c.Run(ctx, 10*time.Second, func() []install.Install { return []install.Install{in} }) }()
+	go func() {
+		done <- c.Run(ctx, 10*time.Second, func() []install.Install { return []install.Install{in} }, publishTo(store))
+	}()
 	t.Cleanup(func() {
 		cancel()
 		if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
 			t.Error(err)
 		}
 	})
-	return c, clk, acks
+	return sig, clk, acks
 }
 
 // ack receives the next decision and checks it was collected at at.
@@ -248,11 +262,11 @@ func ack(t *testing.T, acks <-chan stored, at time.Time) stored {
 func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	var body atomic.Pointer[string]
 	body.Store(new(sample))
-	c, clk, acks := runHooked(t, &body, time.Hour)
+	sig, clk, acks := runHooked(t, &body, time.Hour)
 	if s := ack(t, acks, clk.Now()); !s.notified {
 		t.Fatal("the first result must notify")
 	}
-	testutil.Recv(t, c.OnResult.C(), "the first notification")
+	testutil.Recv(t, sig.C(), "the first notification")
 	for range 2 {
 		clk.Step(10 * time.Second)
 		if s := ack(t, acks, clk.Now()); s.notified {
@@ -264,7 +278,7 @@ func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	if s := ack(t, acks, clk.Now()); !s.notified {
 		t.Fatal("changed content must notify")
 	}
-	testutil.Recv(t, c.OnResult.C(), "the notification for changed content")
+	testutil.Recv(t, sig.C(), "the notification for changed content")
 }
 
 // A scrape whose only change is status_syncs_total does not notify: no
@@ -277,9 +291,9 @@ func TestCollectorIgnoresStatusSyncsChange(t *testing.T) {
 	}
 	var body atomic.Pointer[string]
 	body.Store(syncs("2"))
-	c, clk, acks := runHooked(t, &body, time.Hour)
+	sig, clk, acks := runHooked(t, &body, time.Hour)
 	ack(t, acks, clk.Now())
-	testutil.Recv(t, c.OnResult.C(), "the first notification")
+	testutil.Recv(t, sig.C(), "the first notification")
 	body.Store(syncs("3"))
 	clk.Step(10 * time.Second)
 	if s := ack(t, acks, clk.Now()); s.notified {
@@ -291,16 +305,24 @@ func TestCollectorIgnoresStatusSyncsChange(t *testing.T) {
 func TestCollectorNotifiesAfterStaleResult(t *testing.T) {
 	var body atomic.Pointer[string]
 	body.Store(new(sample))
-	_, clk, acks := runHooked(t, &body, 15*time.Second)
+	sig, clk, acks := runHooked(t, &body, 15*time.Second)
 	ack(t, acks, clk.Now())
+	testutil.Recv(t, sig.C(), "the first notification")
 	clk.Step(10 * time.Second) // 10 s after the last: fresh
 	if s := ack(t, acks, clk.Now()); s.notified {
 		t.Fatal("a result after a fresh one with equal content must not notify")
+	}
+	select {
+	case <-sig.C():
+		t.Fatal("the store notified a result that only renews CollectedAt")
+	default:
 	}
 	clk.Step(20 * time.Second) // one delayed tick: 20 s > 15 s after the last
 	if s := ack(t, acks, clk.Now()); !s.notified {
 		t.Fatal("a result after a stale one must notify")
 	}
+	// Equal content: only the fingerprint's recovery count moves it, so the store notifies.
+	testutil.Recv(t, sig.C(), "the notification after a stale result")
 }
 
 // scraperFunc serves the body f returns.

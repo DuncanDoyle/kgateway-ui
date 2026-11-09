@@ -2,11 +2,13 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { type ComponentType, useMemo } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { useMeta } from "../api/hooks";
 import { AboutPage } from "../pages/AboutPage";
 import { defaultPages } from "../pages/defaultPages";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
+import { mergeContributions } from "./contributions";
 import { DocumentTitle } from "./DocumentTitle";
 import {
   type CorePages,
@@ -50,8 +52,16 @@ interface ShellProps {
 
 /** The application shell. Upstream and downstream apps render this with their own extension. */
 export function Shell({ extension = noExtension, pages, stylesOverride }: ShellProps) {
+  // The server's packs: undefined while /meta loads, null from an older server, which runs them all.
+  const { data: meta } = useMeta();
+  const served = meta ? (meta.packs?.join("\n") ?? null) : undefined;
   const ext = useMemo<ResolvedShellExtension>(() => {
     const themes = extension.themes ?? defaultThemes;
+    const names = served?.split("\n").filter(Boolean);
+    const packs = extension.packs ?? [];
+    // A pack's copy needs the server to list it; its contributions show unless the server leaves it out.
+    const on = packs.filter((p) => served === null || names?.includes(p.name));
+    const notOff = packs.filter((p) => served === undefined || served === null || names?.includes(p.name));
     return {
       brand: extension.brand ?? defaultBrand,
       themes,
@@ -59,11 +69,11 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       routes: extension.routes ?? [],
       navEntries: extension.navEntries ?? [],
       findingRenderers: extension.findingRenderers ?? {},
-      contributions: extension.contributions ?? {},
-      vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },
+      contributions: mergeContributions([...notOff.map((p) => p.contributions), extension.contributions]),
+      vocabulary: Object.assign({}, kubernetesVocabulary, ...on.map((p) => p.vocabulary), extension.vocabulary),
       findingsDocUrl: extension.findingsDocUrl,
     };
-  }, [extension]);
+  }, [extension, served]);
   // A contribution at or below a reserved path is ignored, with one warning, so it cannot shadow an explorer page.
   const contributed = useMemo(
     () =>

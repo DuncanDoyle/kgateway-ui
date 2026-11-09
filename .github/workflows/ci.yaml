@@ -103,6 +103,8 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: spa, path: internal/webui/dist }
       - run: go vet ./...
+      # The compat smoke test runs elsewhere (D-065); here it only has to compile.
+      - run: go vet -tags compat ./test/compat/...
       - uses: golangci/golangci-lint-action@v9
         with: { version: v2.15.0, args: --build-tags e2e }
       # Chart tests run once, in the helm job.
@@ -136,3 +138,29 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The core-only build (cmd/snellius-core), for the compat smoke test.
+      - run: make image-core
+  kgwctl:
+    # Reports whether kgwctl main compiles against this tree; it never blocks a merge (Phase 5 design §13).
+    name: kgwctl compile (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with: { path: snellius }
+      - uses: actions/checkout@v7
+        with: { repository: DuncanDoyle/kgwctl, path: kgwctl, persist-credentials: false }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: snellius/go.mod, cache: false }
+      - name: build and vet kgwctl through a go.work
+        working-directory: kgwctl
+        run: |
+          # A kgwctl still on the module's old path gets the rename, so the check tests the API alone.
+          old=github.com/DuncanDoyle/kgateway-ui
+          if grep -q "$old" go.mod; then
+            grep -rl --include='*.go' "$old" . | xargs -r sed -i "s#$old#github.com/DuncanDoyle/snellius#g"
+            go mod edit -droprequire "$old"
+          fi
+          go work init . ../snellius
+          go build ./...
+          go vet ./...

@@ -3,10 +3,12 @@ import styled from "@emotion/styled";
 import { Calculator, Clock, Lock, type LucideIcon, Minus } from "lucide-react";
 import { type ReactNode, useContext } from "react";
 import type { Computed } from "../api/exploreTypes";
+import { useInstallFeature } from "../api/hooks";
 import { computedCopy } from "../copy/explorer";
 import { HealthIcon } from "../health/HealthIcon";
 import { StaleView } from "../health/staleView";
 import { stateLabel } from "../health/state";
+import { useInstallId } from "../shell/extension";
 import { Tooltip } from "../shell/Tooltip";
 import type { HealthState } from "../theme/tokens";
 
@@ -79,22 +81,21 @@ const Note = styled.span`
 // View A's rules (rules §4); other views name their own family when they arrive.
 const attachmentRules = new Set(["allowed-routes", "section-and-port", "hostname-intersection", "listener-count"]);
 
-/** "kgateway-2.4" reads "kgateway 2.4"; any other id is shown as sent. */
-function ruleSetLabel(rules: string): string {
-  const m = /^kgateway-(\d+\.\d+)$/.exec(rules);
-  return m ? `kgateway ${m[1]}` : rules;
-}
-
 /** The chip's tooltip: which rule of which rule set computed the fact (design §8.4); a restricted fact names none. */
 export function computedTooltip(c: Computed): string {
   if (c.state === "restricted" || c.rule === undefined) return computedCopy.restricted;
   const family = attachmentRules.has(c.rule) ? computedCopy.attachmentRules : computedCopy.otherRules;
-  return computedCopy.tooltip(ruleSetLabel(c.rules), family, computedCopy.ruleNames[c.rule] ?? c.rule);
+  return computedCopy.tooltip(c.label ?? c.rules, family, computedCopy.ruleNames[c.rule] ?? c.rule);
 }
 
 /** Parts as sentences ending in one period: a part's own trailing period is dropped, so the join never shows "..". */
 export function joinSentences(parts: string[]): string {
   return `${parts.map((p) => p.replace(/\.+$/, "")).join(". ")}.`;
+}
+
+/** False only where the install is known to have no computed views (design §10). */
+function useComputed(): boolean {
+  return useInstallFeature(useInstallId(), "computed") !== false;
 }
 
 function NeutralIcon({ glyph: Glyph, kind }: { glyph: LucideIcon; kind: string }) {
@@ -160,6 +161,7 @@ interface ComputedChipProps {
 
 /** The outlined "Computed" chip alone, e.g. in a column header whose cells are computed. */
 export function ComputedChip({ label }: ComputedChipProps) {
+  if (!useComputed()) return null;
   return (
     <Tooltip label={label} placement="start" wrap>
       {/* Focusable so keyboard users can read the tooltip. */}
@@ -217,6 +219,7 @@ interface ComputedBadgeProps {
 
 /** Marks a fact the UI computed: an outlined "Computed" chip whose tooltip names the rule, then its check state and note. */
 export function ComputedBadge({ computed, compact, chip = true, extra, stylesOverride }: ComputedBadgeProps) {
+  const shown = useComputed();
   const stale = useContext(StaleView);
   const all = stateItems(computed, stale);
   // Restricted carries no note on the wire; never show one even if sent (design §7.4).
@@ -232,6 +235,7 @@ export function ComputedBadge({ computed, compact, chip = true, extra, stylesOve
       <span data-text="">{s.text}</span>
     </Item>
   ));
+  if (!shown) return null;
   return (
     <Wrap data-testid="computed-badge" $compact={!!compact} $stylesOverride={stylesOverride}>
       {chip ? <ComputedChip label={full} /> : null}

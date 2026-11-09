@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -30,6 +31,13 @@ type handlerConfig struct {
 	capSources []func() []Capability
 	coreSource func() []Capability
 	commands   diagnose.Commands
+	// commandsFor, if set, gives an install's own commands.
+	commandsFor func(install.Install) diagnose.Commands
+	// featuresFor, if set, gives an install's pack features.
+	featuresFor func(install.Install) []string
+	// packs are the server's pack names; kindFor, if set, filters overview counts per install.
+	packs   []string
+	kindFor func(install.Install, objects.GroupKind) bool
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

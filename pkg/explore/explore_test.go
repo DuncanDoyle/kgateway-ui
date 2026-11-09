@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil/metricstest"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
@@ -87,8 +88,8 @@ func (w *world) input(t *testing.T) Input {
 	a := install.Assign(snap, served, []install.Resolved{res}, nil)
 	owned := a.PerInstall[res.ID()]
 	rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
-		Metrics:    ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}},
-		HasMetrics: true, MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, FirstSeen: w.firstSeen}, health.Upstream(), health.Runtime{})
+		Verify: scopeverify.Result{Available: true}, FirstSeen: w.firstSeen}, health.Upstream(),
+		health.Runtime{Collected: metricstest.Collected(testutil.Now, 30*time.Second, map[string]ctrlmetrics.Result{res.ID(): metricstest.Healthy(testutil.Now)})})
 	return Input{Install: res, Owned: owned, Assignment: a, Snapshot: snap, Served: served, Health: rep}
 }
 

@@ -15,17 +15,18 @@ import (
 )
 
 // computeViews runs sel's views A, B and C over one install, within bounds,
-// and cross-checks them. The checks' State, Mature and Since are left for
-// the persistence step. With m, a view whose input equals m's last one
-// reuses m's results; m is then updated.
+// and cross-checks them; B and C only when sel has a Delegator. The checks'
+// State, Mature and Since are left for the persistence step. With m, a view
+// whose input equals m's last one reuses m's results; m is then updated.
 func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, owned *install.Owned, snap *cache.Snapshot,
 	served []kinds.Served, dec objects.Decoder, bounds computed.Bounds,
 ) *computed.Views {
 	if m == nil {
 		m = &viewsMemo{}
 	}
-	same := m.set && m.rules == sel.Rules.Version() && m.note == sel.Note
-	m.set, m.rules, m.note = true, sel.Rules.Version(), sel.Note
+	dg := sel.Delegator()
+	same := m.set && m.rules == sel.Rules.Version() && m.note == sel.Note && m.delegates == (dg != nil)
+	m.set, m.rules, m.note, m.delegates = true, sel.Rules.Version(), sel.Note, dg != nil
 	in := attachmentInput(res, owned, snap, served, dec)
 	if !same || !reflect.DeepEqual(m.in, in) {
 		m.att = sel.Rules.Attachment(in)
@@ -33,15 +34,19 @@ func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, ow
 		same = false
 	}
 	m.in = in
-	din := delegationInput(res, owned, snap, served, dec, m.att)
-	din.Bounds = bounds
-	if !same || !reflect.DeepEqual(m.din, din) {
-		m.del = sel.Rules.Delegation(din)
-		// CheckDelegation also marks unconfirmable rows in m.del.
-		m.d = computed.CheckDelegation(res.ID(), sel, din, &m.del)
+	if dg == nil {
+		m.din, m.del, m.d = computed.DelegationInput{}, computed.DelegationResult{}, nil
+	} else {
+		din := delegationInput(res, owned, snap, served, dec, m.att)
+		din.Bounds = bounds
+		if !same || !reflect.DeepEqual(m.din, din) {
+			m.del = dg.Delegation(din)
+			// CheckDelegation also marks unconfirmable rows in m.del.
+			m.d = computed.CheckDelegation(res.ID(), sel, din, &m.del)
+		}
+		m.din = din
 	}
-	m.din = din
-	v := &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
+	v := &computed.Views{RuleSet: sel.Rules.Version(), Label: sel.Label(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
 	v.Checks = append(append(make([]computed.CheckResult, 0, len(m.a)+len(m.d)), m.a...), m.d...)
 	return v
 }
@@ -50,14 +55,14 @@ func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, ow
 // functions of their input, so an equal input reuses the results, which are
 // shared and read-only; Checks are copied, as persistence sets their state.
 type viewsMemo struct {
-	set         bool
-	rules, note string
-	in          computed.AttachmentInput
-	att         computed.AttachmentResult
-	a           []computed.CheckResult
-	din         computed.DelegationInput
-	del         computed.DelegationResult
-	d           []computed.CheckResult
+	set, delegates bool
+	rules, note    string
+	in             computed.AttachmentInput
+	att            computed.AttachmentResult
+	a              []computed.CheckResult
+	din            computed.DelegationInput
+	del            computed.DelegationResult
+	d              []computed.CheckResult
 }
 
 // httpRoutes maps the snapshot's HTTPRoutes by ref.
@@ -98,11 +103,10 @@ func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Sna
 			Listeners: v.Listeners, ListenerStatus: v.ListenerStatus, Acceptance: acceptance(u, v)})
 	}
 
-	// The experimental classification depends only on the kind and controller version.
-	ctrl := res.KgatewayVersion()
+	// The experimental classification depends only on the kind and the install.
 	exp := map[objects.GroupKind]bool{}
 	for _, k := range kinds.ByCategory(served, kinds.CategoryRoute) {
-		exp[objects.GroupKind{Group: k.Group, Kind: k.Kind}] = k.ExperimentalOnly(ctrl)
+		exp[objects.GroupKind{Group: k.Group, Kind: k.Kind}] = res.Experimental(k)
 	}
 	in.Routes = make([]computed.Route, 0, len(owned.Routes))
 	for _, r := range owned.Routes {

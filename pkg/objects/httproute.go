@@ -298,7 +298,11 @@ func delegation(r rawObjRef, ns string) *DelegationRef {
 // BackendTargets returns every non-delegation backendRef and every
 // RequestMirror target of v, in the order written. A delegation ref's
 // filters become policies on its children and send no traffic, so they are skipped.
-func BackendTargets(v *HTTPRouteView) []BackendTarget {
+func BackendTargets(v *HTTPRouteView) []BackendTarget { return BackendTargetsAs(v, true) }
+
+// BackendTargetsAs is BackendTargets for a controller that delegates or not.
+// Without delegation every backendRef is an ordinary target, filters included.
+func BackendTargetsAs(v *HTTPRouteView, delegates bool) []BackendTarget {
 	var out []BackendTarget
 	mirrors := func(fs []Filter) {
 		for _, f := range fs {
@@ -310,7 +314,7 @@ func BackendTargets(v *HTTPRouteView) []BackendTarget {
 	for _, r := range v.Rules {
 		mirrors(r.Filters)
 		for _, b := range r.BackendRefs {
-			if b.Delegation == nil {
+			if b.Delegation == nil || !delegates {
 				out = append(out, BackendTarget{Ref: b.Ref})
 				mirrors(b.Filters)
 			}

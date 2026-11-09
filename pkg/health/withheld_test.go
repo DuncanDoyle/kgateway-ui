@@ -26,9 +26,9 @@ func withheldAt(t *testing.T, w *world, st *States, now time.Time) Report {
 	in := w.input(t)
 	in.Now = now
 	if w.metrics != nil {
-		in.Metrics.CollectedAt = now
+		w.metrics.CollectedAt = now
 	}
-	return Evaluate(in, Upstream(), Runtime{States: st})
+	return Evaluate(in, Upstream(), w.runtime(Runtime{States: st}))
 }
 
 // withheldOn is the 024 finding of severity sev on Gateway infra/gw, or nil.
@@ -167,7 +167,7 @@ func TestWithheldMetricsFailing(t *testing.T) {
 	w := withheldWorld(t, "v2.5.0-withheld-synth")
 	in := w.input(t)
 	in.Now = testutil.Now.Add(time.Hour) // collected at testutil.Now, an hour old
-	if c := checkNamed(Evaluate(in, Upstream(), Runtime{States: NewStates()}), "withheld config"); c == nil || c.Unavailable != AvailFailing {
+	if c := checkNamed(Evaluate(in, Upstream(), w.runtime(Runtime{States: NewStates()})), "withheld config"); c == nil || c.Unavailable != AvailFailing {
 		t.Errorf("stale: %+v", c)
 	}
 	if r := withheldAt(t, withheldWorld(t, "v2.5.0-withheld-synth"), st, testutil.Now.Add(2*time.Minute)); withheldOn(r, "nack", SeverityWarning) != nil {
@@ -189,16 +189,16 @@ func TestReportedVersionDisagreement(t *testing.T) {
 	w := withheldWorld(t, "v2.5.0")
 	in := w.input(t)
 	in.Install.ReportedVersion = "2.5.0" // the Deployment says 2.4.7
-	c := checkNamed(Evaluate(in, Upstream(), Runtime{States: NewStates()}), "withheld config")
+	c := checkNamed(Evaluate(in, Upstream(), w.runtime(Runtime{States: NewStates()})), "withheld config")
 	if c == nil || c.Detail != "The controller reports version 2.5.0, but its Deployment says 2.4.7. The UI uses 2.5.0." {
 		t.Errorf("check %+v", c)
 	}
 	in.Install.ReportedVersion = "2.4.7"
-	if c := checkNamed(Evaluate(in, Upstream(), Runtime{States: NewStates()}), "withheld config"); c == nil || c.Detail != "" {
+	if c := checkNamed(Evaluate(in, Upstream(), w.runtime(Runtime{States: NewStates()})), "withheld config"); c == nil || c.Detail != "" {
 		t.Errorf("agreeing versions: %+v", c)
 	}
 	in.Install.Version, in.Install.ReportedVersion = "", "2.5.0"
-	if c := checkNamed(Evaluate(in, Upstream(), Runtime{States: NewStates()}), "withheld config"); c == nil ||
+	if c := checkNamed(Evaluate(in, Upstream(), w.runtime(Runtime{States: NewStates()})), "withheld config"); c == nil ||
 		c.Detail != "The controller reports version 2.5.0; its Deployment has no version. The UI uses 2.5.0." {
 		t.Errorf("no Deployment version: %+v", c)
 	}
@@ -208,11 +208,13 @@ func TestReportedVersionDisagreement(t *testing.T) {
 func TestBoundedPublishWakesAtWindowEnd(t *testing.T) {
 	st := NewStore()
 	run := func(file string, now time.Time) (int, time.Time) {
-		in := withheldWorld(t, file).input(t)
-		in.Now, in.MetricsMaxAge = now, 0
-		in.Metrics.CollectedAt = now
+		w := withheldWorld(t, file)
+		in := w.input(t)
+		in.Now = now
+		w.metrics.CollectedAt = now
 		sink := &runSink{}
-		fs, _ := withheldCheck{}.Run(RunContext{Input: in, State: st, sink: sink})
+		rt := withMetrics(Runtime{}, in.Install.ID(), w.metrics, 0)
+		fs, _ := withheldCheck{}.Run(RunContext{Input: in, State: st, sink: sink, inputs: withheldCheck{}.Inputs(), collected: rt.Collected})
 		return len(fs), sink.wake
 	}
 	run("v2.5.0-withheld-synth", testutil.Now)

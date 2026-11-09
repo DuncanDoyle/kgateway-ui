@@ -103,6 +103,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -149,6 +150,7 @@
       {
         "computed": {
           "by": "ui",
+          "label": "kgateway 2.4",
           "rules": "kgateway-2.4",
           "state": "restricted"
         },
@@ -274,6 +276,7 @@
       "namespace": "shop"
     },
     "ruleSet": "kgateway-2.4",
+    "ruleSetLabel": "kgateway 2.4",
     "rules": [
       {
         "backendRefs": [
@@ -281,6 +284,7 @@
             "delegation": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -319,6 +323,7 @@
             "delegation": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },

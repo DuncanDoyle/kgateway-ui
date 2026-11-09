@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import useSWR, { type SWRConfiguration } from "swr";
 import { ApiError, apiFetch, apiFetchWithHeaders } from "./client";
 import type {
   Capability,
+  Category,
   HealthReport,
   InstallSummary,
   MetaResponse,
@@ -97,6 +98,37 @@ export function useCapabilities(): ReadonlySet<string> | undefined {
 export function useCapabilityState(name: string): Capability | undefined {
   const { data } = useMeta();
   return data?.capabilityStates?.find((c) => c.name === name);
+}
+
+/**
+ * Checks install id's features (InstallSummary.features); undefined while unknown. A server that lists none has them
+ * all, but serves view B only when /meta advertises filters.delegation (PF8).
+ */
+export function useFeatureCheck(id: string): (name: string) => boolean | undefined {
+  const { data: installs, error } = useInstalls();
+  const { data: meta } = useMeta();
+  const features = installs?.find((i) => i.id === id)?.features;
+  const loading = !installs && !error;
+  return useCallback(
+    (name: string) => {
+      if (features) return features.includes(name);
+      if (loading) return undefined;
+      if (name === "delegation") return meta ? supportsFilter(meta, "delegation", "outcome") : undefined;
+      return true;
+    },
+    [features, loading, meta],
+  );
+}
+
+/** Whether install id has the feature name; undefined while unknown (see useFeatureCheck). */
+export function useInstallFeature(id: string, name: string): boolean | undefined {
+  return useFeatureCheck(id)(name);
+}
+
+/** The /meta category of r's kind, e.g. "backend"; undefined until meta loads or when the kind is not served. */
+export function useKindCategory(r: { group: string; kind: string }): Category | undefined {
+  const { data } = useMeta();
+  return data?.kinds.find((k) => k.group === r.group && k.kind === r.kind)?.category;
 }
 
 /** True when /meta advertises the post-v1 filter on list (2.3: routes has listener); false for an older server. */

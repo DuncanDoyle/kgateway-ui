@@ -68,6 +68,12 @@ type subject struct {
 	set        *process.Set
 }
 
+// noProcesses reports an install with no controller workload and no proxy
+// selector, such as a class-only install: it has no processes to judge.
+func noProcesses(in Input) bool {
+	return in.Install.Deployment == nil && in.Install.ProxySelector == nil
+}
+
 // subjects lists in's process subjects; none without process data. An
 // unobserved set has no processes, so it yields no finding (D-016 R3).
 func subjects(in Input) []subject {
@@ -193,6 +199,9 @@ type restartSeen struct {
 // Processes that are gone leave no state behind (Review Focus 2).
 func (c restartsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	if noProcesses(in) {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, takenAt(in))
+	}
 	res := gapResult(in, c.Name())
 	old, _ := Load[*restartState](ctx.State, restartsKey)
 	if old == nil {
@@ -347,6 +356,9 @@ func (probesCheck) Inputs() InputSet {
 func (c probesCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	at := takenAt(in)
+	if noProcesses(in) {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, at)
+	}
 	switch a, running := in.Snapshot.Access[cache.EventsGVR]; {
 	case !running:
 		return nil, NotAvailable(c.Name(), AvailOff, eventsOffDetail, at)
@@ -412,6 +424,9 @@ func (rolloutsCheck) Inputs() InputSet {
 // are not compared (review finding 8).
 func (c rolloutsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	if noProcesses(in) {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, takenAt(in))
+	}
 	events, logs := installLogs(ctx)
 	var fs []Finding
 	for _, s := range subjects(in) {

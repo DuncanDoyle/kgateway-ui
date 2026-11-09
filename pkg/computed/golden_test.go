@@ -161,7 +161,7 @@ func goldens(t *testing.T, dir, tag string) {
 			got := viewA(att)
 			if want.Rows != nil {
 				din := delegationInput(t, c, ain, att)
-				compareDelegation(t, want.delegationExpect, din, rules.Delegation(din))
+				compareDelegation(t, want.delegationExpect, din, rules.(computed.Delegator).Delegation(din))
 			} else if len(c.Bounds) > 0 {
 				t.Fatal("bounds without rows")
 			}

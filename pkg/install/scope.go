@@ -8,6 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 // DiscoveryNamespaceSelectorsEnv is the controller env var rendered from the
@@ -213,13 +215,55 @@ type Resolved struct {
 	Install
 	Scope    Scope
 	Settings Settings
+	// ExperimentalOnly is the install's pack hook for Experimental; nil marks no kind.
+	ExperimentalOnly func(k kinds.Served, inst Install) bool
+	// NoDelegation is set when the install's rule set computes no delegation:
+	// no route is a delegated child or a declared candidate, and a backendRef
+	// to an HTTPRoute is an ordinary ref (Phase 5 design §8.3).
+	NoDelegation bool
 }
 
-// Resolve applies p to every install.
+// Experimental reports whether r's controller watches served kind k only with
+// experimental Gateway API features on.
+func (r Resolved) Experimental(k kinds.Served) bool {
+	return r.ExperimentalOnly != nil && r.ExperimentalOnly(k, r.Install)
+}
+
+// Resolve applies p, ReadSettings and UpstreamExperimentalOnly to every
+// install: the kgateway resolution of callers from before packs.
 func Resolve(insts []Install, p ScopeProvider) []Resolved {
+	out := ResolveWith(insts, func(Install) (ScopeProvider, func(Install) Settings) { return p, ReadSettings })
+	for i := range out {
+		out[i].ExperimentalOnly = UpstreamExperimentalOnly
+	}
+	return out
+}
+
+// SourceAssumed is the Scope.Source of an install without a scope provider.
+const SourceAssumed = "assumed"
+
+// NotRead is the Setting.Reason of an install without a settings reader.
+const NotRead = "not read for this controller"
+
+// ResolveWith resolves each install with the scope provider and settings
+// reader implFor returns for it. A nil provider assumes all namespaces; a nil
+// reader leaves every setting unknown (Phase 5 design §5.3). ExperimentalOnly
+// is left nil: no experimental-only kinds.
+func ResolveWith(insts []Install, implFor func(Install) (ScopeProvider, func(Install) Settings)) []Resolved {
 	out := make([]Resolved, 0, len(insts))
 	for _, in := range insts {
-		out = append(out, Resolved{Install: in, Scope: p.Scope(in), Settings: ReadSettings(in)})
+		p, settings := implFor(in)
+		r := Resolved{Install: in, Scope: Scope{Mode: ScopeAll, Source: SourceAssumed}}
+		if p != nil {
+			r.Scope = p.Scope(in)
+		}
+		if settings != nil {
+			r.Settings = settings(in)
+		} else {
+			s := Setting{Reason: NotRead}
+			r.Settings = Settings{Experimental: s, WildcardNamespace: s, GlobalPolicyNamespace: s}
+		}
+		out = append(out, r)
 	}
 	return out
 }

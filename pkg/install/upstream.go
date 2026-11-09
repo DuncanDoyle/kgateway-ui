@@ -6,6 +6,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/labels"
+
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 // UpstreamControllerName is the GatewayClass controllerName of upstream kgateway,
@@ -88,6 +90,12 @@ func (i Install) KgatewayVersion() string {
 		return i.BaseVersion
 	}
 	return cmp.Or(i.ReportedVersion, i.Version)
+}
+
+// UpstreamExperimentalOnly is kgateway's experimental-only classification of
+// served kind k for inst, from the table in pkg/kinds at inst's KgatewayVersion.
+func UpstreamExperimentalOnly(k kinds.Served, inst Install) bool {
+	return k.ExperimentalOnly(inst.KgatewayVersion())
 }
 
 // ControllerVersion is the version the UI shows for the controller: for

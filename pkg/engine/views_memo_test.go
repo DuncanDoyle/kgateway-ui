@@ -40,7 +40,7 @@ func TestViewsMemoMatchesFreshEngine(t *testing.T) {
 	clock := func() time.Time { return now }
 	src := &snapRef{scale.Snapshot(scale.Typical, 1)}
 	cfg := config(nil, metricsAt(now), clock)
-	cfg.Snapshots, cfg.MetricsMaxAge = src, 0
+	cfg.Snapshots, cfg.Collected = src, served(metricsAt(now), 0)
 	e := New(cfg)
 	routes := gvr(t, "HTTPRoute")
 

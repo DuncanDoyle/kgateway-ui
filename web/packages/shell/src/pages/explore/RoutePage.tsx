@@ -1,18 +1,16 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useMemo } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useRouteDetail } from "../../api/exploreHooks";
-import { useListFilter } from "../../api/hooks";
+import { useInstallFeature } from "../../api/hooks";
 import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
-import { delegationCopy, detailCopy, routeCopy } from "../../copy/explorer";
+import { detailCopy, routeCopy } from "../../copy/explorer";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
-import { Shimmer } from "../../states/Shimmer";
-import { DetailFrame, type ExtraTab, Facts, Section } from "./detailParts";
+import { DetailFrame, Facts, Section } from "./detailParts";
 import { Muted } from "./listParts";
 import { ChildRoutes } from "./route/ChildRoutes";
-import { DelegationTab } from "./route/DelegationTab";
 import { EffectiveMatches } from "./route/EffectiveMatches";
 import { ParentCard } from "./route/ParentCard";
 import { RuleList } from "./route/RuleList";
@@ -74,30 +72,11 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
   const ref = useMemo<LinkedRef>(() => ({ group, kind, namespace: ns, name, link: "detail" }), [group, kind, ns, name]);
   const { data, error } = useRouteDetail(id, ref);
   const hasDelegation = !!data?.rules.some((r) => r.backendRefs.some((b) => b.delegation));
+  // Delegation copy and blocks need a rule set that computes it; the tab is the kgateway web pack's.
+  const delegation = useInstallFeature(id, "delegation") !== false;
   const unlisted = useMemo(() => (data ? unlistedRefs(data) : []), [data]);
   // The parents and up-chain this page links decide the links of the same objects in the trail.
   const trailRefs = useMemo(() => (data ? linkedRefs(data) : undefined), [data]);
-  // View B's tab, only for a parent route on a server that serves …/delegation (/meta filters.delegation, PF8).
-  const viewB = useListFilter("delegation", "outcome");
-  const rules = data?.rules;
-  // A deep link keeps its tab while the detail or /meta loads, so the strip never jumps; it falls back to Overview
-  // only once the data says the route has no delegation refs or the server has no view B.
-  const asked = new URLSearchParams(useLocation().search).get("tab") === "delegation";
-  const show = viewB !== false && (data ? hasDelegation : asked) && (viewB === true || asked);
-  const extraTabs = useMemo<ExtraTab[] | undefined>(
-    () =>
-      show
-        ? [
-            {
-              id: "delegation",
-              label: delegationCopy.tab,
-              content:
-                viewB && rules ? <DelegationTab installId={id} route={ref} rules={rules} /> : <Shimmer h={120} />,
-            },
-          ]
-        : undefined,
-    [show, viewB, rules, id, ref],
-  );
   // From 1600 px the up-chain and parents sit beside the structure; below, where they always were.
   const wide = useTwoColumns();
   const upChain = data ? (
@@ -154,7 +133,6 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
       sideWhenWide
       data={data}
       error={error}
-      extraTabs={extraTabs}
       trailRefs={trailRefs}
       stylesOverride={stylesOverride}
     >
@@ -165,8 +143,12 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
             <Facts>
               <dt>{routeCopy.hostnames}</dt>
               <dd>{hostnameText(data)}</dd>
-              <dt>{routeCopy.parentRoutes}</dt>
-              <dd>{permissionText(data)}</dd>
+              {delegation ? (
+                <>
+                  <dt>{routeCopy.parentRoutes}</dt>
+                  <dd>{permissionText(data)}</dd>
+                </>
+              ) : null}
             </Facts>
           </Section>
           {wide ? null : parentsBlock}
@@ -176,10 +158,10 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
             </h2>
             <RuleList installId={id} rules={data.rules} />
           </Section>
-          {data.effective?.length ? (
+          {delegation && data.effective?.length ? (
             <EffectiveMatches installId={id} edges={data.effective} truncated={data.effectiveTruncated} />
           ) : null}
-          <ChildRoutes installId={id} route={data.ref} expected={data.childCount} />
+          {delegation ? <ChildRoutes installId={id} route={data.ref} expected={data.childCount} /> : null}
         </>
       ) : null}
     </DetailFrame>

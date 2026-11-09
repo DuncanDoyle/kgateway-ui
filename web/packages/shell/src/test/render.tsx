@@ -1,8 +1,10 @@
 import { render } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { SWRConfig, type SWRConfiguration } from "swr";
 import { retryEveryPoll } from "../api/hooks";
+import { kgatewayWebPack } from "../kgateway/webPack";
+import { ShellExtensionContext, useShellExtension } from "../shell/extension";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemes } from "../theme/themes";
 
@@ -56,4 +58,14 @@ export function hrefPath(el: Element): string | null {
   q.delete("via");
   const rest = q.toString();
   return rest ? `${path}?${rest}` : path;
+}
+
+/** The default app's contributions, for pages rendered without the Shell. */
+export function WithKgatewayPack({ children }: { children: ReactNode }) {
+  const base = useShellExtension();
+  return (
+    <ShellExtensionContext.Provider value={{ ...base, contributions: kgatewayWebPack.contributions ?? {} }}>
+      {children}
+    </ShellExtensionContext.Provider>
+  );
 }

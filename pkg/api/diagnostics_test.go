@@ -22,6 +22,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 )
@@ -229,6 +230,26 @@ func TestGroupsAndNextStepsHideHiddenObjects(t *testing.T) {
 	g = groupOn(t, get[Diagnostics](t, authzSrv(t, h, nil, WithCommands(cmdsNoCounters{})), diagPath, 200), edge)
 	if len(g.NextSteps) != 2 || g.NextSteps[0].Title != diagnose.StepEnvoyReason || g.NextSteps[1].Title != diagnose.StepProxyLog {
 		t.Fatalf("no counters command: %+v", g.NextSteps)
+	}
+
+	// The install's pack commands win over the handler's; nil keeps the handler's.
+	for _, tc := range []struct {
+		name  string
+		f     func(install.Install) diagnose.Commands
+		steps int
+	}{{"pack commands", func(i install.Install) diagnose.Commands {
+		if i.ID() == "kgw.kgateway" {
+			return cmdsNoCounters{}
+		}
+		return nil
+	}, 2}, {"no pack commands", func(install.Install) diagnose.Commands { return nil }, 3}} {
+		srv := authzSrv(t, h, nil, WithInstallCommands(tc.f))
+		g := groupOn(t, get[Diagnostics](t, srv, diagPath, 200), edge)
+		fd := get[FindingDetail](t, srv, findingsBase+"/"+f.ID, 200)
+		dp := get[GatewayDetail](t, srv, base+"/gateways/infra/edge", 200).DataPlane
+		if len(g.NextSteps) != tc.steps || len(fd.NextSteps) != tc.steps || dp == nil || len(dp.NextSteps) != tc.steps {
+			t.Errorf("%s: %d steps on diagnostics, %d on the finding, data plane %+v; want %d each", tc.name, len(g.NextSteps), len(fd.NextSteps), dp, tc.steps)
+		}
 	}
 }
 

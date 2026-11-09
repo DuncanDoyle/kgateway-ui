@@ -257,6 +257,9 @@
         ]
       }
     ],
+    "packs": [
+      "kgateway"
+    ],
     "platform": "Kubernetes",
     "synced": true,
     "version": "<build version>",

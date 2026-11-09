@@ -1,10 +1,11 @@
-// Package engine computes the UI's model from the cache, the controller
-// metrics and the registered checks, when triggers or deadlines call for it (D-019).
+// Package engine computes the UI's model from the cache, the collected values
+// and the registered checks, when triggers or deadlines call for it (D-019).
 package engine
 
 import (
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,7 +49,6 @@ type Config struct {
 	// Verifier checks scope against the controller; its persistence should be
 	// 2 × the metrics interval (design §4.4).
 	Verifier scopeverify.Verifier
-	Metrics  ctrlmetrics.Source
 	Checks   []health.Check
 	// Pinned restricts the UI to one install ID; empty shows all.
 	Pinned string
@@ -60,13 +60,16 @@ type Config struct {
 	Process process.Source
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
+	// HooksFor returns the hooks of the pack that claimed an install. Nil gives every install Scope,
+	// RulesFor, Verifier, Process, ProxyMode and kgateway's settings, version, reported version and experimental kinds.
+	HooksFor func(install.Install) Hooks
+	// ClassOnly adds a class-only install per GatewayClass controllerName no
+	// detected install lists (install.ClassOnly); set HooksFor with it.
+	ClassOnly bool
 	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
 	DelegationBounds computed.Bounds
 	// Logger receives install rejections; nil means slog.Default().
 	Logger *slog.Logger
-	// MetricsMaxAge is the age beyond which a metrics result is stale
-	// (3 × the metrics interval). Zero disables staleness: never use it in production.
-	MetricsMaxAge time.Duration
 	// Now stamps computations; nil means Clock.Now. It must agree with Clock,
 	// or Run sees deadlines due that Compute does not.
 	Now func() time.Time
@@ -82,12 +85,41 @@ type Config struct {
 	ConfirmEvery time.Duration
 	// OnLoop, if set, is called on Run's goroutine after each loop transition (tests).
 	OnLoop func(LoopEvent)
-	// Collected, if set, returns the collector values; checks read them and
-	// the confirm tick compares their print (D-019).
+	// Collected, if set, returns the collector values, controller metrics
+	// included; checks read them and the confirm tick compares their print (D-019).
 	Collected func() collect.Snapshot
 	// NoMemo turns per-check memoization off, so every check runs on every
 	// recompute (tests compare against it).
 	NoMemo bool
+}
+
+// Hooks are one install's pack hooks (extension.Impl). A nil Scope assumes all
+// namespaces, nil Settings reads none, nil Version is "", nil Reported reports
+// none, nil ExperimentalOnly marks no kind, nil RulesFor is Config.RulesFor and
+// nil Checks is Config.Checks. A nil Verifier runs no verification, nil
+// Process reports no processes and nil ProxyMode treats every proxy as
+// managed. A RulesFor that returns no Rules gives the install no rule set: no
+// computed views. One without a computed.Delegator gives it no delegation
+// (install.Resolved.NoDelegation). A class-only install never has a rule set.
+type Hooks struct {
+	Scope    install.ScopeProvider
+	Settings func(install.Install) install.Settings
+	RulesFor func(version string) computed.Selection
+	Version  func(install.Install) string
+	// Reported reads the version the controller reports from the collected
+	// values; false keeps the last one, so the rule set does not flip.
+	Reported         func(install.Install, collect.Snapshot) (string, bool)
+	ExperimentalOnly func(kinds.Served, install.Install) bool
+	// Checks run on the install, in registration order: the core's and its pack's.
+	Checks []health.Check
+	// Conditions are the install's condition types beyond Gateway API's.
+	Conditions health.ConditionTypes
+	// Verifier checks the install's scope against its controller.
+	Verifier scopeverify.Verifier
+	// Process reports the install's controller and proxy processes.
+	Process process.Source
+	// ProxyMode decides whether one of the install's Gateways is self-managed.
+	ProxyMode proxymode.Resolver
 }
 
 // InstallModel is everything the API serves about one install.
@@ -120,17 +152,11 @@ type Model struct {
 	// Seq orders computations; it strictly increases.
 	Seq uint64
 	// Next is the earliest deadline not yet due at ComputedAt: a grace expiry,
-	// metrics staleness or a scope mismatch maturing.
+	// a check's wake time, such as metrics staleness, or a scope mismatch maturing.
 	Next Deadline
-	// MetricsRead are the metrics results this computation used, one per install, in install order.
-	MetricsRead []MetricsRead
-}
-
-// MetricsRead is one metrics result as Compute read it.
-type MetricsRead struct {
-	ID      string
-	Result  ctrlmetrics.Result
-	Present bool
+	// Collected are the collector values this computation read; the API shows
+	// the same evidence as the checks from them.
+	Collected collect.Snapshot
 }
 
 // Engine computes Models.
@@ -151,8 +177,8 @@ type Engine struct {
 	views map[string]*viewsMemo
 	// states holds each install's check Stores, keyed by install ID; only touched under computeMu.
 	states map[string]*health.States
-	// reported holds each install's last kgateway_build_info version, kept while
-	// a scrape fails so the rule set does not flip; only touched under computeMu.
+	// reported holds each install's last reported version, kept while the
+	// collected values do not tell, so the rule set does not flip; only touched under computeMu.
 	reported map[string]string
 	// diags holds each install's last diagnosis; only touched under computeMu.
 	diags map[string]*diagMemo
@@ -191,6 +217,18 @@ func New(cfg Config) *Engine {
 	}
 	if cfg.Process == nil {
 		cfg.Process = process.Kube{}
+	}
+	if cfg.HooksFor == nil {
+		legacy := Hooks{Scope: cfg.Scope, Settings: install.ReadSettings, RulesFor: cfg.RulesFor, Version: install.Install.KgatewayVersion,
+			Reported: func(i install.Install, col collect.Snapshot) (string, bool) {
+				return ctrlmetrics.ReportedVersion(col, i.ID())
+			},
+			ExperimentalOnly: install.UpstreamExperimentalOnly, Conditions: health.KgatewayConditions(),
+			Verifier: cfg.Verifier, Process: cfg.Process, ProxyMode: cfg.ProxyMode}
+		if legacy.ProxyMode == nil {
+			legacy.ProxyMode = proxymode.GatewayParameters{}
+		}
+		cfg.HooksFor = func(install.Install) Hooks { return legacy }
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
@@ -305,10 +343,25 @@ func (e *Engine) compute() *Published {
 			e.cfg.Logger.Error("install rejected", "err", err)
 		}
 	}
-	all := install.Resolve(found, e.cfg.Scope)
-	// Assignment runs over all installs so ambiguity is detected even when pinned.
-	asg := install.Assign(snap, served, all, e.decode)
+	classOnly := map[string]bool{}
+	if e.cfg.ClassOnly {
+		var classes []*unstructured.Unstructured
+		for _, k := range kinds.ByCategory(served, kinds.CategoryGatewayClass) {
+			classes = append(classes, snap.Objects[k.GVR()]...)
+		}
+		co := install.ClassOnly(classes, found)
+		for _, i := range co {
+			classOnly[i.ID()] = true
+		}
+		found = append(found, co...)
+		slices.SortFunc(found, func(a, b install.Install) int { return strings.Compare(a.ID(), b.ID()) })
+	}
+	all := install.ResolveWith(found, func(i install.Install) (install.ScopeProvider, func(install.Install) install.Settings) {
+		h := e.cfg.HooksFor(i)
+		return h.Scope, h.Settings
+	})
 	next := deadlines{now: now}
+	// Read once: the version, the verifier, health and the source print share this evidence.
 	var col collect.Snapshot
 	if e.cfg.Collected != nil {
 		col = e.cfg.Collected()
@@ -318,36 +371,55 @@ func (e *Engine) compute() *Published {
 			}
 		}
 	}
+	m.Collected = col
+	// The rule set decides delegation, so it is chosen before assignment. A
+	// class-only install has none, whatever its hooks (design §8.2).
+	sels := make([]computed.Selection, len(all))
+	for i := range all {
+		all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly
+		all[i].ReportedVersion = e.reportedVersion(all[i].Install, col)
+		if !classOnly[all[i].ID()] {
+			sels[i] = e.rulesFor(all[i].Install)
+		}
+		all[i].NoDelegation = sels[i].Delegator() == nil
+	}
+	// Assignment runs over all installs so ambiguity is detected even when pinned.
+	asg := install.Assign(snap, served, all, e.decode)
 	firstSeen := e.firstSeen(now)
 	// Views first: one persistence step over every install's checks precedes health.
 	type run struct {
-		res   install.Resolved
-		owned *install.Owned
-		sel   computed.Selection
-		met   ctrlmetrics.Result
-		has   bool
+		res    install.Resolved
+		owned  *install.Owned
+		sel    computed.Selection
+		checks []health.Check
+		conds  health.ConditionTypes
+		hooks  Hooks
 	}
 	var runs []run
 	var views []*computed.Views
 	memos := make(map[string]*viewsMemo, len(all))
-	for _, res := range all {
+	for i, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
-		// Read once: the version, the verifier, health and the source fingerprint share this evidence.
-		met, has := e.cfg.Metrics.Get(res.ID())
-		res.ReportedVersion = e.reportedVersion(res.ID(), met, has)
-		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion()), met: met, has: has}
+		h := e.cfg.HooksFor(res.Install)
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: sels[i], checks: h.Checks, conds: h.Conditions, hooks: h}
+		if r.checks == nil {
+			r.checks = e.cfg.Checks
+		}
 		runs = append(runs, r)
 		m := e.views[res.ID()]
 		if m == nil {
 			m = &viewsMemo{}
 		}
 		memos[res.ID()] = m
-		v := computeViews(m, r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		var v *computed.Views
+		if r.sel.Rules != nil {
+			v = computeViews(m, r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		}
 		views = append(views, v)
 		// Each cap hit is logged once per distinct value, as rejections are (rules §5.7).
-		if c := v.Delegation.Cap; c != "" && !e.caps[res.ID()+"\x00"+c] {
+		if c := capOf(v); c != "" && !e.caps[res.ID()+"\x00"+c] {
 			e.caps[res.ID()+"\x00"+c] = true
 			e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
 		}
@@ -368,60 +440,83 @@ func (e *Engine) compute() *Published {
 	}
 	for i, r := range runs {
 		res, owned := r.res, r.owned
-		met, has := r.met, r.has
-		m.MetricsRead = append(m.MetricsRead, MetricsRead{ID: res.ID(), Result: met, Present: has})
-		if has && e.cfg.MetricsMaxAge > 0 {
-			next.add(met.CollectedAt.Add(e.cfg.MetricsMaxAge), true) // stale when age > max
+		var ver scopeverify.Result
+		if r.hooks.Verifier != nil {
+			ver = r.hooks.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Collected: col, Now: now, Views: e.decode})
 		}
-		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
-			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now, Views: e.decode})
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
-		proc := e.processes(res, owned, snap)
+		proc := processes(r.hooks.Process, res, owned, snap)
+		mode := r.hooks.ProxyMode
+		if mode == nil {
+			mode = managed{}
+		}
 		rt := health.Runtime{States: states[res.ID()], Collected: col}
 		var pc *printCtx
 		if !e.cfg.NoMemo {
-			pc = &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
-				ver: &ver, views: views[i], kc: kc, cat: cat, col: col, proc: proc}
+			pc = &printCtx{snap: snap, res: res, all: all, ver: &ver, views: views[i], kc: kc, cat: cat, col: col, proc: proc}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
-		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat, Metrics: met,
-			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel}, e.cfg.Checks, rt)
+		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat,
+			FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: mode,
+			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel, Conditions: &r.conds}, r.checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}
 		diag := e.diagnosis(&rep, diagnose.Input{Install: res, Owned: owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()}, pc)
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
-			Computed: views[i]})
+			Computed: views[i], Conditions: &r.conds})
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Diagnosis: diag, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
 			Rules: r.sel, Computed: views[i], Process: proc})
 	}
 	maps.DeleteFunc(e.diags, func(id string, _ *diagMemo) bool { return states[id] == nil })
 	m.Next = next.next
-	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(), Catalog: cat.Key(),
-		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Kinds: kc.String(), Catalog: cat.Key(), Collected: col.Print, Stale: col.StalePrint(now)},
+		ConfirmedAt: snap.TakenAt}
 	return p
 }
 
-// reportedVersion is the build_info version of install id without a leading
-// "v". The last one is kept while scrapes fail or replicas disagree, so the rule
-// set does not flip; a value that is not a version, such as "undefined", is none.
-func (e *Engine) reportedVersion(id string, met ctrlmetrics.Result, has bool) string {
-	if !has || met.Err != "" {
+// reportedVersion is the version i's controller reports through its pack's
+// Reported hook, without a leading "v". The last one is kept while col does not
+// tell, such as a failed scrape, so the rule set does not flip; a value that is
+// not a version, such as "undefined", is none.
+func (e *Engine) reportedVersion(i install.Install, col collect.Snapshot) string {
+	id, h := i.ID(), e.cfg.HooksFor(i)
+	if h.Reported == nil {
 		return e.reported[id]
 	}
-	v, agreed := met.Metrics.BuildVersion()
+	v, told := h.Reported(i, col)
 	switch v = strings.TrimPrefix(v, "v"); {
-	case !agreed:
+	case !told:
 	case rulesets.IsVersion(v):
 		e.reported[id] = v
 	default:
 		delete(e.reported, id)
 	}
 	return e.reported[id]
+}
+
+// capOf is v's delegation cap hit, "" without views.
+func capOf(v *computed.Views) string {
+	if v == nil {
+		return ""
+	}
+	return v.Delegation.Cap
+}
+
+// rulesFor selects i's rule set with its pack's hooks.
+func (e *Engine) rulesFor(i install.Install) computed.Selection {
+	h := e.cfg.HooksFor(i)
+	var v string
+	if h.Version != nil {
+		v = h.Version(i)
+	}
+	if h.RulesFor == nil {
+		return e.cfg.RulesFor(v)
+	}
+	return h.RulesFor(v)
 }
 
 // gatewayAPI is sel's Gateway API table, else the upstream one.
@@ -432,19 +527,36 @@ func gatewayAPI(sel computed.Selection) func(string) (string, bool) {
 	return rulesets.ExpectedGatewayAPI
 }
 
-// processes asks the process source for res's controller and the proxies
-// of each Gateway it owns, and prints the result.
-func (e *Engine) processes(res install.Resolved, owned *install.Owned, snap *cache.Snapshot) *health.ProcessData {
-	d := &health.ProcessData{Controller: e.cfg.Process.Controller(res, snap)}
+// processes asks src for res's controller and the proxies of each Gateway it
+// owns, and prints the result. A nil src reports no processes: every set is
+// empty, not applicable.
+func processes(src process.Source, res install.Resolved, owned *install.Owned, snap *cache.Snapshot) *health.ProcessData {
+	d := &health.ProcessData{}
+	if src != nil {
+		d.Controller = src.Controller(res, snap)
+	}
 	if owned != nil && len(owned.Gateways) > 0 {
 		d.Proxies = make(map[objects.Ref]process.Set, len(owned.Gateways))
 		for _, gw := range owned.Gateways {
 			ref := objects.RefOf(gw)
-			d.Proxies[ref] = e.cfg.Process.Proxies(res, ref, snap)
+			if src != nil {
+				d.Proxies[ref] = src.Proxies(res, ref, snap)
+			} else {
+				d.Proxies[ref] = process.Set{}
+			}
 		}
 	}
 	d.Print = processPrint(d)
 	return d
+}
+
+// managed is the proxy mode of an install whose pack has none: every proxy is
+// run by the controller.
+type managed struct{}
+
+// Resolve implements proxymode.Resolver.
+func (managed) Resolve(*unstructured.Unstructured, *cache.Snapshot, []kinds.Served) proxymode.Mode {
+	return proxymode.Managed
 }
 
 // deadlines collects the earliest deadline not yet due at now.
@@ -463,7 +575,7 @@ func (d *deadlines) add(at time.Time, strict bool) {
 // Current returns the latest publication, or nil before the first.
 func (e *Engine) Current() *Published { return e.cur.Load() }
 
-// Installs returns the installs of the current model; the metrics collector scrapes these.
+// Installs returns the installs of the current model; the pack collectors read these.
 func (e *Engine) Installs() []install.Install {
 	p := e.Current()
 	if p == nil {

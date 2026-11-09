@@ -606,6 +606,7 @@ export const groupsCopy = {
 
 /** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */
 export const processesCopy = {
+  notAvailable: "Not available for this controller",
   title: "Processes", // S412
   search: "Filter Gateways", // S413
   placeholder: "Filter by Gateway name or namespace", // S414
@@ -625,6 +626,7 @@ export const processesCopy = {
 };
 export const dataPlaneCopy = {
   title: "Data plane", // S388
+  notAvailable: "Not available for this controller",
   rejecting: "Proxies reject this Gateway's config", // S305
   unavailable: "Rejects cannot be read right now", // S451
   evidenceRestricted: "Details hidden: they name objects you cannot view.", // S452

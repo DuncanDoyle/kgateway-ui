@@ -1,4 +1,4 @@
-import { apiFetch, PageState, POLL_MS, ResourceName, type ShellExtension } from "@snellius/shell";
+import { apiFetch, kgatewayWebPack, PageState, POLL_MS, ResourceName, type ShellExtension } from "@snellius/shell";
 import useSWR from "swr";
 
 /** The body of GET /api/ext/acme/widgets, served by acme.go. */
@@ -27,6 +27,8 @@ function WidgetsTab({ namespace }: { namespace?: string }) {
 /** What this build adds to the stock UI. */
 export const acme: ShellExtension = {
   brand: { productName: "acme", logo: null },
+  // The backend serves kgateway (extension.New), so the kgateway web pack brings its copy and Delegation tab
+  packs: [kgatewayWebPack],
   contributions: {
     // A tab on every Gateway page, after the core tabs
     detailTabs: {

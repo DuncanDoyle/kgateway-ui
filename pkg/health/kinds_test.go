@@ -20,7 +20,7 @@ func TestServedKindsListOnlyChange(t *testing.T) {
 	run := func(now []kinds.Served) Report {
 		in := healthyWorld().input(t)
 		in.KindsChange = kinds.Diff(watched, now)
-		return Evaluate(in, Upstream(), Runtime{})
+		return Evaluate(in, Upstream(), freshMetrics(Runtime{}))
 	}
 	r := run(without("ReferenceGrant", "DirectResponse"))
 	if has(r, CodeSignalUnavailable, "", "") {
