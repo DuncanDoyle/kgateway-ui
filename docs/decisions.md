@@ -1170,3 +1170,14 @@ Measured on the reference machine, 5 runs per world:
 
 **Consequences:** Design §4.2 and plan Tasks 6 and 13 state the as-built behaviour. README upgrade notes list the v0.6.0 API changes.
 
+
+## D-067 — The shared flags are a public package (2026-11-09, between phases 5 and 6)
+**Status:** accepted (user, 2026-11-09)
+
+**Context:** D-003 has a downstream build bring its own `main`. The flags both binaries share lived in `internal/cli`, which another module cannot import, so a downstream `main` would have to copy them and drift.
+
+**Decision:** The flags move to `pkg/cli`, unchanged. `cli.Parse` still sets the embedded SPA as `Options.UI`; a build from the module cache embeds only the placeholder, so a downstream build sets `Options.UI` to its own web build.
+
+**Alternatives:** Downstream copies the flags: rejected, every new flag would need a downstream change.
+
+**Consequences:** `pkg/cli` is public API (D-003): new flags are additive, and a removed or renamed flag is a breaking change.

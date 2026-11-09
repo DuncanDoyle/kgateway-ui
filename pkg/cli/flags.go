@@ -1,5 +1,5 @@
-// Package cli parses the flags the snellius binaries share, so the default
-// and core-only binaries cannot drift apart.
+// Package cli parses the flags the snellius binaries share, so the default,
+// core-only and downstream binaries cannot drift apart.
 package cli
 
 import (
@@ -11,7 +11,8 @@ import (
 )
 
 // Parse registers the flags on fs and parses args. It returns the kubeconfig
-// path and the app options, with the embedded SPA as the UI.
+// path and the app options, with the embedded SPA as the UI. A build from the
+// module cache embeds only a placeholder, so a downstream build sets o.UI to its own.
 func Parse(fs *flag.FlagSet, args []string) (kubeconfig string, o app.Options, err error) {
 	o.UI = webui.FS()
 	fs.StringVar(&kubeconfig, "kubeconfig", "", "path to a kubeconfig; empty: in-cluster config, else default kubeconfig loading rules")

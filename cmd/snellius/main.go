@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/DuncanDoyle/snellius/internal/cli"
+	"github.com/DuncanDoyle/snellius/pkg/cli"
 	"github.com/DuncanDoyle/snellius/pkg/app"
 )
 
