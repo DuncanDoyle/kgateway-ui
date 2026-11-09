@@ -1,6 +1,6 @@
 # Phase 5.6 — The compatibility check and close (Complete)
 
-**Completed:** 2026-11-09 (local; the core image build and the first compatibility run need the branch pushed)
+**Completed:** 2026-11-09; PR CI green on `c7e6c73` (core-only image included) and the first private compatibility run passed
 **Range:** bc65504..971323c (branch `duncandoyle/genericCore`)
 
 ## Summary

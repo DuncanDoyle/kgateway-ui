@@ -239,7 +239,7 @@ A route that delegates, or is a delegation child, gets no suggested fix: the con
 - the condition can be about only one cross-namespace ref;
 - the ref is a route backendRef or a listener certificateRef, the fields the Gateway API spec defines.
 
-Create it with `kubectl create -f`. The UI does not read ReferenceGrants, so if one already exists, compare its `from` and `to` with the suggested one.
+Create it with `kubectl create -f`. The UI lists ReferenceGrants but does not match them against the ref, so if one already exists, compare its `from` and `to` with the suggested one.
 
 When that one ref's group serves no such kind, the page suggests the corrected group instead, as for KGWUI-013. If discovery is incomplete, or several groups serve the kind, it suggests nothing.
 

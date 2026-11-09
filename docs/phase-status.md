@@ -1,39 +1,30 @@
 # Phase status
 
 ## Phase
-Phase: 5 — Generic Gateway API core
-Base: 169712c8be01e08f8832490df281a81219576174
-Docs: docs/phases/phase-5/
-Status: implementing (design and plan approved by the user 2026-11-08; branch duncandoyle/genericCore)
+Phase: 6 — Traffic Flow & Backends
+Base: (set when the phase starts)
+Docs: docs/phases/phase-6/
+Status: not started
 
 ### Queue
-- [x] Q1 Sub-phase 5.1 (G1) packs, class-only installs, default scope — phases/phase-5/phase-5.1-complete.md
-- [x] Q2 Sub-phase 5.2 (G2) metrics and checks into the pack — phases/phase-5/phase-5.2-complete.md (Task 6a posts at merge)
-- [x] Q3 Sub-phase 5.3 (G3) rule sets, view A, delegation — phases/phase-5/phase-5.3-complete.md
-- [x] Q4 Sub-phase 5.4 (G4) the rest of the kgateway pack — phases/phase-5/phase-5.4-complete.md
-- [x] Q5 Sub-phase 5.5 (G5) web — phases/phase-5/phase-5.5-complete.md
-- [x] Q6 Sub-phase 5.6 (G6) the compatibility check and close — phases/phase-5/phase-5.6-complete.md
+(none yet; the design comes first)
 
 ### Exit gates
-- [x] tests/vet pass (observed)
-- [x] all queue items done or deferred
-- [x] design+plan cross-model review + triage: docs/phases/phase-5/reviews/design-codex.md (+ design-codex-r2.md)
-- [x] phase cross-model review + triage: docs/phases/phase-5/reviews/phase-codex.md
+- [ ] tests/vet pass (observed)
+- [ ] all queue items done or deferred
+- [ ] design+plan cross-model review + triage
+- [ ] phase cross-model review + triage
 - [ ] decisions.md / design / plan in sync with code
-- [ ] phase-5-complete.md written, roadmap updated, tracked items closed
+- [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 5.6 (G6) the compatibility check and close
-Kind: planned
-Status: planned
-Base: bc65504
-Brief: docs/phases/phase-5/phase-5.6-brief.md
+Sub-phase: none
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
 Waiting on: none (program file read 2026-11-08; no edge Phase 5 needs is open)
-Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3) updated in `v0.4.0` (2026-11-07, kgwctl#4), and in `v0.5.0` (2026-11-08): the module is now `github.com/DuncanDoyle/snellius` (kgwctl#5). kgwctl's E2 requests: #17 and #20 shipped in `v0.4.0` and closed; #18 and #19 commented as moving to the Traffic Flow & Backends phase (Phase 6; Phase 4 before D-061) (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. Phase 5 keeps every name kgwctl imports, but breaks E8 on purpose (user, 2026-11-08): controller metrics leave `engine.Config`/`health.Input`; the one-shot path becomes `ctrlmetrics.CollectOnce` + `Publish` (design §7.3). After 5.2 merges: update the program file's E8 rows and file a `cross-repo` issue in kgwctl (plan Task 6a); Snellius does not wait. An informational kgwctl compile job reports, never blocks. The close sends the `v0.6.0` notice for E2, E3, E8.
-Open `cross-repo` issues (2026-11-08): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6); in kgwctl #1–#5 (notices from xdsview and this repo, consumer side).
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5) and `v0.6.0` (2026-11-09, generic core, kgwctl#7). `v0.6.0` breaks E8 on purpose: controller metrics reach the engine only through `setup.Config.Collected` (`ctrlmetrics.CollectOnce` + `Publish`), kgwctl#6. The program file is updated (kgateway-tooling `ca7f2dd`). kgwctl's E2 requests #18 and #19 are for this phase (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
+Open `cross-repo` issues (2026-11-09): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6); in kgwctl #1–#7 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
 
 ## Carry-over (deferred to later phases)
@@ -54,6 +45,7 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - Smaller Phase 2 and Phase 3 items (parked tasks, test gaps, layout at 720 px, P4 polish) — src: phases/phase-2/phase-2-complete.md and phases/phase-3/phase-3-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-09: Phase 5 closed (phases/phase-5/phase-5-complete.md), merged in #31 and released as `v0.6.0`. Phase 6 is next; read the program file and set Base when it starts.
 - [x] Q 4.3 (Phase 4 stabilization, v0.5.1): data age reads the server's clock, so cluster clock skew no longer fakes or hides staleness — closed 2026-11-08, phases/phase-4/phase-4.3-complete.md
 - 2026-11-07: Phase 3 closed (phases/phase-3/phase-3-complete.md). D-061 adds Phase 4 (Snellius rebrand) and Phase 5 (Generic Gateway API core); the old Phases 4–11 are now 6–13. Phase 4 is pre-approved; set Base when it starts, then write its design.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).

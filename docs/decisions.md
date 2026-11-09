@@ -1154,3 +1154,19 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** a public CI job against another implementation: rejected by the user, since it reads as a support claim.
 
 **Consequences:** Setting up the private repo is a Phase 5 G6 task; creating it needs the user's go. A failure there is reported to this repo's maintainers by hand, not by an automated issue.
+
+
+## D-066 — Phase 5 as built (2026-11-09, phase 5)
+**Status:** accepted; each item came from a cross-model review triage
+
+**Context:** Phase 5 (design `phases/phase-5/design.md`) moved kgateway behind a pack. Three choices differ from the design text or were not fixed by it.
+
+**Decision:**
+1. `Impl.Version` keeps its signature; `Impl.Reported(install, snapshot)` reads the reported version, and the engine keeps the last one when a scrape fails (design §4.2, 5.2 review).
+2. API v1 `features` on installs and `packs` in `/meta` are always sent, `[]` when empty, so the SPA can tell an older server (field absent) from a current one (5.5 review).
+3. The compatibility smoke test reports the last complete pass when its deadline cuts one short (5.6, first private run).
+
+**Alternatives:** n/a.
+
+**Consequences:** Design §4.2 and plan Tasks 6 and 13 state the as-built behaviour. README upgrade notes list the v0.6.0 API changes.
+

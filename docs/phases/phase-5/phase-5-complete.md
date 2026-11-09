@@ -1,7 +1,7 @@
 # Phase 5 — Generic Gateway API core (Complete)
 
-**Completed:** 2026-11-09 (local; closes for good once the PR's CI passes, including the core image build)
-**Range:** 169712c..HEAD (branch `duncandoyle/genericCore`)
+**Completed:** 2026-11-09, merged in #31 (`0e74043`) and released as `v0.6.0`
+**Range:** 169712c..c7e6c73 (branch `duncandoyle/genericCore`)
 
 ## Summary
 The core of Snellius is now implementation-independent Kubernetes Gateway API, and kgateway is pack #1 on the same extension seam later downstream editions use. The default binary still ships with the kgateway pack, and for kgateway users nothing visible changed: API v1 only gained additive fields, and every kgateway page is pixel-identical in screenshots. An install no pack claims is a class-only install, status only, behind a chart value that is off by default. A core-only build exists and is proven in a private compatibility CI outside this repo (D-065). No multi-implementation support is claimed.
@@ -27,7 +27,8 @@ None.
 ## Deliverables
 - Go API breaks for v0.6.0 (README upgrade notes): controller metrics leave `engine.Config.Metrics` and `health.Input.Metrics` (`ctrlmetrics.CollectOnce` and `Publish` replace `Static` and `Source`); `computed.Rules` no longer requires `Delegation` (assert `computed.Delegator`); frontend callers register `kgatewayWebPack`.
 - Final bench on 971323c: every budget passes (`bench-5.6.txt`).
-- kgwctl: the program-file update and the cross-repo notice are drafted, to post at merge.
+- kgwctl: the program-file E8 update and the cross-repo notices posted at release (see phase-status Program).
+- PR CI green on `c7e6c73`, the core-only image build included. The private compatibility run passed against both controllers it covers (D-065).
 
 ## Notes for later phases
 - Policy and Backend semantics still live in core packages; they move with the policy phases (6 and 7).
@@ -35,4 +36,4 @@ None.
 - The core boundary test is an import check; semantic leaks need review.
 
 ## Deferred / open
-- First private compatibility run, after the push.
+- None. The first compatibility run surfaced a harness bug, fixed in `c7e6c73`: when the deadline cut a pass short, `Settle` reported "deadline exceeded" instead of the last real failure (regression test `TestSettleKeepsTheLastCompletePass`).

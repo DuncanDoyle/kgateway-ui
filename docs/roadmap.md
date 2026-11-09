@@ -87,7 +87,7 @@ The UI product is renamed Snellius: "See the whole picture.", "Kubernetes Gatewa
 - Finding codes keep the `KGWUI-` prefix, so API v1 does not break.
 
 ### Phase 5 — Generic Gateway API core
-**Status:** Not started
+**Status:** Complete (2026-11-09, v0.6.0) — `docs/phases/phase-5/phase-5-complete.md`
 **Docs:** `docs/phases/phase-5/`
 
 The base becomes implementation-independent Kubernetes Gateway API. kgateway is plugin #1, on the same extension seam later editions use (D-061). No multi-implementation support is claimed; a core-only build is checked in a private compatibility CI, outside this repo, as proof the seam holds.
