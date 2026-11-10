@@ -37,7 +37,9 @@ type Rule struct {
 	Index int
 	Name  string
 	// Matches is nil when omitted and empty for an explicit empty list.
-	Matches     []Match
+	Matches []Match
+	// GRPCMatches is set for a GRPCRoute only, with the same nil/empty rule.
+	GRPCMatches []GRPCMatch
 	Filters     []Filter
 	BackendRefs []BackendRef
 }
