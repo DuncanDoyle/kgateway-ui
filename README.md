@@ -169,6 +169,28 @@ Kinds added with `WithKinds`, and anything a collector reads, need matching rule
 
 A one-shot caller, such as a CLI or a test, builds its own configuration with `pkg/setup` and runs `cache.Start(ctx)` itself. Cancel `ctx` when done, then call `Cache.Wait()`: it returns once every goroutine `Start` launched has exited. Called before `Start` or a second time, it returns at once.
 
+A caller with `list` but not `watch` RBAC uses `cache.ListOnce` instead. It fills the same `Snapshot` from one LIST per input and never watches. A kind it cannot list shows in `Access` as denied or failed. The error return is only for a missing client or a cancelled `ctx`.
+
+```go
+sc, err := setup.Build(clients, setup.Options{MetricsInterval: 10 * time.Second}, extension.New())
+// One LIST per input, no WATCH; snap.Mode is cache.ModeList
+snap, err := cache.ListOnce(ctx, sc.Cache)
+for gvr, a := range snap.Access {
+	fmt.Println(gvr.Resource, a.OK, a.Denied) // a kind the caller cannot list
+}
+```
+
+A caller with namespace-scoped RBAC sets `cache.Config.Namespaces`. Namespaced inputs are then read per namespace; GatewayClass and Namespace stay cluster-wide. `Access` holds the worst state over the namespaces, and `NamespaceAccess` the state per namespace. Snellius itself leaves `Namespaces` empty, which means cluster-wide.
+
+```go
+// Read namespaced kinds only in team-a and team-b
+sc.Cache.Namespaces = []string{"team-a", "team-b"}
+snap, err := cache.ListOnce(ctx, sc.Cache) // a Cache from cache.New(sc.Cache) works too
+for gvr, byNS := range snap.NamespaceAccess {
+	fmt.Println(gvr.Resource, byNS["team-b"].Denied) // denied in team-b only
+}
+```
+
 The frontend renders `Shell` from `@snellius/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx

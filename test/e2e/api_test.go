@@ -22,18 +22,21 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/DuncanDoyle/snellius/pkg/api"
 	"github.com/DuncanDoyle/snellius/pkg/app"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/overview"
 	"github.com/DuncanDoyle/snellius/pkg/platform"
+	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
 
 var base = func() string {
@@ -1601,4 +1604,59 @@ func TestDelegationAgreesWithController(t *testing.T) {
 			}
 		}
 	})
+}
+
+// region Cache access for kgwctl (6.1)
+
+// TestListOnceLive lists the harness cluster with cache.ListOnce, as kgwctl
+// does, and checks each served kind against an independent LIST of that kind.
+func TestListOnceLive(t *testing.T) {
+	cfg, err := clientcmd.BuildConfigFromFlags("", harnessKubeconfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()},
+		setup.Options{MetricsInterval: 10 * time.Second}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	snap, err := cache.ListOnce(ctx, sc.Cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Mode != cache.ModeList || !snap.Synced {
+		t.Fatalf("mode %q, synced %v; want %q and synced", snap.Mode, snap.Synced, cache.ModeList)
+	}
+	total, gateways := 0, 0
+	for _, s := range sc.Cache.Served {
+		gvr := s.GVR()
+		l, err := dyn.Resource(gvr).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Fatalf("independent LIST of %s: %v", gvr.Resource, err)
+		}
+		got := len(snap.Objects[gvr])
+		t.Logf("%-44s ListOnce %3d, LIST %3d, ok %v", gvr.GroupResource(), got, len(l.Items), snap.Access[gvr].OK)
+		if !snap.Access[gvr].OK {
+			t.Errorf("%s: access %+v, want ok", gvr.Resource, snap.Access[gvr])
+		}
+		if got != len(l.Items) {
+			t.Errorf("%s: ListOnce has %d objects, an independent LIST %d", gvr.Resource, got, len(l.Items))
+		}
+		total += got
+		if s.Group == gwGroup && s.Kind == "Gateway" {
+			gateways = got
+		}
+	}
+	if gateways == 0 || total == 0 {
+		t.Fatalf("ListOnce read %d Gateways, %d objects in all; want the fixtures", gateways, total)
+	}
 }
