@@ -7,6 +7,8 @@ package scale
 import (
 	"cmp"
 	"fmt"
+	"hash/fnv"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -61,6 +63,11 @@ type Tier struct {
 	// referenced Services lack a ready endpoint and every proxy Pod restart.
 	// World adds the analyzer's codes 013–018 (see IssueEvery).
 	IsWorst bool
+	// MultiRulePct is the percentage of leaf routes with three rules, and
+	// MultiRefPct that of rules with three weighted backendRefs (0 in every tier;
+	// see Paths). One in ten multi-ref rules carries a weight-0 ref and one in
+	// twenty delegating rules also names an ordinary Backend.
+	MultiRulePct, MultiRefPct int
 }
 
 // Shape is the part of t the typed Phase 3 generators in package testutil need.
@@ -75,6 +82,14 @@ func (t Tier) Shape() testutil.ScaleShape {
 func (t Tier) Worst() Tier {
 	t.Name += "-worst"
 	t.IsWorst = true
+	return t
+}
+
+// Paths is t with multi-rule, multi-ref and mixed delegation routes, which
+// multiply the path model's rows (rules × refs). The rest of the world is unchanged.
+func (t Tier) Paths() Tier {
+	t.Name += "-paths"
+	t.MultiRulePct, t.MultiRefPct = 30, 30
 	return t
 }
 
@@ -627,29 +642,95 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 	return u
 }
 
+// pick is a deterministic share of routes: those whose name and salt hash into the lowest pct of 100.
+func pick(name, salt string, pct int) bool {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name + salt))
+	return int(h.Sum32()%100) < pct
+}
+
+// multiRefs is r's backendRefs for one rule: one, or three weighted ones for a
+// MultiRefPct share of rules, one in ten with a weight-0 ref. Extra refs name
+// other Backends of r's namespace, or other ports for a TCPRoute or TLSRoute.
+// Weights are written only where MultiRefPct is set.
+func (w *world) multiRefs(r *route, rule int) []any {
+	salt := fmt.Sprintf("/ref%d", rule)
+	side := r.kind == "TCPRoute" || r.kind == "TLSRoute"
+	base := backendRef(r)
+	if side {
+		base = map[string]any{"name": r.name, "port": int64(443)}
+	}
+	if w.t.MultiRefPct == 0 {
+		return []any{base}
+	}
+	if !pick(r.name, salt, w.t.MultiRefPct) {
+		base["weight"] = int64(1)
+		return []any{base}
+	}
+	ws := []int64{60, 30, 10}
+	if pick(r.name, salt+"/zero", 10) {
+		ws = []int64{70, 30, 0}
+	}
+	bes := w.nsBE[nsIndex(r.ns)]
+	refs := make([]any, 3)
+	for k := range refs {
+		ref := maps.Clone(base)
+		switch {
+		case k > 0 && side:
+			ref["port"] = int64(443 + 8000*k)
+		case k > 0 && r.issue == 0:
+			ref["name"] = bes[(slices.Index(bes, r.backend)+k)%len(bes)]
+		}
+		ref["weight"] = ws[k]
+		refs[k] = ref
+	}
+	return refs
+}
+
 // rules is one delegating rule for a parent, or one rule to a Backend for a
-// leaf, with r's path prefixes as matches.
+// leaf, with r's path prefixes as matches. A MultiRulePct share of leaves has three rules.
 func (w *world) rules(r *route) []any {
 	match := func(path string) map[string]any {
 		return map[string]any{"path": map[string]any{"type": "PathPrefix", "value": path}}
 	}
+	nRules := 1
+	if r.issue == 0 && len(r.children) == 0 && pick(r.name, "/rules", w.t.MultiRulePct) {
+		nRules = 3
+	}
 	switch r.kind {
-	case "TCPRoute", "TLSRoute":
-		return []any{map[string]any{"backendRefs": []any{map[string]any{"name": r.name, "port": int64(443)}}}}
-	case "GRPCRoute":
-		return []any{map[string]any{"backendRefs": []any{backendRef(r)}}}
+	case "TCPRoute", "TLSRoute", "GRPCRoute":
+		var rs []any
+		for k := range nRules {
+			rs = append(rs, map[string]any{"backendRefs": w.multiRefs(r, k)})
+		}
+		return rs
 	}
 	var ms []any
 	for _, p := range w.pathsOf(r) {
 		ms = append(ms, match(p))
 	}
 	if len(r.children) == 0 {
-		return []any{map[string]any{"matches": ms, "backendRefs": []any{backendRef(r)}}}
+		var rs []any
+		for k := range nRules {
+			rms := ms
+			if k > 0 { // each extra rule has its own sub-paths
+				rms = nil
+				for _, p := range w.pathsOf(r) {
+					rms = append(rms, match(fmt.Sprintf("%s/rule%d", p, k)))
+				}
+			}
+			rs = append(rs, map[string]any{"matches": rms, "backendRefs": w.multiRefs(r, k)})
+		}
+		return rs
 	}
 	var refs []any
 	for _, c := range r.children {
 		cr := w.routes[c]
 		refs = append(refs, map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute", "name": cr.name, "namespace": cr.ns})
+	}
+	if w.t.MultiRefPct > 0 && pick(r.name, "/mixed", 5) {
+		bes := w.nsBE[nsIndex(r.ns)]
+		refs = append(refs, map[string]any{"group": kinds.KgatewayGroup, "kind": "Backend", "name": bes[0], "namespace": r.ns, "weight": int64(1)})
 	}
 	return []any{map[string]any{"matches": ms, "backendRefs": refs}}
 }

@@ -678,3 +678,98 @@ func TestLivePhase3ProxiesSelected(t *testing.T) {
 		}
 	}
 }
+
+// TestPathsWorldShapes: the paths world has multi-rule and multi-ref routes,
+// weight-0 refs, mixed delegation rules and weighted GRPC, TCP and TLS routes,
+// and Large itself has none of them.
+func TestPathsWorldShapes(t *testing.T) {
+	tier := Large.Paths()
+	if tier.Name != "large-paths" || tier.MultiRulePct == 0 || tier.MultiRefPct == 0 || Large.MultiRulePct != 0 || Large.MultiRefPct != 0 {
+		t.Fatalf("%+v", tier)
+	}
+	objs := World(tier, 1)
+	var multiRule, multiRef, zeroWeight, mixed int
+	weighted := map[string]int{}
+	rows, delegatedRows := 0, 0
+	delegators := map[string]int{}
+	for _, o := range objs {
+		if o.GetKind() != "HTTPRoute" {
+			continue
+		}
+		for _, c := range delegation(objs)[key(o.GetNamespace(), o.GetName())] {
+			delegators[c]++
+		}
+	}
+	for _, o := range objs {
+		kind := o.GetKind()
+		var rules []objects.Rule
+		var attach int
+		switch kind {
+		case "HTTPRoute":
+			v := objects.DecodeHTTPRoute(o)
+			rules, attach = v.Rules, len(v.ParentRefs)
+		case "GRPCRoute", "TCPRoute", "TLSRoute":
+			rules, attach = objects.DecodeRouteRules(o), len(objects.DecodeHTTPRoute(o).ParentRefs)
+		default:
+			continue
+		}
+		perRoute := 0
+		if len(rules) >= 3 {
+			multiRule++
+		}
+		for _, r := range rules {
+			perRoute += max(1, len(r.BackendRefs))
+			if len(r.BackendRefs) >= 3 {
+				multiRef++
+			}
+			deleg, plain := false, false
+			for _, b := range r.BackendRefs {
+				if b.Weight == 0 && !b.WeightDefaulted {
+					zeroWeight++
+				}
+				if !b.WeightDefaulted && kind != "HTTPRoute" {
+					weighted[kind]++
+				}
+				if b.Delegation != nil {
+					deleg = true
+				} else {
+					plain = true
+				}
+			}
+			if deleg && plain {
+				mixed++
+			}
+		}
+		if n := delegators[key(o.GetNamespace(), o.GetName())]; n > 0 {
+			delegatedRows += n * perRoute
+		} else {
+			rows += attach * perRoute
+		}
+	}
+	t.Logf("%s: rows %d = %d attachments×rules×refs + %d delegated", tier.Name, rows+delegatedRows, rows, delegatedRows)
+	if multiRule == 0 || multiRef == 0 || zeroWeight == 0 || mixed == 0 {
+		t.Errorf("multi-rule routes %d, multi-ref rules %d, weight-0 refs %d, mixed delegation rules %d", multiRule, multiRef, zeroWeight, mixed)
+	}
+	for _, k := range []string{"GRPCRoute", "TCPRoute", "TLSRoute"} {
+		if weighted[k] == 0 {
+			t.Errorf("%s has no weights", k)
+		}
+	}
+	// Large itself carries none of the shapes: one ref per leaf rule, no weights.
+	for _, o := range World(Large, 1) {
+		rules := objects.DecodeRouteRules(o)
+		if o.GetKind() == "HTTPRoute" {
+			rules = objects.DecodeHTTPRoute(o).Rules
+		}
+		if len(rules) > 1 {
+			t.Fatalf("%s %s: %d rules in Large", o.GetKind(), o.GetName(), len(rules))
+		}
+		for _, r := range rules {
+			for _, b := range r.BackendRefs {
+				if b.Delegation == nil && (len(r.BackendRefs) > 1 || !b.WeightDefaulted) {
+					t.Fatalf("%s %s: multi-ref or weighted rule in Large", o.GetKind(), o.GetName())
+				}
+			}
+		}
+	}
+}

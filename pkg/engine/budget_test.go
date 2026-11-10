@@ -515,7 +515,7 @@ type heapPart struct {
 // consistent world and the worst case. Each part is then dropped in turn; its
 // freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part; the 3.4 watches' is reported.
 func TestBudgetHeap(t *testing.T) {
-	cases := append(slices.Clone(largeCases), measuredTier)
+	cases := append(slices.Clone(largeCases), measuredTier, scale.Large.Paths())
 	if name := os.Getenv(heapChildEnv); name != "" {
 		i := slices.IndexFunc(cases, func(x scale.Tier) bool { return x.Name == name })
 		heapChild(t, cases[i])
@@ -528,7 +528,7 @@ func TestBudgetHeap(t *testing.T) {
 
 // heap31 is the 3.1 baseline's median retained heap over the 2.1 baseline per world
 // (bench/3.1-baseline.txt); the measurement world is held to the contradicting one.
-var heap31 = map[string]float64{"large": 23.2, "large-contradicting": 24.4, "large-contradicting-worst": 24.4}
+var heap31 = map[string]float64{"large": 23.2, "large-contradicting": 24.4, "large-contradicting-worst": 24.4, "large-paths": 23.2}
 
 // heapBudget runs five heap children for tier and checks their median.
 func heapBudget(t *testing.T, tier scale.Tier) {
