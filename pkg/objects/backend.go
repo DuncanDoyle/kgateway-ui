@@ -38,16 +38,13 @@ type RouteView struct {
 	WrittenRefs []WrittenRef
 	Parents     []RouteParentStatus
 	Targets     []BackendTarget
-	// Rules are spec.rules by index; Matches stays nil, GRPCMatches is set for a GRPCRoute.
-	Rules []Rule
 }
 
 // DecodeRoute decodes the shared fields of any route kind in one pass. It never fails.
 func DecodeRoute(u *unstructured.Unstructured) *RouteView {
 	rv, ns := view(u, vParentRefs|vParents), u.GetNamespace()
 	return &RouteView{Hostnames: stringList(field(u, "spec", "hostnames")), ParentRefs: parentRefs(rv, ns),
-		WrittenRefs: writtenRefs(rv), Parents: routeParents(rv, ns), Targets: RouteBackendTargets(u),
-		Rules: decodeRouteRules(u.GetKind(), list(field(u, "spec", "rules")), ns)}
+		WrittenRefs: writtenRefs(rv), Parents: routeParents(rv, ns), Targets: RouteBackendTargets(u)}
 }
 
 // RouteBackendTargets returns the spec.rules[].backendRefs and RequestMirror

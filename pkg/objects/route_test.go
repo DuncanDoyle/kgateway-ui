@@ -8,17 +8,17 @@ import (
 )
 
 func TestDecodeGRPCRules(t *testing.T) {
-	v := DecodeRoute(obj("GRPCRoute", `{"rules":[
+	rules := DecodeRouteRules(obj("GRPCRoute", `{"rules":[
 	 {"name":"a","matches":[
 	   {"method":{"service":"pkg.Svc","method":"Get"},"headers":[{"name":"x","value":"1"},{"type":"RegularExpression","name":"y","value":"2.*"}]},
 	   {"method":{"type":"RegularExpression","service":"p.*"}}],
 	  "filters":[{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"shadow","port":9090},"percent":10}}],
 	  "backendRefs":[{"name":"a","port":50051,"weight":3,"filters":[{"type":"RequestHeaderModifier"}]},{"name":"b","port":50051}]},
 	 {"matches":[]}]}`, ""))
-	if len(v.Rules) != 2 {
-		t.Fatalf("rules: %+v", v.Rules)
+	if len(rules) != 2 {
+		t.Fatalf("rules: %+v", rules)
 	}
-	r := v.Rules[0]
+	r := rules[0]
 	wantM := []GRPCMatch{
 		{Method: &GRPCMethodMatch{Type: "Exact", Service: "pkg.Svc", Method: "Get"},
 			Headers: []KeyMatch{{Type: "Exact", Name: "x", Value: "1"}, {Type: "RegularExpression", Name: "y", Value: "2.*"}}},
@@ -41,18 +41,18 @@ func TestDecodeGRPCRules(t *testing.T) {
 		r.Filters[0].Mirror.Port != 9090 || *r.Filters[0].Mirror.Percent != 10 {
 		t.Fatalf("mirror: %+v", r.Filters)
 	}
-	if v.Rules[1].GRPCMatches == nil || len(v.Rules[1].GRPCMatches) != 0 {
+	if rules[1].GRPCMatches == nil || len(rules[1].GRPCMatches) != 0 {
 		t.Fatal("explicit empty matches")
 	}
 }
 
 func TestDecodeTCPTLSRules(t *testing.T) {
 	for _, kind := range []string{"TCPRoute", "TLSRoute"} {
-		v := DecodeRoute(obj(kind, `{"rules":[{"backendRefs":[{"name":"a","port":5432,"weight":2},{"name":"b","namespace":"db","port":5433}]}]}`, ""))
-		if len(v.Rules) != 1 || v.Rules[0].Matches != nil || v.Rules[0].GRPCMatches != nil {
-			t.Fatalf("%s: %+v", kind, v.Rules)
+		rules := DecodeRouteRules(obj(kind, `{"rules":[{"backendRefs":[{"name":"a","port":5432,"weight":2},{"name":"b","namespace":"db","port":5433}]}]}`, ""))
+		if len(rules) != 1 || rules[0].Matches != nil || rules[0].GRPCMatches != nil {
+			t.Fatalf("%s: %+v", kind, rules)
 		}
-		a, b := v.Rules[0].BackendRefs[0], v.Rules[0].BackendRefs[1]
+		a, b := rules[0].BackendRefs[0], rules[0].BackendRefs[1]
 		if a.Port != 5432 || a.Weight != 2 || a.WeightDefaulted || b.Port != 5433 || b.Weight != 1 || !b.WeightDefaulted || b.Ref.Namespace != "db" {
 			t.Fatalf("%s: %+v %+v", kind, a, b)
 		}
@@ -80,6 +80,21 @@ func TestRouteBackendTargetsUnchanged(t *testing.T) {
 		}
 		if got := DecodeRoute(u).Targets; !reflect.DeepEqual(got, c.want) {
 			t.Fatalf("%s DecodeRoute.Targets: %+v", c.kind, got)
+		}
+	}
+}
+
+func TestRouteRulesNeverDelegate(t *testing.T) {
+	const ref = `{"group":"gateway.networking.k8s.io","kind":"HTTPRoute","name":"x"}`
+	for _, kind := range []string{"GRPCRoute", "TCPRoute"} {
+		u := obj(kind, `{"rules":[{"backendRefs":[`+ref+`]}]}`, "")
+		b := DecodeRouteRules(u)[0].BackendRefs[0]
+		if b.Delegation != nil || b.Ref.Kind != "HTTPRoute" || b.Ref.Name != "x" {
+			t.Fatalf("%s: %+v", kind, b)
+		}
+		ts := DecodeRoute(u).Targets
+		if len(ts) != 1 || ts[0].Ref.Kind != "HTTPRoute" || ts[0].Ref.Name != "x" {
+			t.Fatalf("%s targets: %+v", kind, ts)
 		}
 	}
 }

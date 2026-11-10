@@ -1,5 +1,7 @@
 package objects
 
+import "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 // GRPCMethodMatch is a GRPCRoute method match; Type defaults to Exact.
 type GRPCMethodMatch struct {
 	Type, Service, Method string
@@ -32,25 +34,31 @@ func decodeGRPCMatch(item any) GRPCMatch {
 	return m
 }
 
-// decodeRouteRules decodes spec.rules of a GRPCRoute, TCPRoute or TLSRoute.
-// Only a GRPCRoute has matches; none of them delegates.
-func decodeRouteRules(kind string, rules []any, ns string) []Rule {
-	if rules == nil {
+// DecodeRouteRules decodes spec.rules of a GRPCRoute, TCPRoute or TLSRoute,
+// with backendRefs and filters as for an HTTPRoute. Only a GRPCRoute has
+// matches (GRPCMatches; Matches stays nil), and no ref is a delegation. It never fails.
+func DecodeRouteRules(u *unstructured.Unstructured) []Rule {
+	items, ns := list(field(u, "spec", "rules")), u.GetNamespace()
+	if items == nil {
 		return nil
 	}
-	out := make([]Rule, 0, len(rules))
-	for i, item := range rules {
-		r := decodeRule(i, item, ns)
-		r.Matches = nil
-		for j := range r.BackendRefs {
-			r.BackendRefs[j].Delegation = nil
-		}
-		if m, ok := item.(map[string]any); ok && kind == "GRPCRoute" {
-			if ms, ok := m["matches"].([]any); ok {
+	grpc := u.GetKind() == "GRPCRoute"
+	out := make([]Rule, 0, len(items))
+	for i, item := range items {
+		r := Rule{Index: i}
+		if m, ok := item.(map[string]any); ok {
+			r.Name, _ = m["name"].(string)
+			if ms, ok := m["matches"].([]any); ok && grpc {
 				r.GRPCMatches = make([]GRPCMatch, 0, len(ms))
 				for _, x := range ms {
 					r.GRPCMatches = append(r.GRPCMatches, decodeGRPCMatch(x))
 				}
+			}
+			r.Filters = decodeFilters(m["filters"], ns)
+			for _, b := range list(m["backendRefs"]) {
+				br := decodeBackendRef(b, ns)
+				br.Delegation = nil
+				r.BackendRefs = append(r.BackendRefs, br)
 			}
 		}
 		out = append(out, r)
