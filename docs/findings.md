@@ -12,6 +12,8 @@ Some findings, or parts of their evidence, are computed by the UI, not reported 
 
 Severities: an error turns the install red, a warning turns it yellow, and info never changes its state on its own. A check that is still pending can make the install unknown, as the KGWUI-003 and KGWUI-008 entries say.
 
+**Holds.** Some checks wait before they decide, such as KGWUI-023's 30 s and KGWUI-018's 5 min. While a check waits, its result carries a `hold`: how many items it is deciding on and when the first is due. "What was checked" shows such a check as "Deciding", not green. A hold never changes the install's state, and it starts again when the UI restarts.
+
 **Since.** A finding from a status condition takes the condition's `lastTransitionTime`. For every other finding, `since` is when the UI first saw it. The UI keeps that time in memory, so it resets when the UI restarts. The [README upgrade notes](../README.md#upgrade-notes) say the same. KGWUI-001 is the one exception: with controller logs on, its `since` can come from the log.
 
 **Next steps.** Some findings have next steps: commands filled in for your install. The UI never runs them. Each one names the permission it needs in your own RBAC, such as `pods/log`.

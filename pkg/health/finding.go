@@ -131,6 +131,20 @@ type CheckResult struct {
 	// ControllerLogs says whether a check that reads the controller log read it
 	// (LogsRead or LogsNotRead); empty for other checks. Never serialised.
 	ControllerLogs string `json:"-"`
+	// Hold says the check is still deciding on some items; nil when it waits on none.
+	// Evaluate sets it from the run's RunContext.Hold calls (D-068).
+	Hold *Hold `json:"hold,omitempty"`
+}
+
+// Hold is what a check waits on before it decides: counts and a time, never
+// object refs, so every caller may see it (D-068).
+type Hold struct {
+	// Until is the earliest moment a held item is decided.
+	Until time.Time `json:"until"`
+	// Count is how many items are held, in the unit the check raises its finding on.
+	Count int `json:"count"`
+	// Reason is generic text that never names an object.
+	Reason string `json:"reason"`
 }
 
 // WithheldGateway is a Gateway whose snapshot deferral recurred after its

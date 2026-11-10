@@ -1181,3 +1181,17 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Downstream copies the flags: rejected, every new flag would need a downstream change.
 
 **Consequences:** `pkg/cli` is public API (D-003): new flags are additive, and a removed or renamed flag is a breaking change.
+
+## D-068 — Checks declare their holds (2026-11-10, between phases 5 and 6)
+**Status:** accepted (user, 2026-11-10; program edge E9, #33)
+
+**Context:** Several checks wait before they decide. Some report OK while they wait, so "What was checked" shows them green, and the pending ones give no due time. kgwctl's `check --live` and the UI after a restart both need to tell "fine" from "still deciding". `WakeAt` cannot tell them: it also schedules the decay of raised findings and input staleness deadlines.
+
+**Decision:** A check declares a hold explicitly. `CheckResult` gains an optional `hold` with `until`, `count` and `reason`. `ok` and `pending` keep their meaning, and the rollup is unchanged. Holds carry counts only, never object refs. They count toward the report fingerprint. The UI shows a third "deciding" state. The work is sub-phase 5.7, before Phase 6.
+
+**Alternatives:**
+- Infer holds from `WakeAt`: rejected, because it would mark checks with live findings as deciding.
+- Set `ok: false` during a hold: rejected, because one held object would grey out the whole check.
+- Derive times from cluster timestamps: rejected by kgwctl, since deletions, retries and webhooks leave none.
+
+**Consequences:** `hold` is public API from the release that carries it. The per-collector next-run time stays out unless a later edge asks for it.

@@ -52,6 +52,7 @@ const (
 	xdsTypeStream           = "%s rejected on 1 stream."
 	xdsActiveRejects        = "%.0f active rejects"
 	xdsHoldError            = "A controller Pod restarted or was replaced. Waiting up to 60 s for rejects to return"
+	xdsHoldReason           = "Waiting to see if rejects return after a controller restart"
 	xdsStaleError           = "Controller metrics are stale. Last collected at %s"
 )
 
@@ -191,7 +192,7 @@ func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		cur.keep(key, g)
 		ctx.Retain(FindingID(in.Install.ID(), CodeXDSRejected, ref(gw), nil))
-		ctx.WakeAt(end)
+		ctx.Hold(end, 1, xdsHoldReason)
 		held = true
 	}
 	ctx.State.Set(xdsKey, cur)

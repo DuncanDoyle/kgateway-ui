@@ -3,6 +3,7 @@ package health
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/DuncanDoyle/snellius/pkg/collect"
@@ -267,6 +268,8 @@ type RunContext struct {
 type runSink struct {
 	wake     time.Time
 	retained map[string]bool
+	hold     *Hold
+	reasons  []string // hold's distinct reasons, in declaration order
 }
 
 // WakeAt says the check's output may change at at; the engine recomputes by
@@ -277,6 +280,30 @@ func (c RunContext) WakeAt(at time.Time) {
 	}
 	if c.sink.wake.IsZero() || at.Before(c.sink.wake) {
 		c.sink.wake = at
+	}
+}
+
+// Hold says the check decides on count items at until, and why; reason must
+// never name an object (D-068). It wakes the engine at until. Evaluate puts
+// the run's holds on its CheckResult: the earliest until, the summed count
+// and the distinct reasons. A time not after Now is ignored.
+func (c RunContext) Hold(until time.Time, count int, reason string) {
+	if c.sink == nil || !until.After(c.Now) || count <= 0 {
+		return
+	}
+	c.WakeAt(until)
+	h := c.sink.hold
+	if h == nil {
+		c.sink.hold, c.sink.reasons = &Hold{Until: until, Count: count, Reason: reason}, []string{reason}
+		return
+	}
+	if until.Before(h.Until) {
+		h.Until = until
+	}
+	h.Count += count
+	if !slices.Contains(c.sink.reasons, reason) {
+		c.sink.reasons = append(c.sink.reasons, reason)
+		h.Reason = strings.Join(c.sink.reasons, "; ")
 	}
 }
 

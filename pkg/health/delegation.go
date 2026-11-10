@@ -26,17 +26,22 @@ func graceStart(in Input, us ...*unstructured.Unstructured) time.Time {
 	return t
 }
 
+// declaredGraceStart is when d's grace starts: the later first sight of the route and its parent route.
+func declaredGraceStart(in Input, d install.DeclaredCandidate) time.Time {
+	us := []*unstructured.Unstructured{d.Route.Obj}
+	if p, ok := in.Owned.Route(d.Parent.Ref()); ok {
+		us = append(us, p.Obj)
+	}
+	return graceStart(in, us...)
+}
+
 // declaredFinding is KGWUI-011's status trigger for d (design §6.2): info
 // while the later of the route's and the parent's current generation was
 // first seen less than Grace ago, warning after. Its clock is its own.
 func declaredFinding(in Input, d install.DeclaredCandidate) Finding {
 	parent := d.Parent.Ref()
-	us := []*unstructured.Unstructured{d.Route.Obj}
-	if p, ok := in.Owned.Route(parent); ok {
-		us = append(us, p.Obj)
-	}
 	sev := SeverityWarning
-	if in.Now.Sub(graceStart(in, us...)) < Grace {
+	if in.Now.Sub(declaredGraceStart(in, d)) < Grace {
 		sev = SeverityInfo
 	}
 	own := in.firstSeen(d.Route.Obj)

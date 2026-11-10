@@ -224,7 +224,8 @@ func PerturbCollected(s collect.Snapshot, set health.InputSet, seed int64) colle
 
 // CheckDeclaredInputs fails t when c's output changes under a perturbation of
 // the inputs it does not declare. It names the check and the input.
-// Each run starts from fresh States seeded with the same first-seen times; rt.States is unused.
+// Each run starts from fresh States seeded with the same first-seen times, warmed by one run at
+// in.Now for the Now shift; rt.States is unused.
 func CheckDeclaredInputs(t testing.TB, c health.Check, in health.Input, rt health.Runtime, seed int64) {
 	t.Helper()
 	set := c.Inputs()
@@ -250,10 +251,26 @@ func CheckDeclaredInputs(t testing.TB, c health.Check, in health.Input, rt healt
 	if !set.Clock {
 		perturbed["Now"] = ShiftNow(in, base.Next, seed)
 	}
+	// warmed is fresh States that already ran in once, so a hold keeps the start it took then.
+	warmed := func() *health.States {
+		st := fresh()
+		wrt := rt
+		wrt.States = st
+		health.Evaluate(in, checks, wrt)
+		return st
+	}
 	for what, p := range perturbed {
 		prt := rt
 		prt.States = fresh()
 		prt.Collected = PerturbCollected(rt.Collected, set, seed)
+		want := want
+		if what == "Now" {
+			// A later Now before the next wake on a warmed Store changes nothing, a hold's until included.
+			wrt := rt
+			wrt.States = warmed()
+			want = normalise(health.Evaluate(in, checks, wrt))
+			prt.States = warmed()
+		}
 		got := evaluateRecovering(t, c, p, prt)
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("check %q reads an input it does not declare (perturbed: %s, seed %d)\n declared: %+v\n before: %+v\n after:  %+v", c.Name(), what, seed, set, want, got)

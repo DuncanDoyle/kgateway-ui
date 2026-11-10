@@ -35,13 +35,23 @@ const Strip = styled.div<{ $state: HealthState; stylesOverride?: SerializedStyle
 `;
 
 // region Helpers
+/** A span of s seconds, e.g. "5s", "3h", "16d". */
+function span(s: number): string {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+}
+
 /** Relative time, e.g. "5s ago", "3h ago", "16d ago". */
 export function ago(iso: string, now: number): string {
-  const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
+  return `${span(Math.max(0, Math.round((now - Date.parse(iso)) / 1000)))} ago`;
+}
+
+/** Time until iso, e.g. "in 25s"; "now" once it has passed. */
+export function inTime(iso: string, now: number): string {
+  const s = Math.round((Date.parse(iso) - now) / 1000);
+  return s > 0 ? `in ${span(s)}` : "now";
 }
 
 function sentence(s: string): string {

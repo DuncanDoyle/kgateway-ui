@@ -508,6 +508,8 @@ export const diagnosticsCopy = {
   viewProcesses: "View processes", // S387
   whatWasChecked: "What was checked", // S385
   notAvailable: "Not available", // S358
+  deciding: "Deciding",
+  decidingOn: (n: number, when: string) => `Deciding on ${plural(n, ["object", "objects"])}, ${when}`,
   unavailableReason: {
     off: "Turned off", // S359
     denied: "No permission to read its input", // S360

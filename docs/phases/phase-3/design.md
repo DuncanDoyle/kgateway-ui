@@ -235,6 +235,7 @@ Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-026 an
 - A check whose input is missing returns an unavailable `CheckResult` with its reason: `denied` (RBAC refused the watch), `failing` (the watch or scrape errors), or `off` (its chart toggle is off). "What was checked" shows it as "not available", in the wording it uses for unreachable metrics today.
 - A missing metric family on an older version is `not-on-version`, shown as "not available on this version" (§8.6).
 - A not-available Phase 3 check raises no KGWUI-008 and never turns the verdict unknown. Its findings are simply absent, and "What was checked" says why.
+- A check that is waiting before it decides carries a `hold` (D-068). "What was checked" shows it as "deciding", with how many items and when, never as green. The rollup is unchanged.
 
 Each code has a short docs entry (cause, evidence, fix) in `docs/findings.md`, written in 3.3; a finding's "Learn more" links to it **(our call)**. Messages and next steps go through the wording pass (§17.5).
 

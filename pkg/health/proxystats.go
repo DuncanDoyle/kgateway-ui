@@ -91,7 +91,7 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		var matured []proxystats.Pod
-		var onset time.Time
+		var onset, due time.Time // due: the earliest Pod still inside the age
 		scraped, errs := 0, 0
 		for _, p := range g.Pods {
 			if p.Err != "" {
@@ -115,8 +115,16 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				if onset.IsZero() || t.Before(onset) {
 					onset = t
 				}
+			} else if end := t.Add(ProxyConditionAge); due.IsZero() || end.Before(due) {
+				due = end
+			}
+		}
+		// A Gateway already raised is no held item; its younger Pods only wake the engine.
+		if !due.IsZero() {
+			if len(matured) == 0 {
+				ctx.Hold(due, 1, c.holdReason())
 			} else {
-				ctx.WakeAt(t.Add(ProxyConditionAge))
+				ctx.WakeAt(due)
 			}
 		}
 		// A Gateway with no Pod scraped has no stats; otherwise its failing Pods are counted.
@@ -300,4 +308,12 @@ func proxyGateways(ctx RunContext) map[objects.Ref]*proxystats.Gateway {
 		out[gws[i].Gateway] = &gws[i]
 	}
 	return out
+}
+
+// holdReason is the check's hold reason while a Gateway's proxies are inside ProxyConditionAge.
+func (c proxyStatsCheck) holdReason() string {
+	if c.cond == proxyWarming {
+		return "Waiting for proxies to finish loading config"
+	}
+	return "Waiting for proxies to reconnect"
 }

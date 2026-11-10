@@ -455,11 +455,16 @@ func xdsUnavailable(checks []health.CheckResult) bool {
 	return j >= 0 && !checks[j].OK
 }
 
-// wireChecks is cs with UTC times, never nil.
+// wireChecks is cs with UTC times, never nil. A hold is copied, as the model shares it.
 func wireChecks(cs []health.CheckResult) []health.CheckResult {
 	out := make([]health.CheckResult, len(cs))
 	for k, c := range cs {
 		c.CollectedAt = wireTime(c.CollectedAt)
+		if c.Hold != nil {
+			h := *c.Hold
+			h.Until = wireTime(h.Until)
+			c.Hold = &h
+		}
 		out[k] = c
 	}
 	return out

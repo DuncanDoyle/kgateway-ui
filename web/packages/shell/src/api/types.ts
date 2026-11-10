@@ -55,6 +55,13 @@ export interface CheckResult {
   pending?: boolean;
   /** Why an optional input is missing; such a check never makes the install unknown (D-034). */
   unavailable?: "off" | "denied" | "failing" | "not-on-version" | "not-observed";
+  /** The check is still deciding on count items, first at until; reason names no object (D-068). */
+  hold?: CheckHold;
+}
+export interface CheckHold {
+  until: string;
+  count: number;
+  reason: string;
 }
 /** Health as sent on the wire: checks is null when no check ran. */
 export type RawHealthReport = Omit<HealthReport, "checks"> & { checks: CheckResult[] | null };

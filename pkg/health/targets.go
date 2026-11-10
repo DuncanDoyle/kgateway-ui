@@ -40,6 +40,9 @@ const (
 	targetDisagrees = "%s: computed %s, controller reports ancestor %s."
 )
 
+// targetHoldReason is the resource status hold reason while a policy target is inside TargetHold.
+const targetHoldReason = "Waiting for policy targets to appear"
+
 // targetsKey is the Store key of the holds: hold key → when the target was first seen missing.
 const targetsKey = "policy targets"
 
@@ -48,17 +51,17 @@ type policyTargets struct {
 	in         *Input
 	t          computed.PolicyTargeter
 	prev, next map[string]time.Time
-	wake       func(time.Time)
+	declare    func(until time.Time, count int, reason string)
 }
 
 // newPolicyTargets returns the run's targets state, or nil when the rule set has no PolicyTargeter.
-func (in *Input) newPolicyTargets(st *Store, wake func(time.Time)) *policyTargets {
+func (in *Input) newPolicyTargets(st *Store, declare func(until time.Time, count int, reason string)) *policyTargets {
 	t := in.Rules.PolicyTargeter()
 	if t == nil {
 		return nil
 	}
 	prev, _ := Load[map[string]time.Time](st, targetsKey)
-	return &policyTargets{in: in, t: t, prev: prev, next: map[string]time.Time{}, wake: wake}
+	return &policyTargets{in: in, t: t, prev: prev, next: map[string]time.Time{}, declare: declare}
 }
 
 // save keeps the holds of the targets missing in this run; the rest start over.
@@ -124,13 +127,14 @@ func (p *policyTargets) findings(u *unstructured.Unstructured) (fs []Finding, al
 				}
 			}
 		}
-		if !ancestorDue.IsZero() && in.Now.Before(ancestorDue) {
-			p.wake(ancestorDue)
-		}
+		// A target is one held item, due for 016 first and then for the verifier's 012.
 		if in.Now.Before(due) {
-			p.wake(due)
+			p.declare(due, 1, targetHoldReason)
 			all = false
 			continue
+		}
+		if !ancestorDue.IsZero() && in.Now.Before(ancestorDue) {
+			p.declare(ancestorDue, 1, targetHoldReason)
 		}
 		since := seen
 		f := Finding{Code: CodePolicyTargetNotFound, Slug: "policy-target-not-found", Severity: SeverityWarning, Install: in.Install.ID(),

@@ -19,13 +19,22 @@ Status: not started
 - [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: none
+Sub-phase: 5.7 — Checks report what they are waiting on (E9, #33; D-068)
+Kind: planned (after the Phase 5 close, before Phase 6)
+Base: 78e38f8e
+Brief: docs/phases/phase-5/phase-5.7-brief.md
+Status: implemented and reviewed (reviews/5.7-codex.md); PR next
+
+### Queue
+- [x] Q1 (P2) Declared holds and the `hold` block on check results, API and stream — brief rows 1–9
+- [x] Q2 (P2) "Deciding" state in What was checked — brief rows 10–12
+- [ ] Q3 (P3) Docs (findings.md, snellius.dev), cross-model review, release tag, comment on #33, program file E9 row
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
 Waiting on: none (program file read 2026-11-08; no edge Phase 5 needs is open)
 Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5) and `v0.6.0` (2026-11-09, generic core, kgwctl#7). `v0.6.0` breaks E8 on purpose: controller metrics reach the engine only through `setup.Config.Collected` (`ctrlmetrics.CollectOnce` + `Publish`), kgwctl#6. The program file is updated (kgateway-tooling `ca7f2dd`). kgwctl's E2 requests #18 and #19 are for this phase (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
-Open `cross-repo` issues (2026-11-09): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6); in kgwctl #1–#7 (notices from xdsview and this repo, consumer side).
+Open `cross-repo` issues (2026-11-10): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6), #33 (kgwctl E9, sub-phase 5.7); in kgwctl #1–#7 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
 
 ## Carry-over (deferred to later phases)
@@ -40,6 +49,7 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039). Retained heap is +39.3 of 48 MiB (D-057); Phase 5 must keep the shared cache in the core — src: phases/phase-3/reviews/3.0-gate-codex.md#2
 - (P3) A live `warm_withheld` capture for KGWUI-024's error; on kind the gauge never outlasts a scrape — src: phases/phase-3/phase-3.4-complete.md
 - (P3) README Install: say that installing the chart needs rights to create a ClusterRole and ClusterRoleBinding (usually cluster-admin), since Kubernetes only lets you bind permissions you hold. Next release (2026-11-09)
+- (P4) Watch upstream kgateway#14815 (open, 2026-11-10): GatewayExtension gains an `Accepted` condition with observedGeneration. No phase waits on it. At each phase start, check whether it merged; if so, read the condition when present (an error finding for an in-use extension, as KGWUI-002 does for Backends), and show "not available" when absent
 - (P4) Neutral `Install` and `Detector` (design §14.4 refactors) — Phase 5 G1 (D-061)
 - (P4) kgateway policy ownership, ListenerPolicy CA refs and Backend judgement stay in core packages, inert without kgateway kinds; move behind pack hooks in Phases 6 and 7 — src: phases/phase-5/design.md §4.1, reviews/design-codex.md#4
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified. Its 016-from-status expectation (3.5 S9) is unverified too — src: phases/phase-1/phase-1.4-complete.md, phases/phase-3/phase-3.5-complete.md

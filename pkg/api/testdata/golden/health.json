@@ -28,6 +28,11 @@
       {
         "collectedAt": "2026-10-17T12:00:00Z",
         "error": "1 resource is being processed by the controller",
+        "hold": {
+          "count": 1,
+          "reason": "Waiting for the controller to process resources",
+          "until": "2026-10-17T12:01:00Z"
+        },
         "name": "resource status",
         "ok": false,
         "pending": true,

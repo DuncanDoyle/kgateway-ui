@@ -139,6 +139,7 @@ it("keeps the public export surface", () => {
         "Candidate",
         "Capability",
         "Category",
+        "CheckHold",
         "CheckResult",
         "Computed",
         "ComputedAttachment",
