@@ -86,12 +86,14 @@ type Snapshot struct {
 	Services       []ServiceFact
 	EndpointSlices []SliceFact
 	// Synced is true once every core informer (served kinds, Namespaces,
-	// Pods and Deployments) has synced or failed. Optional watches and
-	// list-only kinds never hold it back.
+	// Pods and Deployments) has synced or failed; from ListOnce, once each
+	// was listed or denied. Optional watches and list-only kinds never hold it back.
 	Synced  bool
 	TakenAt time.Time
 	// Source is the fingerprint of exactly the objects and access states copied.
 	Source Fingerprint
+	// Mode is ModeWatch for a Cache's snapshot and ModeList for ListOnce's.
+	Mode string
 }
 
 // Snapshotter returns the current snapshot.
@@ -138,6 +140,7 @@ type progress struct {
 	failures uint64          // failures so far; a watch-list stream remembers the count it was opened at
 	onChange func()          // called when err turns empty or non-empty; may be nil
 	loops    *sync.WaitGroup // joins the watch wrappers' goroutines; may be nil
+	listed   bool            // ListOnce filled the store from a successful LIST
 }
 
 func (p *progress) failure(err error) {
@@ -197,7 +200,7 @@ func (p *progress) access(synced bool) Access {
 	switch {
 	case p.err != "":
 		return Access{Err: p.err, Denied: p.denied}
-	case !synced:
+	case !synced && !p.listed:
 		return Access{}
 	}
 	return Access{OK: true}
@@ -275,11 +278,20 @@ func (w *observed) Stop() {
 
 // tracked is an informer with the progress of its own List and Watch calls.
 // reg is the change handler's registration; nil without Config.Changes or
-// when registration failed.
+// when registration failed. list and strip are the informer's instrumented
+// List and transform, which ListOnce calls without the informer.
 type tracked struct {
 	inf      toolscache.SharedIndexInformer
 	progress *progress
 	reg      toolscache.ResourceEventHandlerRegistration
+	list     toolscache.ListWithContextFunc
+	strip    toolscache.TransformFunc
+}
+
+// setTransform sets the informer's transform, which ListOnce applies too.
+func (t *tracked) setTransform(f toolscache.TransformFunc) {
+	t.strip = f
+	_ = t.inf.SetTransform(f) // fails only on a started informer
 }
 
 // Cache is a set of informers whose contents are read through Snapshot.
@@ -309,6 +321,8 @@ type Cache struct {
 	settled atomic.Bool
 	// handlerHook, if set, runs in each event handler before it notifies (tests).
 	handlerHook atomic.Pointer[func()]
+	// listed marks ListOnce's cache, where a failed required LIST holds back Synced.
+	listed bool
 }
 
 // handled is every event handler: the test hook, then the notification.
@@ -323,8 +337,9 @@ func (c *Cache) handled() {
 // the reflector whether the client supports watch-list semantics (fakes do not).
 func (c *Cache) informer(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
 	p := &progress{onChange: c.changes.Notify, loops: &c.running}
-	lw := toolscache.ToListWatcherWithWatchListSemantics(instrument(p, list, watchFn), client)
-	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
+	ilw := instrument(p, list, watchFn)
+	lw := toolscache.ToListWatcherWithWatchListSemantics(ilw, client)
+	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p, list: ilw.ListWithContextFunc}
 	if c.changes != nil {
 		notify := func(any) { c.handled() }
 		// Fails only on a stopped informer. Without a handler the kind still
@@ -550,7 +565,7 @@ func accessAll(ts []tracked) Access {
 func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[schema.GroupVersionResource]Access, bool) {
 	acc := make(map[schema.GroupVersionResource]Access, len(c.dyn)+6)
 	synced := true
-	settled := func(a Access) bool { return a.OK || a.Err != "" }
+	settled := func(a Access) bool { return a.OK || a.Denied || a.Err != "" && !c.listed }
 	for gvr, t := range c.dyn {
 		a := access(t)
 		acc[gvr] = a
@@ -617,7 +632,7 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 // Snapshot copies the current cache contents and fingerprints, in the same
 // pass, exactly what it copied.
 func (c *Cache) Snapshot() *Snapshot {
-	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now()}
+	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now(), Mode: ModeWatch}
 	var svcs []*serviceEntry
 	var eps []*sliceEntry
 	var p printer

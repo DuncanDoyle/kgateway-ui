@@ -167,7 +167,7 @@ func (c *Cache) serviceInformer(kube kubernetes.Interface) tracked {
 	t := c.informer(kube, &corev1.Service{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return svcs.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return svcs.Watch(ctx, o) })
-	_ = t.inf.SetTransform(stripService) // fails only on a started informer
+	t.setTransform(stripService)
 	return t
 }
 
@@ -177,6 +177,6 @@ func (c *Cache) sliceInformer(kube kubernetes.Interface) tracked {
 	t := c.informer(kube, &discoveryv1.EndpointSlice{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return es.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return es.Watch(ctx, o) })
-	_ = t.inf.SetTransform(stripSlice) // fails only on a started informer
+	t.setTransform(stripSlice)
 	return t
 }

@@ -462,7 +462,7 @@ func (c *Cache) eventInformer(kube kubernetes.Interface, f *eventFilter) tracked
 			}
 			return newFilterWatch(w, &c.running, f.event), nil
 		})
-	_ = t.inf.SetTransform(stripEvent) // fails only on a started informer
+	t.setTransform(stripEvent)
 	return t
 }
 
