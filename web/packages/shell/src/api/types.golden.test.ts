@@ -65,6 +65,7 @@ import type {
   BackendState,
   Candidate,
   Capability,
+  CheckHold,
   CheckResult,
   Computed,
   ComputedAttachment,
@@ -419,8 +420,9 @@ const check = shape<CheckResult>(
     detail: "?",
     pending: "?",
     unavailable: "?",
+    hold: "?",
   },
-  {},
+  { hold: shape<CheckHold>({ until: "!", count: "!", reason: "!" }) },
   { unavailable: { off: 1, denied: 1, failing: 1, "not-on-version": 1, "not-observed": 1 } },
 );
 const healthReport = shape<HealthReport>(
