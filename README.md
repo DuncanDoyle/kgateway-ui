@@ -185,7 +185,7 @@ A caller with namespace-scoped RBAC sets `cache.Config.Namespaces`. Namespaced i
 ```go
 // Read namespaced kinds only in team-a and team-b
 sc.Cache.Namespaces = []string{"team-a", "team-b"}
-snap, err := cache.ListOnce(ctx, sc.Cache) // a Cache from cache.New(sc.Cache) works too
+snap, err := cache.ListOnce(ctx, sc.Cache) // the same Config you give cache.New
 for gvr, byNS := range snap.NamespaceAccess {
 	fmt.Println(gvr.Resource, byNS["team-b"].Denied) // denied in team-b only
 }

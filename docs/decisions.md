@@ -1258,7 +1258,7 @@ Measured on the reference machine, 5 runs per world:
 
 **Decision:** A `ScopedReader` interface in the core, implemented by the Kubernetes provider, reads one Service's EndpointSlices on request: a paged, label-selected LIST of at most 10 pages of 10 slices. At most 4 reads run at once, each times out after 2 s, and a memo keeps 32 Services for 5 s. Over a bound the result is partial, timed out or busy. The caller is authorised before any read.
 
-**Consequences:** No watch and no retained state beyond the memo. The reader is the first on-demand collector #35 reuses (D-069).
+**Consequences:** No watch and no retained state beyond the memo. The reader is the seam #35 reuses (D-069).
 
 **Alternatives:** Keep addresses in the cached facts: rejected by the memory budget. A Pod watch: rejected for the same reason.
 
