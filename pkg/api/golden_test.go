@@ -565,7 +565,7 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 })
 
 // D-032, D-028: goldens match the wire byte for byte; ids, first-seen sinces, groups,
-// KGWUI-003 freshness evidence and 013/014 refs evidence are the only additions to the Phase 2
+// KGWUI-003 freshness evidence, 013/014 refs evidence and check holds (D-068) are the only additions to the Phase 2
 // bytes, and 013/014 replace 002's code and slug (D-030). It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
