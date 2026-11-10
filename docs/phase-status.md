@@ -23,7 +23,7 @@ Sub-phase: 5.7 — Checks report what they are waiting on (E9, #33; D-068)
 Kind: planned (after the Phase 5 close, before Phase 6)
 Base: 78e38f8e
 Brief: docs/phases/phase-5/phase-5.7-brief.md
-Status: brief written; inferred rows await user confirmation
+Status: brief confirmed (user, 2026-11-10) and reviewed (reviews/5.7-brief-codex.md); ready to implement
 
 ### Queue
 - [ ] Q1 (P2) Declared holds and the `hold` block on check results, API and stream — brief rows 1–9
