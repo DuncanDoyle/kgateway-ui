@@ -1,6 +1,7 @@
 package health
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -235,4 +236,74 @@ func TestNoHoldOnFindingDecay(t *testing.T) {
 			t.Fatalf("check %q holds %+v", c.Name, c.Hold)
 		}
 	}
+}
+
+// A memoized check that reads another check's output reruns when only that output's hold changes.
+func TestHoldChangeRerunsDependentMemo(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	count := 1
+	src := funcCheck{name: "src", inputs: InputSet{Clock: true}, run: func(ctx RunContext) ([]Finding, CheckResult) {
+		ctx.Hold(now.Add(time.Minute), count, "a")
+		return nil, CheckResult{Name: "src", OK: true, CollectedAt: now}
+	}}
+	dep := funcCheck{name: "dep", inputs: InputSet{Checks: []string{"src"}}, run: func(ctx RunContext) ([]Finding, CheckResult) {
+		out, _ := ctx.Output("src")
+		return nil, CheckResult{Name: "dep", OK: true, CollectedAt: now, Detail: fmt.Sprintf("src holds %d", out.Result.Hold.Count)}
+	}}
+	rt := Runtime{States: NewStates(), Print: func(InputSet) (uint64, bool) { return 1, true }}
+	in := Input{Now: now}
+	if d := checkNamed(Evaluate(in, []Check{src, dep}, rt), "dep").Detail; d != "src holds 1" {
+		t.Fatalf("first run: %q", d)
+	}
+	count = 2
+	if d := checkNamed(Evaluate(in, []Check{src, dep}, rt), "dep").Detail; d != "src holds 2" {
+		t.Fatalf("after a hold-only change: %q, want the dependent rerun", d)
+	}
+}
+
+// The verifier's 012 window holds its target after the 016 is raised; the 012 then replaces the hold.
+func TestHoldPolicyTargetVerifier(t *testing.T) {
+	const reason = "Waiting for policy targets to appear"
+	edge := testutil.GwRef("infra", "edge")
+	bare := targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", "nope")}, nil)
+	withAncestor := targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", "nope")}, nil, accepted(edge))
+	w := healthyWorld()
+	w.firstSeen = func(*unstructured.Unstructured) time.Time { return t0 }
+	rt := Runtime{States: NewStates()}
+	run := func(at time.Duration, p *unstructured.Unstructured) Report {
+		w.objs = append(healthyWorld().objs, p)
+		in := w.input(t)
+		in.Rules, in.Now = rules24, t0.Add(Grace+at)
+		return Evaluate(in, Upstream(), rt)
+	}
+	wantHold(t, run(0, bare), "resource status", true, false, t0.Add(Grace+TargetHold), 1, reason)
+	r := run(40*time.Second, withAncestor)
+	if len(targetFindings(r, "infra/tp")) != 1 || len(findingsFor(r, CodeComputedDisagrees, "infra/tp")) != 0 {
+		t.Fatalf("at 40 s: %+v", r.Findings)
+	}
+	wantHold(t, r, "resource status", true, false, t0.Add(Grace+40*time.Second+TargetHold), 1, reason)
+	r = run(71*time.Second, withAncestor)
+	if len(findingsFor(r, CodeComputedDisagrees, "infra/tp")) != 1 {
+		t.Fatalf("at 71 s: %+v", r.Findings)
+	}
+	wantNoHold(t, r, "resource status")
+}
+
+// Resource grace and a policy target in one run: pending as for grace, the
+// counts summed and until the earlier of the two due times.
+func TestHoldResourceGraceAndPolicyTarget(t *testing.T) {
+	young := testutil.HTTPRoute("shop", "young", []objects.ParentRef{testutil.GwRef("infra", "edge")})
+	w := healthyWorld()
+	w.objs = append(w.objs, young, targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil))
+	w.firstSeen = func(u *unstructured.Unstructured) time.Time {
+		if u.GetName() == "young" {
+			return t0.Add(Grace - 40*time.Second) // grace ends at grace + 20 s
+		}
+		return t0
+	}
+	in := w.input(t)
+	in.Rules, in.Now = rules24, t0.Add(Grace+5*time.Second) // the target is due at grace + 35 s
+	r := Evaluate(in, Upstream(), Runtime{States: NewStates()})
+	wantHold(t, r, "resource status", false, true, t0.Add(Grace+20*time.Second), 2,
+		"Waiting for policy targets to appear; Waiting for the controller to process resources")
 }

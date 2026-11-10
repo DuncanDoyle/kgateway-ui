@@ -81,10 +81,22 @@ func holdSnapshot(t *testing.T) *cache.Snapshot {
 
 // A running engine with unchanged inputs and no safety recompute: at the
 // hold's until it recomputes by itself, and the API shows the finding, not the hold.
+// With a source fingerprint the check memos are on, and an expired hold is never reused.
 func TestRunningEngineDecidesAtHoldUntil(t *testing.T) {
+	for _, memo := range []bool{false, true} {
+		t.Run(map[bool]string{false: "memo off", true: "memo on"}[memo], func(t *testing.T) { runningHold(t, memo) })
+	}
+}
+
+func runningHold(t *testing.T, memo bool) {
+	snap := holdSnapshot(t)
+	if memo {
+		snap.Source = cache.Fingerprint{Kinds: map[string]cache.KindPrint{"routes": {Count: 1}}}
+	}
 	fc := testutil.FakeClock()
+	src := clockedSnap{snap, fc.Now}
 	ev := make(chan engine.LoopEvent, 1024)
-	e := engine.New(engine.Config{Snapshots: largeSnap{holdSnapshot(t)}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
+	e := engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
 		Collected: served(okMetrics("kgw.kgateway"), 0, nil), Checks: health.Upstream(), Clock: fc, Now: fc.Now,
 		OnLoop: func(x engine.LoopEvent) {
@@ -123,4 +135,16 @@ func TestRunningEngineDecidesAtHoldUntil(t *testing.T) {
 	if c := checkOf(h, "backend endpoints"); findingCode(h, health.CodeBackendNoReadyEndpoints) == nil || c.Hold != nil {
 		t.Fatalf("at until: %+v %+v", c, h.Findings)
 	}
+}
+
+// clockedSnap serves s taken at now, as the cache stamps each snapshot, so a memo can restamp it.
+type clockedSnap struct {
+	s   *cache.Snapshot
+	now func() time.Time
+}
+
+func (c clockedSnap) Snapshot() *cache.Snapshot {
+	s := *c.s
+	s.TakenAt = c.now()
+	return &s
 }
