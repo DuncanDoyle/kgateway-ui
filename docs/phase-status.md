@@ -4,22 +4,30 @@
 Phase: 6 — Traffic Flow & Backends
 Base: 657378ad
 Docs: docs/phases/phase-6/
-Status: design in progress (started 2026-11-10); field research done (private), proxy endpoint view moved after GA (D-069, #35)
+Status: implementing (design and plan approved 2026-11-10; plan approved on condition that Claude and Codex agree, which they did). Branch `duncandoyle/phase6`, worktree `../snellius-phase6`. Field research done (private); proxy endpoint view after GA (D-069, #35)
 
 ### Queue
-(none yet; the design comes first)
+Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a time:
+- [ ] 6.1 cache access for kgwctl (Tasks 19–21) ← CURRENT
+- [ ] 6.2 path model, paths API, path list (Tasks 22–32)
+- [ ] 6.3 backends (Tasks 33–39)
+- [ ] 6.4 route trace, all route kinds (Tasks 40–42)
+- [ ] 6.5 Gateway map, core (Tasks 43–47)
+- [ ] 6.6 Gateway map, the rest; phase close (Tasks 48–50)
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
-- [ ] design+plan cross-model review + triage
+- [x] design+plan cross-model review + triage (reviews/design-codex.md, reviews/plan-codex.md)
 - [ ] phase cross-model review + triage
 - [ ] decisions.md / design / plan in sync with code
 - [ ] snellius.dev matches the user-visible changes (program P-006; `npm run sync:findings` for finding codes)
 - [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 6.1 — Cache access for kgwctl (planned)
+Base: 5704f91
+Brief: phases/phase-6/phase-6.1-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
@@ -40,7 +48,7 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039). Retained heap is +39.3 of 48 MiB (D-057); Phase 5 must keep the shared cache in the core — src: phases/phase-3/reviews/3.0-gate-codex.md#2
 - (P3) A live `warm_withheld` capture for KGWUI-024's error; on kind the gauge never outlasts a scrape — src: phases/phase-3/phase-3.4-complete.md
 - (P3) README Install: say that installing the chart needs rights to create a ClusterRole and ClusterRoleBinding (usually cluster-admin), since Kubernetes only lets you bind permissions you hold. Next release (2026-11-09)
-- (P4) Watch upstream kgateway#14815 (open, 2026-11-10): GatewayExtension gains an `Accepted` condition with observedGeneration. No phase waits on it. At each phase start, check whether it merged; if so, read the condition when present (an error finding for an in-use extension, as KGWUI-002 does for Backends), and show "not available" when absent
+- (P4) Watch upstream kgateway#14815 (open, checked 2026-11-10 at Phase 6 start): GatewayExtension gains an `Accepted` condition with observedGeneration. No phase waits on it. At each phase start, check whether it merged; if so, read the condition when present (an error finding for an in-use extension, as KGWUI-002 does for Backends), and show "not available" when absent
 - (P4) Neutral `Install` and `Detector` (design §14.4 refactors) — Phase 5 G1 (D-061)
 - (P4) kgateway policy ownership, ListenerPolicy CA refs and Backend judgement stay in core packages, inert without kgateway kinds; move behind pack hooks in Phases 6 and 7 — src: phases/phase-5/design.md §4.1, reviews/design-codex.md#4
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified. Its 016-from-status expectation (3.5 S9) is unverified too — src: phases/phase-1/phase-1.4-complete.md, phases/phase-3/phase-3.5-complete.md
