@@ -109,7 +109,7 @@ Why now: about 60% of the code is already generic, and the refactor is cheaper b
 - Where a route actually sends traffic: Services and Backends, weights, endpoint health and endpoint discovery status.
 - A scoped flow diagram centred on a single gateway or route.
 - A Backends list (kgateway `Backend` objects, Kubernetes Services and any other kind a route sends traffic to). Selecting one shows every route that routes to it, through which Gateways, listeners and hostnames: how this backend is exposed. It is the inverse of the route page's "other routes using this backend" (user, 2026-11-07).
-- Must work with `Backend` and Envoy cluster health alone; Services and EndpointSlices are optional (D-016).
+- Must work with `Backend` status alone; Services and EndpointSlices are optional (D-016). Envoy cluster and endpoint health from the proxies moves to the proxy endpoint view after GA (D-069, #35); Phase 6 keeps the seams for it.
 
 ### Phase 7 — Policies & Filters
 **Status:** Not started
@@ -207,6 +207,7 @@ The evidence from Phases 6–8 (backends, policies, the route tester) is what ma
 - **A kgateway CLI** is now a planned separate project. It imports `pkg/cache` and `pkg/engine` for a one-shot load (edge E2) and the Phase 3.3 analyzer as a package (edge E3). The MCP server milestone covers part of this need.
 - **A Headlamp plugin.** It would be a second surface; one surface comes first.
 - **A support-bundle export.** Revisit after Phase 11.
+- **Proxy endpoint view** (#35, D-069). Per-proxy endpoints, health and drift against Kubernetes and the controller, opt-in. After GA; needs an upstream kgateway option for read-only `/clusters`.
 - **The agentgateway data plane.** It has its own controller, so this roadmap covers the Envoy data plane only.
 - **GRPCRoute, TCPRoute and TLSRoute.** Not in Phase 2 scope (HTTPRoute first). Added when a phase design pulls them in.
 

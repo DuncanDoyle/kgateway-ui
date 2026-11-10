@@ -1195,3 +1195,14 @@ Measured on the reference machine, 5 runs per world:
 - Derive times from cluster timestamps: rejected by kgwctl, since deletions, retries and webhooks leave none.
 
 **Consequences:** `hold` is public API from the release that carries it. The per-collector next-run time stays out unless a later edge asks for it.
+
+## D-069 — Proxy endpoint health moves after GA (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; #35)
+
+**Context:** The roadmap asked Phase 6 to work with `Backend` objects and Envoy cluster health alone (D-016). Field reports show the proxy side is where the hardest backend problems sit: stale or diverging endpoints per replica, ejected endpoints, limits nobody set. Showing it needs data Snellius doesn't read today. Per-endpoint data is on the proxy admin port, which kgateway binds to localhost. Per-cluster counters need a cluster-to-backend mapping that D-058 deferred. Phase 6 also carries the topology graph and the backend inventory.
+
+**Decision:** Phase 6 covers backends from Kubernetes and from kgateway `Backend` status. Envoy cluster and endpoint health per proxy, and drift between Kubernetes, the controller and the proxies, move to an opt-in proxy endpoint view after GA (#35). Phase 6 keeps its seams open: runtime identity per install, Gateway and proxy; a cluster-mapping hook that may return several results or "unknown"; endpoints modelled by source with completeness; per-proxy sections in backend detail; scoped, time-limited collectors; backend health that can take a later proxy input.
+
+**Alternatives:** Per-cluster counters from the stats Snellius already reads, in Phase 6: rejected for now, since the mapping to backends is the hard part and it would grow Phase 6.
+
+**Consequences:** A backend without Kubernetes endpoints shows `Backend` status only until #35. The Phase 6 design checks each seam above against #35.

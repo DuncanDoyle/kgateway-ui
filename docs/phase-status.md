@@ -4,7 +4,7 @@
 Phase: 6 — Traffic Flow & Backends
 Base: 657378ad
 Docs: docs/phases/phase-6/
-Status: design in progress (started 2026-11-10)
+Status: design in progress (started 2026-11-10); field research done (private), proxy endpoint view moved after GA (D-069, #35)
 
 ### Queue
 (none yet; the design comes first)
