@@ -2,9 +2,9 @@
 
 ## Phase
 Phase: 6 — Traffic Flow & Backends
-Base: (set when the phase starts)
+Base: 657378ad
 Docs: docs/phases/phase-6/
-Status: not started
+Status: design in progress (started 2026-11-10)
 
 ### Queue
 (none yet; the design comes first)
@@ -23,7 +23,7 @@ none
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
-Waiting on: none (program file read 2026-11-08; no edge Phase 5 needs is open)
+Waiting on: none (program file read 2026-11-10; Phase 6 needs no open edge. It answers kgwctl's E2 requests #18 and #19)
 Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5) and `v0.6.0` (2026-11-09, generic core, kgwctl#7). `v0.6.0` breaks E8 on purpose: controller metrics reach the engine only through `setup.Config.Collected` (`ctrlmetrics.CollectOnce` + `Publish`), kgwctl#6. The program file is updated (kgateway-tooling `ca7f2dd`). kgwctl's E2 requests #18 and #19 are for this phase (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
 Open `cross-repo` issues (2026-11-10): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6), in kgwctl #1–#7 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
