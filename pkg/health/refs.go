@@ -350,15 +350,20 @@ func kindNotServedMessage(bad []RefLocation) string {
 // field is a core Service ref with a Service the cache lacks or a port it
 // lacks, and every other ref is a core Service ref the cache shows resolving.
 // A ref the UI cannot check may be the cause, so it leaves the finding as is.
-// It needs the Services watch OK: absence from a cache that is not synced says nothing.
+// It needs the Services watch OK, and in a scoped snapshot each ref's namespace
+// read: absence from a cache that did not read it says nothing.
 func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []writtenRef) {
 	if in.Snapshot == nil || !in.Snapshot.Access[cache.ServicesGVR].OK {
 		return
 	}
+	scoped := len(in.Snapshot.RequestedNamespaces) > 0
 	var hit *writtenRef
 	var hitSvc *cache.ServiceFact
 	for i, r := range field {
 		if r.delegation || r.Ref.Group != "" || r.Ref.Kind != "Service" {
+			return
+		}
+		if scoped && !in.Snapshot.NamespaceAccess[cache.ServicesGVR][r.Ref.Namespace].OK {
 			return
 		}
 		svc := in.service(r.Ref)

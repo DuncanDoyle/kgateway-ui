@@ -61,17 +61,32 @@ func (p servicePort) key() string { return p.ns + "/" + p.name + ":" + strconv.I
 func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	at := takenAt(in)
-	res := ok(c.Name(), false, at)
-	var skip map[string]bool
-	if why, detail := endpointsAvailability(in.Snapshot); why != "" {
-		if skip = unreadableNamespaces(in.Snapshot); skip == nil {
-			ctx.State.Set(endpointsStartsKey, nil)
-			return nil, NotAvailable(c.Name(), why, detail, at)
+	why, detail := endpointsAvailability(in.Snapshot)
+	scoped := len(in.Snapshot.RequestedNamespaces) > 0
+	if why != "" && (!scoped || !slices.ContainsFunc(in.Snapshot.RequestedNamespaces, func(ns string) bool { return endpointsReadable(in.Snapshot, ns) })) {
+		ctx.State.Set(endpointsStartsKey, nil)
+		return nil, NotAvailable(c.Name(), why, detail, at)
+	}
+	// unread are the namespaces a scoped snapshot cannot judge: requested ones not OK, and referenced ones not read.
+	unread := map[string]bool{}
+	if scoped {
+		for _, ns := range in.Snapshot.RequestedNamespaces {
+			if !endpointsReadable(in.Snapshot, ns) {
+				unread[ns] = true
+			}
 		}
-		res = NotAvailable(c.Name(), why, fmt.Sprintf(endpointsNSDetail, strings.Join(slices.Sorted(maps.Keys(skip)), ", ")), at)
+	}
+	result := func() CheckResult {
+		if len(unread) == 0 {
+			return ok(c.Name(), false, at)
+		}
+		if why == "" {
+			why = AvailNotObserved
+		}
+		return NotAvailable(c.Name(), why, fmt.Sprintf(endpointsNSDetail, strings.Join(slices.Sorted(maps.Keys(unread)), ", ")), at)
 	}
 	if in.Owned == nil {
-		return nil, res
+		return nil, result()
 	}
 	svcs := make(map[string]*cache.ServiceFact, len(in.Snapshot.Services))
 	for i := range in.Snapshot.Services {
@@ -93,7 +108,8 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		route := objects.RefOf(r.Obj)
 		for _, sp := range serviceRefs(r.Obj) {
-			if skip[sp.ns] {
+			if scoped && !endpointsReadable(in.Snapshot, sp.ns) {
+				unread[sp.ns] = true
 				continue // unknown, never ready
 			}
 			svc := svcs[sp.ns+"/"+sp.name]
@@ -144,7 +160,7 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	slices.SortFunc(fs, func(a, b Finding) int {
 		return cmp.Or(a.Resource.Compare(*b.Resource), cmp.Compare(a.Facts.(*EndpointsEvidence).Port, b.Facts.(*EndpointsEvidence).Port))
 	})
-	return fs, res
+	return fs, result()
 }
 
 // endpointsAvailability says why Services or EndpointSlices cannot feed 023:
@@ -171,27 +187,10 @@ func endpointsAvailability(snap *cache.Snapshot) (Availability, string) {
 	return why, detail
 }
 
-// unreadableNamespaces returns the namespaces of a scoped snapshot where
-// Services or EndpointSlices are not OK; nil when cluster-wide or when no namespace is OK.
-func unreadableNamespaces(snap *cache.Snapshot) map[string]bool {
-	svcs, eps := snap.NamespaceAccess[cache.ServicesGVR], snap.NamespaceAccess[cache.EndpointSlicesGVR]
-	if svcs == nil || eps == nil {
-		return nil
-	}
-	skip, readable := map[string]bool{}, false
-	for _, byNS := range []map[string]cache.Access{svcs, eps} {
-		for ns := range byNS {
-			if svcs[ns].OK && eps[ns].OK {
-				readable = true
-			} else {
-				skip[ns] = true
-			}
-		}
-	}
-	if !readable {
-		return nil
-	}
-	return skip
+// endpointsReadable reports whether a scoped snapshot read both Services and
+// EndpointSlices in namespace ns; a namespace it did not request is not read.
+func endpointsReadable(snap *cache.Snapshot, ns string) bool {
+	return snap.NamespaceAccess[cache.ServicesGVR][ns].OK && snap.NamespaceAccess[cache.EndpointSlicesGVR][ns].OK
 }
 
 // resolvedHere reports whether route u has, on one of parents, a current

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -50,13 +49,8 @@ func TestDeniedNamespaceIsUnknown(t *testing.T) {
 	if hasFinding(rep, health.CodeBackendNoReadyEndpoints, "b/web", "") {
 		t.Fatalf("the Service in denied b is judged: %v", neutralFindings(rep))
 	}
-	var chk *health.CheckResult
-	for i := range rep.Checks {
-		if rep.Checks[i].Name == "backend endpoints" {
-			chk = &rep.Checks[i]
-		}
-	}
-	if chk == nil || chk.OK || chk.Unavailable != health.AvailDenied || !strings.Contains(chk.Error, "b") || strings.Contains(chk.Error, "a,") {
+	if chk := checkOf(rep, "backend endpoints"); chk == nil || chk.OK || chk.Unavailable != health.AvailDenied ||
+		chk.Error != "Services or EndpointSlices are not available in namespaces b" {
 		t.Fatalf("backend endpoints check %+v, want not available (denied) naming b", chk)
 	}
 
@@ -69,6 +63,53 @@ func TestDeniedNamespaceIsUnknown(t *testing.T) {
 	if rep := e.Compute().Installs[0].Health; hasFinding(rep, health.CodeBackendNoReadyEndpoints, "", "") {
 		t.Fatalf("all namespaces denied: %v", neutralFindings(rep))
 	}
+
+	// Every requested namespace readable, refs to c, which was never requested: c is
+	// neither judged nor explained, though c/web is absent from the snapshot.
+	snap.Access[cache.ServicesGVR] = ok
+	snap.NamespaceAccess[cache.ServicesGVR] = map[string]cache.Access{"a": ok, "b": ok}
+	route.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{
+		map[string]any{"name": "web", "namespace": "c", "port": int64(8080)}}}}
+	unresolved := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}
+	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: unresolved})
+	broken.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{
+		map[string]any{"name": "web", "namespace": "c", "port": int64(8080)}}}}
+	scoped := snapshot(t, route, broken)
+	scoped.Services, scoped.EndpointSlices = snap.Services, snap.EndpointSlices
+	scoped.RequestedNamespaces, scoped.NamespaceAccess = snap.RequestedNamespaces, snap.NamespaceAccess
+	scoped.Access[cache.ServicesGVR], scoped.Access[cache.EndpointSlicesGVR] = ok, ok
+	now = testutil.Now
+	e = New(config(scoped, metricsAt(testutil.Now), func() time.Time { return now }))
+	e.Compute()
+	now = now.Add(health.EndpointsHold + health.Grace + time.Second)
+	rep = e.Compute().Installs[0].Health
+	if chk := checkOf(rep, "backend endpoints"); chk == nil || chk.OK || chk.Unavailable != health.AvailNotObserved ||
+		chk.Error != "Services or EndpointSlices are not available in namespaces c" {
+		t.Fatalf("backend endpoints check %+v, want not available naming c", chk)
+	}
+	var refs bool
+	for _, f := range rep.Findings {
+		if f.Code != health.CodeRefUnresolved {
+			continue
+		}
+		refs = true
+		if ev, _ := f.Facts.(*health.RefsEvidence); ev == nil || ev.Explanation == health.RefExplainServiceMissing {
+			t.Fatalf("a Service in an unrequested namespace is explained: %+v", f)
+		}
+	}
+	if !refs {
+		t.Fatalf("no KGWUI-013 for shop/broken: %v", neutralFindings(rep))
+	}
+}
+
+// checkOf is rep's result of check name, or nil.
+func checkOf(rep health.Report, name string) *health.CheckResult {
+	for i := range rep.Checks {
+		if rep.Checks[i].Name == name {
+			return &rep.Checks[i]
+		}
+	}
+	return nil
 }
 
 // A class-only install's controller is never seen. In a scoped snapshot that is
