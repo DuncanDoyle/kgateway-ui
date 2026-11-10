@@ -230,6 +230,19 @@ func packImports(rel string, f *ast.File) []string {
 	return out
 }
 
+// The path model is core (Phase 6 design §4): no pack package and no
+// packAllowed entry, so the check below covers all of pkg/paths.
+func TestPathsIsCore(t *testing.T) {
+	if inPack("pkg/paths") {
+		t.Fatal("pkg/paths is a pack package")
+	}
+	for f := range packAllowed {
+		if strings.HasPrefix(f, "pkg/paths/") {
+			t.Fatalf("%s may import a pack package", f)
+		}
+	}
+}
+
 // Core code names no kgateway-pack package unless its file is listed with a
 // reason (Phase 5 design §13): wiring, the compatibility surface, or a pack
 // check still housed in pkg/health.
