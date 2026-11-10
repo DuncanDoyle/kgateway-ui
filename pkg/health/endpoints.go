@@ -28,6 +28,7 @@ const (
 	endpointsDetail     = "Service `%s` has no ready endpoints for port %d."
 	endpointsOffDetail  = "Services and EndpointSlices are not watched"
 	endpointsSyncDetail = "Services and EndpointSlices are not synced yet"
+	endpointsHoldReason = "Waiting for backends to get ready endpoints"
 )
 
 // endpointsCheck: KGWUI-023, one per Service port that a resolved core Service
@@ -119,7 +120,7 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		starts[sp.key()] = t
 		if in.Now.Sub(t) < EndpointsHold {
-			ctx.WakeAt(t.Add(EndpointsHold))
+			ctx.Hold(t.Add(EndpointsHold), 1, endpointsHoldReason)
 			continue
 		}
 		slices.SortFunc(ev.Routes, objects.Ref.Compare)

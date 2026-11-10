@@ -275,8 +275,13 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		res    objects.Ref
 		parent objects.ParentRef
 	}
-	reported := map[pendingKey]int{}  // index in fs
-	inGrace := map[objects.Ref]bool{} // resources being processed
+	reported := map[pendingKey]int{}       // index in fs
+	inGrace := map[objects.Ref]time.Time{} // resources being processed: their grace end
+	grace := func(r objects.Ref, end time.Time) {
+		if at, ok := inGrace[r]; !ok || end.Before(at) {
+			inGrace[r] = end
+		}
+	}
 	// notProcessed reports u (for parent) once: info while u's current
 	// generation was first seen less than Grace ago, warning after. A later
 	// block whose kind comes first in §10.1 order replaces the evidence.
@@ -291,9 +296,9 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		reported[k] = len(fs)
 		sev := SeverityWarning
-		if in.Now.Sub(in.firstSeen(u)) < Grace {
+		if seen := in.firstSeen(u); in.Now.Sub(seen) < Grace {
 			sev, msg = SeverityInfo, "Being processed by the controller"
-			inGrace[r] = true
+			grace(r, seen.Add(Grace))
 		}
 		key := []string{ownerSelf}
 		if parent != (objects.ParentRef{}) {
@@ -469,7 +474,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	for _, d := range in.Owned.Declared {
 		f := declaredFinding(in, d)
 		if f.Severity == SeverityInfo {
-			inGrace[*f.Resource] = true
+			grace(*f.Resource, declaredGraceStart(in, d).Add(Grace))
 		}
 		fs = append(fs, f)
 	}
@@ -481,7 +486,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// processed only for another install, so none here means not yet processed;
 	// on v2.3/v2.4 that includes a policy whose target is missing. A computed
 	// 016 for every target replaces that 003 (design §7.6).
-	targets := in.newPolicyTargets(ctx.State, ctx.WakeAt)
+	targets := in.newPolicyTargets(ctx.State, ctx.Hold)
 	for _, p := range in.Owned.Policies {
 		tfs, allMissing := targets.findings(p.Obj)
 		fs = append(fs, tfs...)
@@ -541,6 +546,9 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		return 0, false
 	})
+	for _, end := range inGrace {
+		ctx.Hold(end, 1, resourceHoldReason)
+	}
 	if n := len(inGrace); n > 0 {
 		noun := "resources are"
 		if n == 1 {
@@ -739,8 +747,9 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 					Resource: ref(gw), Message: "Self-managed proxy: the UI cannot see its readiness"})
 				continue
 			}
-			if in.Now.Sub(in.firstSeen(gw)) < Grace {
+			if seen := in.firstSeen(gw); in.Now.Sub(seen) < Grace {
 				inGrace++
+				ctx.Hold(seen.Add(Grace), 1, proxyHoldReason)
 				continue
 			}
 			fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
@@ -786,6 +795,12 @@ func addProxyDeployerErrors(ctx RunContext, fs []Finding) {
 		}
 	}
 }
+
+// Hold reasons of the resource status and gateway proxies grace (D-068).
+const (
+	resourceHoldReason = "Waiting for the controller to process resources"
+	proxyHoldReason    = "Waiting for proxy deployments to appear"
+)
 
 // proxyAmbiguousMessage is 006's message when several Deployments carry the Gateway's label.
 const proxyAmbiguousMessage = "More than one proxy Deployment matches this Gateway"

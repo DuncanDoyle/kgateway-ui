@@ -185,6 +185,9 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	}
 	ctx := runContext(in, c, set, rt, outputs)
 	fs, cr = c.Run(ctx)
+	if ctx.sink.hold != nil {
+		cr.Hold = ctx.sink.hold
+	}
 	wake = ctx.sink.wake
 	sinces := identify(in.Install.ID(), in.Now, fs, ctx.State, rt.States.checkIDs(c.Name()))
 	var keep map[string]bool
@@ -412,5 +415,10 @@ func outputPrint(fs []Finding, cr CheckResult) uint64 {
 		at(&w.Last)
 	}
 	str(cr.ControllerLogs)
+	if flag(cr.Hold != nil); cr.Hold != nil {
+		at(&cr.Hold.Until)
+		u64(uint64(cr.Hold.Count)) //nolint:gosec // hashed bits
+		str(cr.Hold.Reason)
+	}
 	return h.Sum64()
 }

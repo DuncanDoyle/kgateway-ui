@@ -96,6 +96,9 @@ const (
 	progressMin     = 3
 )
 
+// progressHoldReason is 018's hold reason.
+const progressHoldReason = "Waiting to see if status catches up"
+
 // progressKey is the progress check's Store key.
 const progressKey = "progress"
 
@@ -196,7 +199,7 @@ func (c progressCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	// Design §10.2: one object must have stayed stuck for the hold, not only the count.
 	if due := st.longest(kinds, in.Now).Add(progressHold); in.Now.Before(due) {
-		ctx.WakeAt(due)
+		ctx.Hold(due, stuck, progressHoldReason)
 		return nil, res
 	}
 	ev := &StatusProgressEvidence{Kinds: countKinds(kinds), Oldest: oldest}

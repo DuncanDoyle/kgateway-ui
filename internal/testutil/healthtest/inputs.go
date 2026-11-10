@@ -254,7 +254,11 @@ func CheckDeclaredInputs(t testing.TB, c health.Check, in health.Input, rt healt
 		prt := rt
 		prt.States = fresh()
 		prt.Collected = PerturbCollected(rt.Collected, set, seed)
-		got := evaluateRecovering(t, c, p, prt)
+		got, want := evaluateRecovering(t, c, p, prt), want
+		if what == "Now" {
+			// A hold first seen on a fresh Store runs from Now, as its wake does; a kept Store keeps its start.
+			got, want = withoutHoldUntil(got), withoutHoldUntil(want)
+		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("check %q reads an input it does not declare (perturbed: %s, seed %d)\n declared: %+v\n before: %+v\n after:  %+v", c.Name(), what, seed, set, want, got)
 		}
@@ -285,4 +289,18 @@ func normalise(r health.Report) guardOutput {
 		out.Checks[i].CollectedAt = time.Time{}
 	}
 	return out
+}
+
+// withoutHoldUntil is o with each hold's Until zeroed, on copies of the holds.
+func withoutHoldUntil(o guardOutput) guardOutput {
+	cs := append([]health.CheckResult(nil), o.Checks...)
+	for i := range cs {
+		if h := cs[i].Hold; h != nil {
+			cp := *h
+			cp.Until = time.Time{}
+			cs[i].Hold = &cp
+		}
+	}
+	o.Checks = cs
+	return o
 }
