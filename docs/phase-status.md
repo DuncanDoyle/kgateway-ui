@@ -23,11 +23,11 @@ Sub-phase: 5.7 — Checks report what they are waiting on (E9, #33; D-068)
 Kind: planned (after the Phase 5 close, before Phase 6)
 Base: 78e38f8e
 Brief: docs/phases/phase-5/phase-5.7-brief.md
-Status: brief confirmed (user, 2026-11-10) and reviewed (reviews/5.7-brief-codex.md); ready to implement
+Status: implemented and reviewed (reviews/5.7-codex.md); PR next
 
 ### Queue
-- [ ] Q1 (P2) Declared holds and the `hold` block on check results, API and stream — brief rows 1–9
-- [ ] Q2 (P2) "Deciding" state in What was checked — brief rows 10–12
+- [x] Q1 (P2) Declared holds and the `hold` block on check results, API and stream — brief rows 1–9
+- [x] Q2 (P2) "Deciding" state in What was checked — brief rows 10–12
 - [ ] Q3 (P3) Docs (findings.md, snellius.dev), cross-model review, release tag, comment on #33, program file E9 row
 
 ## Program
