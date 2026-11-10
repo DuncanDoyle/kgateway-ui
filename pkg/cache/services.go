@@ -161,22 +161,24 @@ func sliceFact(es *discoveryv1.EndpointSlice) SliceFact {
 	return f
 }
 
-// serviceInformer watches every Service, cut down to a ServiceFact's fields.
-func (c *Cache) serviceInformer(kube kubernetes.Interface) tracked {
-	svcs := kube.CoreV1().Services("")
+// serviceInformer watches the Services of namespace ns ("" for all), cut down to a ServiceFact's fields.
+func (c *Cache) serviceInformer(kube kubernetes.Interface, ns string) tracked {
+	svcs := kube.CoreV1().Services(ns)
 	t := c.informer(kube, &corev1.Service{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return svcs.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return svcs.Watch(ctx, o) })
+	t.namespace = ns
 	t.setTransform(stripService)
 	return t
 }
 
-// sliceInformer watches every EndpointSlice, cut down to a SliceFact's fields.
-func (c *Cache) sliceInformer(kube kubernetes.Interface) tracked {
-	es := kube.DiscoveryV1().EndpointSlices("")
+// sliceInformer watches the EndpointSlices of namespace ns ("" for all), cut down to a SliceFact's fields.
+func (c *Cache) sliceInformer(kube kubernetes.Interface, ns string) tracked {
+	es := kube.DiscoveryV1().EndpointSlices(ns)
 	t := c.informer(kube, &discoveryv1.EndpointSlice{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return es.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return es.Watch(ctx, o) })
+	t.namespace = ns
 	t.setTransform(stripSlice)
 	return t
 }

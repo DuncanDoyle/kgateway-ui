@@ -93,7 +93,7 @@ func TestServiceTransformShape(t *testing.T) {
 			t.Errorf("Service %d: %+v, want %+v", i, g, want[i])
 		}
 	}
-	for _, o := range w.c.services.inf.GetStore().List() {
+	for _, o := range w.c.services[0].inf.GetStore().List() {
 		if _, ok := o.(*serviceEntry); !ok {
 			t.Fatalf("stored Service %T, want only its fact", o)
 		}
@@ -129,7 +129,7 @@ func TestSliceFactsCountReadyPerPortName(t *testing.T) {
 			t.Errorf("slice %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	for _, o := range w.c.slices.inf.GetStore().List() {
+	for _, o := range w.c.slices[0].inf.GetStore().List() {
 		if _, ok := o.(*sliceEntry); !ok {
 			t.Fatalf("stored EndpointSlice %T, want only its fact", o)
 		}

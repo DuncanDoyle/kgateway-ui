@@ -35,16 +35,14 @@ func ListOnce(ctx context.Context, cfg Config) (*Snapshot, error) {
 	c := New(cfg)
 	c.listed = true
 	inputs := c.all()
-	for gvr, t := range c.dyn {
+	for gvr, ts := range c.dyn {
 		if c.listOnly[gvr] {
-			inputs = append(inputs, t)
+			inputs = append(inputs, ts...)
 		}
 	}
-	inputs = append(inputs, c.proxyPods...)
-	for _, t := range []*tracked{c.crds, c.services, c.slices} {
-		if t != nil {
-			inputs = append(inputs, *t)
-		}
+	inputs = slices.Concat(inputs, c.proxyPods, c.services, c.slices)
+	if c.crds != nil {
+		inputs = append(inputs, *c.crds)
 	}
 	var wg sync.WaitGroup
 	for _, t := range inputs {

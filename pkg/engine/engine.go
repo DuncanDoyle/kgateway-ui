@@ -360,6 +360,14 @@ func (e *Engine) compute() *Published {
 		h := e.cfg.HooksFor(i)
 		return h.Scope, h.Settings
 	})
+	// A scoped snapshot may hide a controller; a class-only install's is never seen (design §12.2).
+	if len(snap.RequestedNamespaces) > 0 {
+		for i := range all {
+			if classOnly[all[i].ID()] && all[i].Scope.Source == install.SourceAssumed {
+				all[i].Scope.Source = install.SourceNotObserved
+			}
+		}
+	}
 	next := deadlines{now: now}
 	// Read once: the version, the verifier, health and the source print share this evidence.
 	var col collect.Snapshot

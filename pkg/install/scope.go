@@ -242,6 +242,10 @@ func Resolve(insts []Install, p ScopeProvider) []Resolved {
 // SourceAssumed is the Scope.Source of an install without a scope provider.
 const SourceAssumed = "assumed"
 
+// SourceNotObserved is the Scope.Source of an install whose controller a
+// namespace-scoped snapshot does not show, as opposed to one known to be outside it.
+const SourceNotObserved = "controller not observed"
+
 // NotRead is the Setting.Reason of an install without a settings reader.
 const NotRead = "not read for this controller"
 

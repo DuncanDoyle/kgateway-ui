@@ -171,6 +171,11 @@ func TestListOnceErrors(t *testing.T) {
 	if _, err := ListOnce(context.Background(), cfg); err == nil {
 		t.Fatal("nil Dynamic: no error")
 	}
+	cfg = w.cfg
+	cfg.Kube = nil
+	if _, err := ListOnce(context.Background(), cfg); err == nil {
+		t.Fatal("nil Kube: no error")
+	}
 	// A failure on every optional input is still a partial result, never an error.
 	for _, r := range []string{"services", "endpointslices", "events", "pods"} {
 		w.kube.PrependReactor("list", r, func(clienttesting.Action) (bool, runtime.Object, error) {

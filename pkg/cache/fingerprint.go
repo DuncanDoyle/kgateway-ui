@@ -26,11 +26,14 @@ func (k *KindPrint) add(uid types.UID, rv string) {
 type Fingerprint struct {
 	Kinds  map[string]KindPrint
 	Access map[string]Access
+	// NamespaceAccess is Snapshot.NamespaceAccess by GVR.String(); nil when cluster-wide.
+	NamespaceAccess map[string]map[string]Access
 }
 
 // Equal reports whether f and o describe the same objects and access states.
 func (f Fingerprint) Equal(o Fingerprint) bool {
-	return maps.Equal(f.Kinds, o.Kinds) && maps.Equal(f.Access, o.Access)
+	return maps.Equal(f.Kinds, o.Kinds) && maps.Equal(f.Access, o.Access) &&
+		maps.EqualFunc(f.NamespaceAccess, o.NamespaceAccess, func(a, b map[string]Access) bool { return maps.Equal(a, b) })
 }
 
 // Fingerprinter returns the fingerprint of the live source data.
@@ -98,11 +101,17 @@ func (p *printer) add(gvr schema.GroupVersionResource, o any) {
 }
 
 // finish keys the result by GVR.String() and gives every kind in access an entry.
-func (p *printer) finish(access map[schema.GroupVersionResource]Access) Fingerprint {
-	f := Fingerprint{Kinds: make(map[string]KindPrint, len(access)), Access: make(map[string]Access, len(access))}
-	for gvr, a := range access {
+func (p *printer) finish(access accessSet) Fingerprint {
+	f := Fingerprint{Kinds: make(map[string]KindPrint, len(access.all)), Access: make(map[string]Access, len(access.all))}
+	for gvr, a := range access.all {
 		f.Access[gvr.String()] = a
 		f.Kinds[gvr.String()] = KindPrint{}
+	}
+	if access.byNS != nil {
+		f.NamespaceAccess = make(map[string]map[string]Access, len(access.byNS))
+		for gvr, byNS := range access.byNS {
+			f.NamespaceAccess[gvr.String()] = maps.Clone(byNS)
+		}
 	}
 	for gvr, k := range p.kinds {
 		f.Kinds[gvr.String()] = *k

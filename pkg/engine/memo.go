@@ -183,6 +183,15 @@ func kindPrint(snap *cache.Snapshot, k kindKey) uint64 {
 	p.flag(ok)
 	p.flag(a.OK)
 	p.str(a.Err)
+	// A scoped snapshot's per-namespace access; absent from a cluster-wide one's print.
+	if byNS := snap.NamespaceAccess[k.gvr]; byNS != nil {
+		for _, ns := range slices.Sorted(maps.Keys(byNS)) {
+			a := byNS[ns]
+			p.str(ns)
+			p.flag(a.OK)
+			p.str(a.Err)
+		}
+	}
 	return p.h.Sum64()
 }
 
