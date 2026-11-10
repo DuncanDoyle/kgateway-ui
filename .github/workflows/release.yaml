@@ -57,5 +57,8 @@ jobs:
           (cd web && npm ci && npm pkg set version="${GITHUB_REF_NAME#v}" -w @snellius/shell)
           make shell-pack
       # Packed first, so the release is created with the shell package attached.
-      - run: gh release create "$GITHUB_REF_NAME" --generate-notes "web/packages/shell/snellius-shell-${GITHUB_REF_NAME#v}.tgz"
+      # A tag with a suffix (v0.7.0-alpha.1) is a pre-release, never the repo's latest release.
+      - run: |
+          pre=(); [[ "$GITHUB_REF_NAME" == *-* ]] && pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${pre[@]}" --generate-notes "web/packages/shell/snellius-shell-${GITHUB_REF_NAME#v}.tgz"
         env: { GH_TOKEN: "${{ github.token }}" }
