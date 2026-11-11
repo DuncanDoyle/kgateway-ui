@@ -32,8 +32,8 @@ export const trafficCopy = {
 
 // region Columns and cells
 export const pathColumnCopy = {
-  gateway: "Gateway", // S612
-  route: "Route", // S613
+  gateway: "Gateway · listener", // S612
+  route: "Route · rule", // S613
   match: "Match", // S614
   target: "Sends to", // S615
   share: "Share", // S616
@@ -53,7 +53,7 @@ export const actionCopy: Record<Exclude<PathRow["action"], "backend">, string> =
 
 export const cellCopy = {
   delegated: "Delegated", // S625
-  viaListenerSet: (name: string) => `via ${name}`, // S626
+  viaListenerSet: (name: string) => `on ListenerSet ${name}`, // S626
   allRequests: "All requests", // S627
   matchUnknown: "Match unknown", // S628
   allConnections: "All connections", // S629
@@ -71,7 +71,7 @@ export const shareCopy = {
   connectionsFail: "connections fail", // S636
   mayFail: "may fail", // S637
   notShown: "Not shown", // S638
-  notShownHint: "The split here depends on how the controller handles delegation.", // S639
+  notShownHint: "No share: this rule also delegates.", // S639
   mirror: (p: number) => `Mirror ${Number.isInteger(p) ? p : p.toFixed(1)} %`, // S640
 };
 
@@ -79,7 +79,7 @@ export const shareCopy = {
 export const endpointCopy = {
   ready: (ready: number, total: number) => `${ready}/${total} ready`, // S641
   partial: "Partly read", // S642
-  failed: "Not read", // S643
+  failed: "Read failed", // S643
   unavailable: "Not read", // S644
   stale: "Out of date", // S645
   notApplicable: "Not applicable", // S646
@@ -103,7 +103,7 @@ export function signalText(s: PathSignal): string {
     case "listener":
       return `Listener ${s.code} is False${on}`; // S652
     case "finding":
-      return `Finding ${s.code}${on}`; // S653
+      return s.title ? `${s.title}${on}` : `Finding ${s.code}${on}`; // S653
     case "delegation":
       return `Delegation ${s.code}${on}`; // S654
     case "coverage":
@@ -117,19 +117,34 @@ export function signalText(s: PathSignal): string {
   }
 }
 
+/** A signal for a tooltip: a finding's title with its code. */
+export function signalDetail(s: PathSignal): string {
+  return s.kind === "finding" && s.title ? `${s.code}: ${signalText(s)}` : signalText(s);
+}
+
 // region Summary
-export const summaryCopy = {
+export const summaryCopy: {
+  label: string;
+  paths: (n: number) => string;
+  reach: (routes: number, gateways: number, backends: number) => string;
+  counts: (paths: number, routes: number, gateways: number, backends: number) => string;
+  hidden: string;
+  endpointsNotRead: string;
+  notComputedTitle: string;
+  notComputed: string;
+} = {
   label: "Path summary", // S666
-  counts: (paths: number, routes: number, gateways: number, backends: number) =>
+  paths: (n: number) => plural(n, ["path", "paths"]), // S670
+  reach: (routes: number, gateways: number, backends: number) =>
     [
-      plural(paths, ["path", "paths"]),
       plural(routes, ["route", "routes"]),
       plural(gateways, ["Gateway", "Gateways"]),
       plural(backends, ["backend", "backends"]),
-    ].join(" · "), // S661
+    ].join(" · "), // S671
+  counts: (paths: number, routes: number, gateways: number, backends: number) =>
+    `${summaryCopy.paths(paths)} · ${summaryCopy.reach(routes, gateways, backends)}`, // S661
   hidden: "Some paths are hidden from you.", // S662
-  endpointsNotRead: "Endpoints were not read, so a path's endpoint state may be unknown.", // S663
-  notComputedTitle: "No paths computed for this install", // S664
-  notComputed:
-    "This install has no computed views, so its paths cannot be derived. It does not mean there is no traffic.", // S665
+  endpointsNotRead: "Endpoints were not read for some paths.", // S663
+  notComputedTitle: "Paths not available", // S664
+  notComputed: "This install has no computed views. That does not mean it has no traffic.", // S665
 };

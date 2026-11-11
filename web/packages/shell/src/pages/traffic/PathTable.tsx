@@ -5,10 +5,9 @@ import { columnCopy } from "../../copy/explorer";
 import { cellCopy, endpointCopy, noteCopy, pathColumnCopy, trafficCopy } from "../../copy/traffic";
 import type { SortState } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
-import { StaleView } from "../../health/staleView";
 import { Muted, OneLine } from "../explore/listParts";
-import { Code, GatewayCell, RouteCell, ShareCell, StateCell, TargetCell } from "./PathCells";
-import { baseKey, endpointText, keyRows, matchSummary, signalLines } from "./pathText";
+import { Code, GatewayCell, RouteCell, ShareCell, StateCell, TargetCell, WhyCell } from "./PathCells";
+import { baseKey, endpointText, keyRows, matchSummary } from "./pathText";
 
 // region Helpers
 function columns(installId: string): ObjectColumn<PathRow>[] {
@@ -91,11 +90,7 @@ function columns(installId: string): ObjectColumn<PathRow>[] {
       header: pathColumnCopy.why,
       width: "11%",
       secondary: true,
-      cell: (r) => {
-        const lines = signalLines(r);
-        const all = r.note ? [...lines, noteCopy[r.note]] : lines;
-        return all.length ? <OneLine text={all.join("\n")} placement="end" /> : null;
-      },
+      cell: (r) => <WhyCell r={r} />,
     },
   ];
 }
@@ -104,8 +99,6 @@ function columns(installId: string): ObjectColumn<PathRow>[] {
 interface PathTableProps {
   installId: string;
   page?: Page<PathRow>;
-  /** Every state shows unknown: the data is stale or its last poll failed. */
-  stale: boolean;
   busy: boolean;
   onClearFilters?: () => void;
   sort: SortState;
@@ -119,7 +112,6 @@ interface PathTableProps {
 export function PathTable({
   installId,
   page,
-  stale,
   busy,
   onClearFilters,
   sort,
@@ -131,26 +123,24 @@ export function PathTable({
   const cols = useMemo(() => columns(installId), [installId]);
   const keys = useMemo(() => keyRows(page?.items ?? []), [page]);
   return (
-    <StaleView.Provider value={stale}>
-      <ObjectTable
-        label={trafficCopy.table}
-        installId={installId}
-        noun={trafficCopy.noun}
-        columns={cols}
-        rowRef={rowRef}
-        rowKey={(r) => keys.get(r) ?? baseKey(r)}
-        page={page}
-        loading={!page}
-        busy={busy}
-        emptyTitle={emptyTitle}
-        onClearFilters={onClearFilters}
-        sort={sort}
-        onSort={onSort}
-        onPage={onPage}
-        showDenied={false}
-        stylesOverride={stylesOverride}
-      />
-    </StaleView.Provider>
+    <ObjectTable
+      label={trafficCopy.table}
+      installId={installId}
+      noun={trafficCopy.noun}
+      columns={cols}
+      rowRef={rowRef}
+      rowKey={(r) => keys.get(r) ?? baseKey(r)}
+      page={page}
+      loading={!page}
+      busy={busy}
+      emptyTitle={emptyTitle}
+      onClearFilters={onClearFilters}
+      sort={sort}
+      onSort={onSort}
+      onPage={onPage}
+      showDenied={false}
+      stylesOverride={stylesOverride}
+    />
   );
 }
 

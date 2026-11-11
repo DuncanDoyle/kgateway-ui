@@ -422,6 +422,8 @@ export interface GRPCMatch {
 export interface PathSignal {
   kind: "gateway" | "listener" | "route-status" | "waiting" | "finding" | "delegation" | "coverage";
   code?: string;
+  /** A finding signal's message, as the findings API shows it. */
+  title?: string;
   ref?: LinkedRef;
   state: HealthState;
 }
@@ -506,6 +508,23 @@ export interface PathSummary extends PathCounts {
   endpointsNotRead?: boolean;
   hidden?: boolean;
   unmemoised?: boolean;
+  /** The Gateways and route namespaces of the visible rows, each counted with every filter but its own; absent from older servers. */
+  facets?: PathFacets;
+}
+/** A Gateway and the paths through it. */
+export interface GatewayFacet {
+  ref: LinkedRef;
+  paths: number;
+}
+/** A route namespace and the paths with a route in it. */
+export interface NamespaceFacet {
+  name: string;
+  paths: number;
+}
+/** The gateway and namespace filter values, sorted by name. */
+export interface PathFacets {
+  gateways: GatewayFacet[];
+  namespaces: NamespaceFacet[];
 }
 /** GET …/paths. */
 export interface PathsResponse {

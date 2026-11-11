@@ -78,8 +78,30 @@ type Summary struct {
 	EndpointsNotRead bool
 	// Hidden is set when visible dropped any row.
 	Hidden bool
+	// Facets are the Gateways and route namespaces the viewer can narrow to.
+	Facets Facets
 	// Unmemoised is set by the caller when the topology was over the memo cap.
 	Unmemoised bool
+}
+
+// Facets list the values of the gateway and namespace filters over the
+// visible rows. Each facet applies every filter but its own, so a selected
+// Gateway leaves the others selectable. Both are sorted by name.
+type Facets struct {
+	Gateways   []GatewayFacet
+	Namespaces []NamespaceFacet
+}
+
+// GatewayFacet is a Gateway and the paths through it.
+type GatewayFacet struct {
+	Ref   objects.Ref
+	Paths int
+}
+
+// NamespaceFacet is a route namespace and the paths whose chain has a route in it.
+type NamespaceFacet struct {
+	Name  string
+	Paths int
 }
 
 // Counts are a Summary's counts for one state.
@@ -142,15 +164,24 @@ func Run(t *Topology, p *Projection, q Query, visible func(explore.DepSet) bool)
 		return Page{}, err
 	}
 	tl := newTally(t)
+	fc := facetCounts{gateways: map[int32]int{}, namespaces: map[string]int{}}
 	var es []int32
 	for _, i := range p.Order {
 		if visible != nil && !visible(t.Deps(t.Rows[i])) {
 			tl.s.Hidden = true
 			continue
 		}
-		if qq.match(t, p, i) {
+		ok := qq.match(t, p, i, facetNone)
+		if ok {
 			es = append(es, i)
 			tl.add(p, i)
+		}
+		// Without its own filter set, a facet counts exactly the matching rows.
+		if len(qq.Gateways) == 0 && ok || len(qq.Gateways) > 0 && qq.match(t, p, i, facetGateway) {
+			fc.gateways[t.atts[t.Rows[i].att].gateway]++
+		}
+		if qq.Namespace == "" && ok || qq.Namespace != "" && qq.match(t, p, i, facetNamespace) {
+			fc.addNamespaces(t, t.Rows[i])
 		}
 	}
 	// es is in problem-first order, so a stable sort keeps it for ties.
@@ -165,11 +196,54 @@ func Run(t *Topology, p *Projection, q Query, visible func(explore.DepSet) bool)
 	}
 	pg := qq.page(t, p, es)
 	pg.Summary = tl.summary()
+	pg.Summary.Facets = fc.facets(t)
 	return pg, nil
 }
 
-// match reports whether row i passes q's filters.
-func (q *query) match(t *Topology, p *Projection, i int32) bool {
+// facet names the filter a match leaves out, so its facet lists every value.
+type facet uint8
+
+const (
+	facetNone facet = iota
+	facetGateway
+	facetNamespace
+)
+
+// facetCounts counts paths per Gateway (a Refs index) and per route namespace.
+type facetCounts struct {
+	gateways   map[int32]int
+	namespaces map[string]int
+}
+
+// addNamespaces counts row r once in each distinct namespace of its chain.
+func (c facetCounts) addNamespaces(t *Topology, r Row) {
+	chain := t.chain(r)
+	for k, ri := range chain {
+		ns := t.Refs[t.routes[ri].ref].Namespace
+		if !slices.ContainsFunc(chain[:k], func(rj int32) bool { return t.Refs[t.routes[rj].ref].Namespace == ns }) {
+			c.namespaces[ns]++
+		}
+	}
+}
+
+// facets is c sorted by name; never nil.
+func (c facetCounts) facets(t *Topology) Facets {
+	f := Facets{Gateways: make([]GatewayFacet, 0, len(c.gateways)), Namespaces: make([]NamespaceFacet, 0, len(c.namespaces))}
+	for k, n := range c.gateways {
+		f.Gateways = append(f.Gateways, GatewayFacet{Ref: t.Refs[k], Paths: n})
+	}
+	slices.SortFunc(f.Gateways, func(a, b GatewayFacet) int {
+		return cmp.Or(cmp.Compare(a.Ref.Namespace, b.Ref.Namespace), cmp.Compare(a.Ref.Name, b.Ref.Name))
+	})
+	for ns, n := range c.namespaces {
+		f.Namespaces = append(f.Namespaces, NamespaceFacet{Name: ns, Paths: n})
+	}
+	slices.SortFunc(f.Namespaces, func(a, b NamespaceFacet) int { return cmp.Compare(a.Name, b.Name) })
+	return f
+}
+
+// match reports whether row i passes q's filters, all but skip's.
+func (q *query) match(t *Topology, p *Projection, i int32, skip facet) bool {
 	r := t.Rows[i]
 	switch {
 	case len(q.States) > 0 && !slices.Contains(q.States, p.Problems[i].State),
@@ -177,7 +251,7 @@ func (q *query) match(t *Topology, p *Projection, i int32) bool {
 		q.Mirror == MirrorOnly && r.mirror < 0, q.Mirror == MirrorExclude && r.mirror >= 0:
 		return false
 	}
-	if len(q.Gateways) > 0 {
+	if len(q.Gateways) > 0 && skip != facetGateway {
 		gw := t.Gateway(r)
 		if !slices.ContainsFunc(q.Gateways, func(g objects.Ref) bool { return g.Namespace == gw.Namespace && g.Name == gw.Name }) {
 			return false
@@ -187,14 +261,18 @@ func (q *query) match(t *Topology, p *Projection, i int32) bool {
 	if q.Kind != "" && t.Refs[t.routes[chain[0]].ref].Kind != q.Kind {
 		return false
 	}
-	if q.Route != nil || q.Namespace != "" {
-		var route, ns bool
+	ns := q.Namespace
+	if skip == facetNamespace {
+		ns = ""
+	}
+	if q.Route != nil || ns != "" {
+		var route, inNS bool
 		for _, ri := range chain {
 			rt := t.Refs[t.routes[ri].ref]
 			route = route || q.Route != nil && rt == *q.Route
-			ns = ns || rt.Namespace == q.Namespace
+			inNS = inNS || rt.Namespace == ns
 		}
-		if q.Route != nil && !route || q.Namespace != "" && !ns {
+		if q.Route != nil && !route || ns != "" && !inNS {
 			return false
 		}
 	}

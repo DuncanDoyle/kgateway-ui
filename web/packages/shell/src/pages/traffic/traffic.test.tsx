@@ -184,8 +184,13 @@ it("problem rows show their state as icon and text, with the signals behind it",
   // A problem's signals are reachable from the keyboard.
   expect(states[0]).toHaveAttribute("tabindex", "0");
   expect(states[6]).not.toHaveAttribute("tabindex");
-  // The redirect rule shows its written action, not a backend.
-  expect(within(table()).getByText("Redirect")).toBeInTheDocument();
+  // The redirect rule shows its written action, not a backend, and no share.
+  const redirect = within(table()).getByText("Redirect").closest("tr") as HTMLElement;
+  expect(redirect.querySelector('td[data-col="share"]')).toHaveTextContent(/^$/);
+  // The Why column says what the finding is; its code is in the tooltip.
+  expect(within(table()).getAllByText(/^Proxy deployment not found \(Gateway infra\/other\)/).length).toBeGreaterThan(
+    0,
+  );
   expect(within(table()).getAllByText("1/1 ready").length).toBeGreaterThan(0);
   expect(within(table()).getByText("25 %")).toBeInTheDocument();
 });
@@ -196,9 +201,10 @@ it("an install without computed views explains that no paths are computed, not t
     return { ...b, rows: [], summary: { ...b.summary, paths: 0, notComputed: "no-attachments" } };
   });
   mount();
-  expect(await screen.findByText("No paths computed for this install")).toBeInTheDocument();
-  expect(screen.getByText(/It does not mean there is no traffic/)).toBeInTheDocument();
+  expect(await screen.findByText("Paths not available")).toBeInTheDocument();
+  expect(screen.getByText(/That does not mean it has no traffic/)).toBeInTheDocument();
   expect(screen.queryByRole("table", { name: "Paths" })).toBeNull();
+  expect(screen.queryByTestId("narrow-to")).toBeNull();
 });
 
 describe("cell text", () => {
@@ -229,4 +235,83 @@ describe("cell text", () => {
   it("an empty match list matches all requests", () => {
     expect(matchSummary(row({ matches: [] })).text).toBe("All requests");
   });
+});
+
+it("stale data turns every state unknown: rows, share flags, the Why column and the summary tiles", async () => {
+  serve(() => {
+    const b = golden();
+    const rows = b.rows.map((r, i) => (i === 0 ? { ...r, shareState: "failing" as const, share: 25 } : r));
+    return { ...b, rows, collectedAt: new Date(Date.now() - 10 * 60_000).toISOString() };
+  });
+  mount();
+  await within(table()).findAllByLabelText("shop/cart-svc");
+  const states = within(table()).getAllByTestId("path-state");
+  expect(new Set(states.map((s) => s.textContent))).toEqual(new Set(["Unknown"]));
+  expect(within(table()).queryByText("requests fail")).toBeNull();
+  for (const cell of document.querySelectorAll('td[data-col="why"]')) expect(cell).toHaveTextContent(/^$/);
+  const summary = screen.getByRole("region", { name: "Path summary" });
+  expect(within(summary).getByTestId("summary-warning")).not.toHaveAttribute("data-on");
+});
+
+it("fresh data shows the share flag and lights the problem tiles", async () => {
+  serve(() => {
+    const b = golden();
+    return { ...b, rows: b.rows.map((r, i) => (i === 0 ? { ...r, shareState: "failing" as const, share: 25 } : r)) };
+  });
+  mount();
+  await within(table()).findAllByLabelText("shop/cart-svc");
+  expect(within(table()).getByText("requests fail")).toBeInTheDocument();
+  expect(screen.getByTestId("summary-warning")).toHaveAttribute("data-on", "true");
+  expect(screen.getByTestId("summary-healthy")).not.toHaveAttribute("data-on");
+});
+
+it("Narrow to chips come from the server's facets, not the shown rows", async () => {
+  serve(() => {
+    const b = golden();
+    const zzz = { ...(b.summary.facets?.gateways[0] as NonNullable<typeof b.summary.facets>["gateways"][number]) };
+    zzz.ref = { ...zzz.ref, name: "zzz" };
+    return {
+      ...b,
+      summary: {
+        ...b.summary,
+        facets: { gateways: [...(b.summary.facets?.gateways ?? []), zzz], namespaces: [{ name: "far", paths: 1 }] },
+      },
+    };
+  });
+  mount("?gateway=infra/other");
+  await within(table()).findAllByLabelText("shop/cart-svc");
+  const gws = screen.getByRole("group", { name: "Gateways" });
+  // Selected first, then the server's name order; zzz has no row on this page.
+  expect(
+    within(gws)
+      .getAllByRole("button")
+      .map((b) => b.textContent),
+  ).toEqual(["infra/other", "infra/edge", "infra/zzz"]);
+  await userEvent.click(within(gws).getByRole("button", { name: "infra/zzz" }));
+  await waitFor(() => expect(search().get("gateway")).toBe("infra/other,infra/zzz"));
+  expect(
+    within(screen.getByRole("group", { name: "Route namespaces" })).getByRole("button", { name: "far" }),
+  ).toBeInTheDocument();
+});
+
+it("an empty result hides the Narrow to line and keeps its filters as removable tags", async () => {
+  serve(() => {
+    const b = golden();
+    const none = { paths: 0, routes: 0, gateways: 0, backends: 0 };
+    return {
+      ...b,
+      rows: [],
+      summary: {
+        ...none,
+        byState: { error: none, warning: none, unknown: none, healthy: none },
+        facets: { gateways: [], namespaces: [] },
+      },
+    };
+  });
+  mount("?gateway=infra/gone&namespace=x");
+  expect(await screen.findByText("No paths match these filters.")).toBeInTheDocument();
+  expect(screen.queryByTestId("narrow-to")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Remove filter Gateway: infra/gone" }));
+  await waitFor(() => expect(search().has("gateway")).toBe(false));
+  expect(search().get("namespace")).toBe("x");
 });

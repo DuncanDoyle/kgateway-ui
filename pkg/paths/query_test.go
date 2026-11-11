@@ -303,3 +303,61 @@ func TestRunRouteMatchesChain(t *testing.T) {
 		}
 	}
 }
+
+// TestRunFacets: each facet counts the visible rows that pass every filter but
+// its own, so a selected Gateway or namespace leaves the others selectable;
+// a hidden Gateway is never a facet.
+func TestRunFacets(t *testing.T) {
+	top, p := queryWorld(t)
+	edgeRef := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
+	sideRef := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "side"}
+	type facets struct {
+		gws map[string]int
+		nss map[string]int
+	}
+	got := func(f paths.Facets) facets {
+		out := facets{map[string]int{}, map[string]int{}}
+		var names []string
+		for _, g := range f.Gateways {
+			out.gws[g.Ref.Namespace+"/"+g.Ref.Name] = g.Paths
+			names = append(names, g.Ref.Namespace+"/"+g.Ref.Name)
+		}
+		if !slices.IsSorted(names) {
+			t.Fatalf("gateways not sorted: %v", names)
+		}
+		names = names[:0]
+		for _, n := range f.Namespaces {
+			out.nss[n.Name] = n.Paths
+			names = append(names, n.Name)
+		}
+		if !slices.IsSorted(names) {
+			t.Fatalf("namespaces not sorted: %v", names)
+		}
+		return out
+	}
+	cases := []struct {
+		name    string
+		q       paths.Query
+		visible func(explore.DepSet) bool
+		gws     map[string]int
+		nss     map[string]int
+	}{
+		{"none", paths.Query{}, nil, map[string]int{"infra/edge": 4, "infra/side": 3}, map[string]int{"shop": 5, "other": 2}},
+		// gateway=edge keeps side selectable; the namespace facet narrows to edge's rows.
+		{"gateway", paths.Query{Gateways: []objects.Ref{edgeRef}}, nil, map[string]int{"infra/edge": 4, "infra/side": 3}, map[string]int{"shop": 4}},
+		{"namespace", paths.Query{Namespace: "other"}, nil, map[string]int{"infra/side": 2}, map[string]int{"shop": 5, "other": 2}},
+		{"both", paths.Query{Gateways: []objects.Ref{sideRef}, Namespace: "shop"}, nil, map[string]int{"infra/edge": 4, "infra/side": 1}, map[string]int{"shop": 1, "other": 2}},
+		{"kind narrows both", paths.Query{Kind: "GRPCRoute"}, nil, map[string]int{"infra/side": 1}, map[string]int{"shop": 1}},
+		{"hidden gateway", paths.Query{Gateways: []objects.Ref{sideRef}}, func(d explore.DepSet) bool {
+			return !slices.ContainsFunc(d, func(i int32) bool { return top.Refs[i] == edgeRef })
+		}, map[string]int{"infra/side": 3}, map[string]int{"shop": 1, "other": 2}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := got(run(t, top, p, c.q, c.visible).Summary.Facets)
+			if fmt.Sprint(f.gws) != fmt.Sprint(c.gws) || fmt.Sprint(f.nss) != fmt.Sprint(c.nss) {
+				t.Fatalf("facets %v %v, want %v %v", f.gws, f.nss, c.gws, c.nss)
+			}
+		})
+	}
+}

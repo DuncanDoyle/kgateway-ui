@@ -319,3 +319,39 @@ func TestPathsUnknownMatchIsNull(t *testing.T) {
 		t.Fatalf("matches not null on the wire: %s", body)
 	}
 }
+
+// Facets at the API: a restricted viewer never sees the hidden Gateway as a
+// facet, and gateway=A still lists B so another Gateway stays selectable.
+func TestPathsFacets(t *testing.T) {
+	_, open, _ := startWith(t, setup{endpoints: true}, pathsWorld()...)
+	_, hidden, _ := startWith(t, setup{endpoints: true, authz: AuthorizerFunc(hideEdge)}, pathsWorld()...)
+	names := func(f PathFacetsDTO) []string {
+		var out []string
+		for _, g := range f.Gateways {
+			out = append(out, g.Ref.Namespace+"/"+g.Ref.Name)
+		}
+		return out
+	}
+	all := get[PathsResponse](t, open, pathsURL, 200)
+	if got := names(all.Summary.Facets); !slices.Equal(got, []string{"infra/edge", "infra/other"}) {
+		t.Fatalf("facets %v", got)
+	}
+	picked := get[PathsResponse](t, open, pathsURL+"?gateway=infra/other", 200)
+	if got := names(picked.Summary.Facets); !slices.Equal(got, []string{"infra/edge", "infra/other"}) || picked.Summary.Gateways != 1 {
+		t.Fatalf("gateway=infra/other: facets %v, summary %+v", got, picked.Summary)
+	}
+	if !reflect.DeepEqual(picked.Summary.Facets.Gateways, all.Summary.Facets.Gateways) {
+		t.Fatalf("gateway facet counts change with the gateway filter: %+v", picked.Summary.Facets.Gateways)
+	}
+	restricted := get[PathsResponse](t, hidden, pathsURL+"?gateway=infra/edge", 200)
+	if got := names(restricted.Summary.Facets); !slices.Equal(got, []string{"infra/other"}) {
+		t.Fatalf("restricted facets %v", got)
+	}
+	for _, r := range all.Rows {
+		for _, s := range r.Problem.Signals {
+			if s.Kind == paths.SignalFinding && s.Title == "" {
+				t.Fatalf("finding signal without a title: %+v", s)
+			}
+		}
+	}
+}

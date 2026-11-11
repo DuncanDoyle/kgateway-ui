@@ -98,6 +98,7 @@ import type {
   FreshnessCount,
   FreshnessEvidence,
   GatewayDetail,
+  GatewayFacet,
   GatewayListRow,
   GatewayProcesses,
   GatewayRow,
@@ -123,6 +124,7 @@ import type {
   Match,
   MetaResponse,
   Mirror,
+  NamespaceFacet,
   NextStep,
   OverviewResponse,
   Page,
@@ -131,6 +133,7 @@ import type {
   ParentStatus,
   ParentSummary,
   PathCounts,
+  PathFacets,
   PathListener,
   PathMatch,
   PathProblem,
@@ -1171,7 +1174,7 @@ const pathRow = shape<PathRow>(
       { state: "!", signals: "!" },
       {
         signals: shape<PathSignal>(
-          { kind: "!", code: "?", ref: "?", state: "!" },
+          { kind: "!", code: "?", title: "?", ref: "?", state: "!" },
           { ref: linkedRef },
           {
             kind: {
@@ -1212,8 +1215,16 @@ const pathsResponse = shape<PathsResponse>(
         endpointsNotRead: "?",
         hidden: "?",
         unmemoised: "?",
+        facets: "?",
       },
       {
+        facets: shape<PathFacets>(
+          { gateways: "!", namespaces: "!" },
+          {
+            gateways: shape<GatewayFacet>({ ref: "!", paths: "!" }, { ref: linkedRef }),
+            namespaces: shape<NamespaceFacet>({ name: "!", paths: "!" }),
+          },
+        ),
         byState: shape<PathSummary["byState"]>(
           { healthy: "!", warning: "!", error: "!", unknown: "!" },
           { healthy: pathCounts, warning: pathCounts, error: pathCounts, unknown: pathCounts },

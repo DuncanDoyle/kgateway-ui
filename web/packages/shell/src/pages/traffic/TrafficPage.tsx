@@ -11,6 +11,7 @@ import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
 import { HealthIcon } from "../../health/HealthIcon";
+import { StaleView } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
 import { PageState } from "../../states/PageState";
 import type { HealthState } from "../../theme/tokens";
@@ -56,8 +57,8 @@ const mirrorOptions: FilterOption[] = [
   { value: "only", label: trafficCopy.mirrorOnly },
   { value: "exclude", label: trafficCopy.mirrorExclude },
 ];
-/** The most chips per group in the Narrow to line. */
-const NARROW_MAX = 12;
+/** The most chips per group in the Narrow to line; selected values always show. */
+const NARROW_MAX = 50;
 
 /** The newly pressed value of a single-valued chip group, or "" when the pressed one was released. */
 const single = (prev: string[], next: string[]) => next.find((v) => !prev.includes(v)) ?? "";
@@ -78,9 +79,9 @@ const toPage = (d: PathsResponse): Page<PathRow> => ({
   collectedAt: d.collectedAt,
 });
 
-/** The distinct values of the shown rows, the selected ones first so they can always be released. */
+/** The server's facet values in its name order, the selected ones first so they can always be released. */
 function narrowOptions(values: string[], selected: string[]): FilterOption[] {
-  const rest = [...new Set(values)].filter((v) => !selected.includes(v)).sort();
+  const rest = values.filter((v) => !selected.includes(v));
   return [...selected, ...rest].slice(0, Math.max(NARROW_MAX, selected.length)).map((v) => ({ value: v, label: v }));
 }
 
@@ -101,21 +102,32 @@ export function TrafficPage({ stylesOverride }: TrafficPageProps = {}) {
   const summary = l.data?.summary;
   const gateways = listValues(l.params, "gateway");
   const namespace = listValues(l.params, "namespace").slice(0, 1);
-  const rows = l.data?.rows ?? [];
+  const facets = summary?.facets;
   const gatewayOptions = narrowOptions(
-    rows.map((r) => refText(r.gateway)),
+    (facets?.gateways ?? []).map((g) => refText(g.ref)),
     gateways,
   );
   const namespaceOptions = narrowOptions(
-    rows.flatMap((r) => r.routes.map((x) => x.namespace ?? "")).filter(Boolean),
+    (facets?.namespaces ?? []).map((n) => n.name),
     namespace,
   );
-  const tags = (["listener", "route", "backend"] as const).flatMap((key) =>
+  // The line keeps its place while loading and goes when there is nothing to narrow; its filters are then tags.
+  const narrow = !summary || (!summary.notComputed && summary.paths > 0);
+  const tagKeys = narrow
+    ? (["listener", "route", "backend"] as const)
+    : (["gateway", "namespace", "listener", "route", "backend"] as const);
+  const tags = tagKeys.flatMap((key) =>
     listValues(l.params, key).map((v) => (
       <FilterTag
         key={`${key}=${v}`}
         text={`${trafficCopy.tags[key]}: ${refTag(v)}`}
-        onRemove={() => l.setFilter({ [key]: null })}
+        onRemove={() =>
+          l.setFilter({
+            [key]: listValues(l.params, key)
+              .filter((x) => x !== v)
+              .join(","),
+          })
+        }
       />
     )),
   );
@@ -160,36 +172,37 @@ export function TrafficPage({ stylesOverride }: TrafficPageProps = {}) {
       onClearFilters={l.filtered ? l.clearFilters : undefined}
       stylesOverride={stylesOverride}
     >
-      <Narrow data-testid="narrow-to">
-        <span className="label">{trafficCopy.narrow}</span>
-        <span className="label" aria-hidden="true">
-          {trafficCopy.gatewayChips}
-        </span>
-        <StateFilter
-          label={trafficCopy.gateways}
-          options={gatewayOptions}
-          selected={gateways}
-          onChange={(v) => l.setFilter({ gateway: v.join(",") })}
-        />
-        <span className="label" aria-hidden="true">
-          {trafficCopy.namespaceChips}
-        </span>
-        <StateFilter
-          label={trafficCopy.namespaces}
-          options={namespaceOptions}
-          selected={namespace}
-          onChange={(v) => l.setFilter({ namespace: single(namespace, v) })}
-        />
-      </Narrow>
+      {narrow ? (
+        <Narrow data-testid="narrow-to">
+          <span className="label">{trafficCopy.narrow}</span>
+          <span className="label" aria-hidden="true">
+            {trafficCopy.gatewayChips}
+          </span>
+          <StateFilter
+            label={trafficCopy.gateways}
+            options={gatewayOptions}
+            selected={gateways}
+            onChange={(v) => l.setFilter({ gateway: v.join(",") })}
+          />
+          <span className="label" aria-hidden="true">
+            {trafficCopy.namespaceChips}
+          </span>
+          <StateFilter
+            label={trafficCopy.namespaces}
+            options={namespaceOptions}
+            selected={namespace}
+            onChange={(v) => l.setFilter({ namespace: single(namespace, v) })}
+          />
+        </Narrow>
+      ) : null}
       {summary?.notComputed ? (
         <PageState kind="empty" title={summaryCopy.notComputedTitle} message={summaryCopy.notComputed} />
       ) : (
-        <>
+        <StaleView.Provider value={stale}>
           <PathSummary summary={summary} />
           <PathTable
             installId={l.id}
             page={page}
-            stale={stale}
             busy={l.busy}
             onClearFilters={l.filtered ? l.clearFilters : undefined}
             sort={l.sort}
@@ -197,7 +210,7 @@ export function TrafficPage({ stylesOverride }: TrafficPageProps = {}) {
             onPage={l.setCursor}
             emptyTitle={l.filtered ? listCopy.emptyFiltered(trafficCopy.noun[1]) : listCopy.empty(trafficCopy.noun[1])}
           />
-        </>
+        </StaleView.Provider>
       )}
     </ListFrame>
   );

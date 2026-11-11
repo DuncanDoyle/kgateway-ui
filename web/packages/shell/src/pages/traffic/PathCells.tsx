@@ -1,14 +1,15 @@
 import styled from "@emotion/styled";
+import { useContext } from "react";
 import type { LinkedRef, PathRow } from "../../api/types";
 import { columnCopy, routeCopy } from "../../copy/explorer";
-import { actionCopy, cellCopy, shareCopy } from "../../copy/traffic";
+import { actionCopy, cellCopy, noteCopy, shareCopy } from "../../copy/traffic";
 import { HealthIcon } from "../../health/HealthIcon";
-import { useShownState } from "../../health/staleView";
+import { StaleView, useShownState } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
 import { Tooltip } from "../../shell/Tooltip";
 import type { HealthState } from "../../theme/tokens";
 import { Muted, NameCell, nameTip, OneLine, refText } from "../explore/listParts";
-import { shareText, signalLines } from "./pathText";
+import { shareText, signalDetails, signalLines } from "./pathText";
 
 // region Styles
 const State = styled.span<{ $state: HealthState }>`
@@ -70,7 +71,7 @@ const Flag = styled.span<{ $state: HealthState }>`
 /** The row's state with icon, colour and text; its signals in a tooltip. Under a stale view it shows unknown. */
 export function StateCell({ r }: { r: PathRow }) {
   const state = useShownState(r.problem.state);
-  const lines = state === r.problem.state ? signalLines(r) : [];
+  const lines = state === r.problem.state ? signalDetails(r) : [];
   const badge = (
     <State $state={state} tabIndex={lines.length ? 0 : undefined} data-testid="path-state">
       <HealthIcon state={state} />
@@ -138,13 +139,15 @@ export function TargetCell({ r, installId }: { r: PathRow; installId: string }) 
 
 export function ShareCell({ r }: { r: PathRow }) {
   const s = shareText(r);
+  // A flag is a state, so a stale view drops it with every other state.
+  const flag = useContext(StaleView) ? undefined : s.flag;
   const body = (
     <Pair>
       <span>{r.shareState === "not-shown" ? <Muted>{s.text}</Muted> : s.text}</span>
-      {s.flag ? (
-        <Flag $state={s.flag.state}>
-          <HealthIcon state={s.flag.state} size={14} notice />
-          {s.flag.text}
+      {flag ? (
+        <Flag $state={flag.state}>
+          <HealthIcon state={flag.state} size={14} notice />
+          {flag.text}
         </Flag>
       ) : null}
     </Pair>
@@ -154,4 +157,16 @@ export function ShareCell({ r }: { r: PathRow }) {
   ) : (
     body
   );
+}
+
+/** The signals behind the state in plain words, codes in the tooltip; blank under a stale view, as the state is. */
+export function WhyCell({ r }: { r: PathRow }) {
+  if (useContext(StaleView)) return null;
+  const note = r.note ? [noteCopy[r.note]] : [];
+  const lines = [...signalLines(r), ...note];
+  return lines.length ? (
+    <OneLine text={[...signalDetails(r), ...note].join("\n")} placement="end">
+      {lines.join(" · ")}
+    </OneLine>
+  ) : null;
 }

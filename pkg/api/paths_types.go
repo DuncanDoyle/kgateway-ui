@@ -89,9 +89,11 @@ type ProblemDTO struct {
 
 // SignalDTO is one existing signal on a row's chain: its kind, its code (a
 // finding code, condition type, capability state or view C reason) and object.
+// Title is a finding signal's message, as the findings API shows it.
 type SignalDTO struct {
 	Kind  string       `json:"kind"`
 	Code  string       `json:"code,omitempty"`
+	Title string       `json:"title,omitempty"`
 	Ref   *LinkedRef   `json:"ref,omitempty"`
 	State health.State `json:"state"`
 }
@@ -116,6 +118,27 @@ type PathSummaryDTO struct {
 	EndpointsNotRead bool                     `json:"endpointsNotRead,omitempty"`
 	Hidden           bool                     `json:"hidden,omitempty"`
 	Unmemoised       bool                     `json:"unmemoised,omitempty"`
+	// Facets are the Gateways and route namespaces of the visible rows,
+	// each counted with every filter but its own.
+	Facets PathFacetsDTO `json:"facets"`
+}
+
+// PathFacetsDTO lists the gateway and namespace filter values, sorted by name.
+type PathFacetsDTO struct {
+	Gateways   []GatewayFacetDTO   `json:"gateways"`
+	Namespaces []NamespaceFacetDTO `json:"namespaces"`
+}
+
+// GatewayFacetDTO is a Gateway and the paths through it.
+type GatewayFacetDTO struct {
+	Ref   LinkedRef `json:"ref"`
+	Paths int       `json:"paths"`
+}
+
+// NamespaceFacetDTO is a route namespace and the paths with a route in it.
+type NamespaceFacetDTO struct {
+	Name  string `json:"name"`
+	Paths int    `json:"paths"`
 }
 
 // PathsResponse is GET …/paths.

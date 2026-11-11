@@ -1,9 +1,11 @@
 import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { EyeOff, Info } from "lucide-react";
-import type { PathCounts, PathSummary as Summary } from "../../api/types";
+import { useContext } from "react";
+import type { PathSummary as Summary } from "../../api/types";
 import { summaryCopy } from "../../copy/traffic";
 import { HealthIcon } from "../../health/HealthIcon";
+import { StaleView } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
 import { Shimmer } from "../../states/Shimmer";
 import type { HealthState } from "../../theme/tokens";
@@ -72,12 +74,6 @@ const wide = css`width: 240px;`;
 const narrow = css`width: 160px; max-width: 100%;`;
 const STATES: HealthState[] = ["error", "warning", "unknown", "healthy"];
 
-/** "37 paths" and the rest of a state's counts, the way one broken shared backend reads (design §5). */
-function tileText(c: PathCounts): [string, string] {
-  const [paths, ...rest] = summaryCopy.counts(c.paths, c.routes, c.gateways, c.backends).split(" · ");
-  return [paths ?? "", rest.join(" · ")];
-}
-
 // region Component
 interface PathSummaryProps {
   /** The whole filtered result; absent while loading. */
@@ -87,6 +83,8 @@ interface PathSummaryProps {
 
 /** The counts of the whole filtered result, per state, with the coverage and visibility notes (design §5, §13). */
 export function PathSummary({ summary, stylesOverride }: PathSummaryProps) {
+  // Under a stale view no tile claims a state: they all go neutral.
+  const stale = useContext(StaleView);
   return (
     <Box aria-label={summaryCopy.label} data-testid="path-summary" stylesOverride={stylesOverride}>
       <div className="total">
@@ -113,15 +111,22 @@ export function PathSummary({ summary, stylesOverride }: PathSummaryProps) {
       <ul>
         {STATES.map((s) => {
           const c = summary?.byState[s];
-          const [paths, rest] = c ? tileText(c) : ["", ""];
           return (
-            <Tile key={s} $state={s} $on={!!c?.paths && s !== "healthy"} data-testid={`summary-${s}`}>
+            <Tile
+              key={s}
+              $state={s}
+              $on={!stale && !!c?.paths && s !== "healthy"}
+              data-on={(!stale && !!c?.paths && s !== "healthy") || undefined}
+              data-testid={`summary-${s}`}
+            >
               <div className="head">
                 <HealthIcon state={s} notice />
                 {stateLabel(s)}
-                {c ? <span>{paths}</span> : null}
+                {c ? <span>{summaryCopy.paths(c.paths)}</span> : null}
               </div>
-              <div className="rest">{c ? rest : <Shimmer h={12} stylesOverride={narrow} />}</div>
+              <div className="rest">
+                {c ? summaryCopy.reach(c.routes, c.gateways, c.backends) : <Shimmer h={12} stylesOverride={narrow} />}
+              </div>
             </Tile>
           );
         })}

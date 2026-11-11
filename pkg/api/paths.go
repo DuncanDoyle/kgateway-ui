@@ -90,23 +90,54 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 	}
 	pg.Summary.Unmemoised = !kept
 	l := linkerFor(v, m, i)
+	titles := findingTitles(i)
 	rows := make([]PathRowDTO, 0, len(pg.Rows))
 	for _, k := range pg.Rows {
-		rows = append(rows, pathRow(l, t, proj, k))
+		rows = append(rows, pathRow(l, titles, t, proj, k))
 	}
-	sum := pathSummary(pg.Summary)
+	sum := pathSummary(l, pg.Summary)
 	if i.Computed == nil {
 		sum.NotComputed = NotComputedNoAttachments
 	}
 	writeJSON(w, PathsResponse{Install: id, Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: sum, CollectedAt: wireTime(p.ConfirmedAt)})
 }
 
-// pathSummary is s on the wire.
-func pathSummary(s paths.Summary) PathSummaryDTO {
+// titleKey is a finding's code and resource.
+type titleKey struct {
+	code string
+	ref  objects.Ref
+}
+
+// findingTitles maps each finding's code and resource to its message, the
+// first finding's when several share both.
+func findingTitles(i *engine.InstallModel) map[titleKey]string {
+	out := map[titleKey]string{}
+	for _, f := range i.Health.Findings {
+		if f.Resource == nil || f.Message == "" {
+			continue
+		}
+		k := titleKey{f.Code, *f.Resource}
+		if _, ok := out[k]; !ok {
+			out[k] = f.Message
+		}
+	}
+	return out
+}
+
+// pathSummary is s on the wire; the caller may view every facet's Gateway.
+func pathSummary(l linker, s paths.Summary) PathSummaryDTO {
 	out := PathSummaryDTO{PathCountsDTO: PathCountsDTO{Paths: s.Paths, Routes: s.Routes, Gateways: s.Gateways, Backends: s.Backends},
 		ByState: make(map[string]PathCountsDTO, len(s.ByState)), EndpointsNotRead: s.EndpointsNotRead, Hidden: s.Hidden, Unmemoised: s.Unmemoised}
 	for st, c := range s.ByState {
 		out.ByState[string(st)] = PathCountsDTO(c)
+	}
+	out.Facets = PathFacetsDTO{Gateways: make([]GatewayFacetDTO, 0, len(s.Facets.Gateways)),
+		Namespaces: make([]NamespaceFacetDTO, 0, len(s.Facets.Namespaces))}
+	for _, g := range s.Facets.Gateways {
+		out.Facets.Gateways = append(out.Facets.Gateways, GatewayFacetDTO{Ref: l.linked(g.Ref), Paths: g.Paths})
+	}
+	for _, n := range s.Facets.Namespaces {
+		out.Facets.Namespaces = append(out.Facets.Namespaces, NamespaceFacetDTO(n))
 	}
 	return out
 }
@@ -117,11 +148,11 @@ var actions = map[paths.Action]string{paths.ActionBackend: ActionBackend, paths.
 
 // pathRow is row k of t, projected by proj, on the wire. The caller may view
 // every dependency of the row, so its refs link as the linker decides.
-func pathRow(l linker, t *paths.Topology, proj *paths.Projection, k int32) PathRowDTO {
+func pathRow(l linker, titles map[titleKey]string, t *paths.Topology, proj *paths.Projection, k int32) PathRowDTO {
 	r := t.Rows[k]
 	ln := t.Listener(r)
 	out := PathRowDTO{Gateway: l.linked(t.Gateway(r)), Listener: PathListenerDTO{Name: ln.Name, Protocol: ln.Protocol, Port: ln.Port},
-		Hostnames: t.Hostnames(r), Action: actions[t.Action(r)], Problem: problemDTO(l, proj.Problems[k])}
+		Hostnames: t.Hostnames(r), Action: actions[t.Action(r)], Problem: problemDTO(l, titles, proj.Problems[k])}
 	if out.Hostnames == nil {
 		out.Hostnames = []string{}
 	}
@@ -192,11 +223,15 @@ func note(d paths.DelegState) string {
 	return ""
 }
 
-// problemDTO is p on the wire; signals is never null.
-func problemDTO(l linker, p paths.Problem) ProblemDTO {
+// problemDTO is p on the wire; signals is never null. A finding signal
+// carries its finding's message as its title.
+func problemDTO(l linker, titles map[titleKey]string, p paths.Problem) ProblemDTO {
 	out := ProblemDTO{State: p.State, Signals: make([]SignalDTO, 0, len(p.Signals))}
 	for _, s := range p.Signals {
 		d := SignalDTO{Kind: s.Kind, Code: s.Code, State: s.State}
+		if s.Kind == paths.SignalFinding {
+			d.Title = titles[titleKey{s.Code, s.Ref}]
+		}
 		if s.Ref != (objects.Ref{}) {
 			lr := l.linked(s.Ref)
 			d.Ref = &lr

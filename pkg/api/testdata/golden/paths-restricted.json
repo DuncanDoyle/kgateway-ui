@@ -59,7 +59,8 @@
                 "name": "other",
                 "namespace": "infra"
               },
-              "state": "warning"
+              "state": "warning",
+              "title": "Proxy deployment not found"
             }
           ],
           "state": "warning"
@@ -123,7 +124,8 @@
                 "name": "other",
                 "namespace": "infra"
               },
-              "state": "warning"
+              "state": "warning",
+              "title": "Proxy deployment not found"
             },
             {
               "code": "missing",
@@ -191,7 +193,8 @@
                 "name": "other",
                 "namespace": "infra"
               },
-              "state": "warning"
+              "state": "warning",
+              "title": "Proxy deployment not found"
             }
           ],
           "state": "warning"
@@ -237,6 +240,26 @@
           "paths": 3,
           "routes": 1
         }
+      },
+      "facets": {
+        "gateways": [
+          {
+            "paths": 3,
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "other",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "namespaces": [
+          {
+            "name": "shop",
+            "paths": 3
+          }
+        ]
       },
       "gateways": 1,
       "hidden": true,

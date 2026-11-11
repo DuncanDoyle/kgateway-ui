@@ -1,6 +1,6 @@
 import type { GRPCMatch, PathRow } from "../../api/types";
 import { routeCopy } from "../../copy/explorer";
-import { cellCopy, endpointCopy, shareCopy, signalText } from "../../copy/traffic";
+import { cellCopy, endpointCopy, shareCopy, signalDetail, signalText } from "../../copy/traffic";
 import type { HealthState } from "../../theme/tokens";
 import { refText } from "../explore/listParts";
 import { matchText } from "../explore/route/MatchLine";
@@ -62,6 +62,8 @@ const tcpLike = (r: PathRow) => r.routes[0]?.kind === "TCPRoute" || r.routes[0]?
 
 /** The share cell's text and the state its flag shows, if any (design §4.4). */
 export function shareText(r: PathRow): { text: string; flag?: { state: HealthState; text: string } } {
+  // A redirect, direct response or rule without backends has no share.
+  if (r.action !== "backend") return { text: "" };
   const pct = shareCopy.percent(r.share ?? 0);
   switch (r.shareState) {
     case "shown":
@@ -106,3 +108,6 @@ export function endpointText(r: PathRow): string | undefined {
 
 /** The problem's signals, one per line, for the state's tooltip and the Why column. */
 export const signalLines = (r: PathRow) => r.problem.signals.map(signalText);
+
+/** The signals with their codes, for tooltips. */
+export const signalDetails = (r: PathRow) => r.problem.signals.map(signalDetail);

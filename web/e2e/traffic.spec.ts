@@ -85,6 +85,14 @@ test("the gateway= chip narrows, and a reload keeps the filters", async ({ page 
   await chip.click();
   await expect(page).toHaveURL(/gateway=traffic%2Ftraffic/);
   await expect(chip).toHaveAttribute("aria-pressed", "true");
+  // The facets keep the other Gateways with errors selectable.
+  const d0 = await paths(page, `state=error&gateway=${gw}`);
+  const others = d0.summary.facets?.gateways.map((g) => `${g.ref.namespace}/${g.ref.name}`) ?? [];
+  expect(others.length).toBeGreaterThan(1);
+  for (const o of others)
+    await expect(
+      page.getByRole("group", { name: trafficCopy.gateways }).getByRole("button", { name: o, exact: true }),
+    ).toBeVisible();
   const d = await paths(page, `state=error&gateway=${gw}`);
   const rows = await dataRows(page);
   await expect(rows).toHaveCount(d.rows.length);
