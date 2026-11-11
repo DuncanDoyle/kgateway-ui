@@ -85,3 +85,15 @@ func (unlabelled) Version() string { return "custom-1" }
 func (unlabelled) Attachment(computed.AttachmentInput) computed.AttachmentResult {
 	return computed.AttachmentResult{}
 }
+
+// Every kgateway rule set judges Backends with the pack's judgement (Phase 6 design §11).
+func TestEverySetJudgesBackends(t *testing.T) {
+	for _, v := range []string{"2.3.11", "2.4.7", "2.5.0", "banana"} {
+		if Select(v).BackendJudge() == nil {
+			t.Errorf("%s: rule set %s has no BackendJudge", v, Select(v).Rules.Version())
+		}
+	}
+	if (computed.Selection{}).BackendJudge() != nil {
+		t.Error("no rule set offers a BackendJudge")
+	}
+}

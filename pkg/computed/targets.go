@@ -1,6 +1,7 @@
 package computed
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -84,6 +85,29 @@ type TargetStatusReporter interface {
 func (s Selection) TargetStatusReporter() TargetStatusReporter {
 	r, _ := s.Rules.(TargetStatusReporter)
 	return r
+}
+
+// BackendVerdict is a rule set's judgement of a Backend object.
+type BackendVerdict string
+
+// The verdicts of BackendJudge. Unknown is never healthy.
+const (
+	BackendAccepted BackendVerdict = "accepted"
+	BackendRejected BackendVerdict = "rejected"
+	BackendUnknown  BackendVerdict = "unknown"
+)
+
+// BackendJudge is an optional interface of a Rules: it judges a Backend from its
+// status, returning the condition it read (nil when absent). Without it a Backend shows its conditions only.
+type BackendJudge interface {
+	JudgeBackend(b *unstructured.Unstructured) (BackendVerdict, *metav1.Condition)
+}
+
+// BackendJudge returns the selected rule set's judge, or nil when it has none.
+// A wrapping rule set forwards it to keep the Backend state.
+func (s Selection) BackendJudge() BackendJudge {
+	j, _ := s.Rules.(BackendJudge)
+	return j
 }
 
 // DecodeTargets returns a policy's spec.targetRefs and spec.targetSelectors as written.

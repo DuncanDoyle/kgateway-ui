@@ -1,0 +1,65 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "code": "KGWUI-002",
+        "detail": "Accepted=False, reason Invalid",
+        "group": "f1-4e3tz2a25wh4jkjlllt42mlhtb",
+        "id": "f1-c7vw432l6imb5qyzj4ia2by3fh",
+        "message": "Invalid configuration",
+        "resource": {
+          "group": "gateway.kgateway.dev",
+          "kind": "Backend",
+          "link": "yaml",
+          "name": "be-bad",
+          "namespace": "shop"
+        },
+        "severity": "error",
+        "since": "2026-10-17T11:00:00Z",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-002",
+        "detail": "Accepted=False, reason Invalid (the controller does not report which Backend version it checked)",
+        "group": "f1-whosnrftih5tfilpjvfhduljwz",
+        "id": "f1-5mmf7ijcry6o4ddegn2bjfsmiw",
+        "message": "Invalid configuration",
+        "resource": {
+          "group": "gateway.kgateway.dev",
+          "kind": "Backend",
+          "link": "yaml",
+          "name": "be-old",
+          "namespace": "shop"
+        },
+        "severity": "warning",
+        "since": "2026-10-17T11:00:00Z",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-004",
+        "detail": "targets Gateway infra/edge",
+        "group": "f1-b6uspryyolqs7xmxt2y4fu4q3f",
+        "id": "f1-sr3nt34mw3yema4cgo2evzaj7v",
+        "message": "Namespace not watched by the controller",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "posts",
+          "namespace": "blog"
+        },
+        "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
+        "slug": "namespace-not-watched"
+      }
+    ],
+    "total": 3
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

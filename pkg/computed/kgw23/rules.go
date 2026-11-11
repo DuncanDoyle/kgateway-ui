@@ -2,7 +2,11 @@
 package kgw23
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/kgwbackend"
 	"github.com/DuncanDoyle/snellius/pkg/computed/viewa"
 )
 
@@ -25,4 +29,9 @@ func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
 // Delegation implements computed.Delegator.
 func (rules) Delegation(in computed.DelegationInput) computed.DelegationResult {
 	return delegation(in)
+}
+
+// JudgeBackend implements computed.BackendJudge with the kgateway pack's judgement.
+func (rules) JudgeBackend(b *unstructured.Unstructured) (computed.BackendVerdict, *metav1.Condition) {
+	return kgwbackend.Judge(b)
 }

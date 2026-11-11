@@ -533,10 +533,10 @@ func (p *projector) backend(sigs []Signal, ref objects.Ref, port int32, traffic 
 				sigs = append(sigs, Signal{Kind: SignalFinding, Code: f.Code, Ref: ref, State: sevState(f.Severity)})
 			}
 		}
-		// Without a 002, a Backend whose Accepted has no current evidence is waiting.
-		if b := p.backends[ref]; b != nil && len(sigs) == n {
-			if st, _ := health.BackendState(b); st == health.StateUnknown {
-				sigs = append(sigs, Signal{Kind: SignalWaiting, Code: "Accepted", Ref: ref, State: st})
+		// Without a 002, a Backend the rule set's judge cannot judge is waiting.
+		if b, j := p.backends[ref], p.in.Model.Rules.BackendJudge(); b != nil && j != nil && len(sigs) == n {
+			if v, _ := j.JudgeBackend(b); v == computed.BackendUnknown {
+				sigs = append(sigs, Signal{Kind: SignalWaiting, Code: "Accepted", Ref: ref, State: health.StateUnknown})
 			}
 		}
 	}

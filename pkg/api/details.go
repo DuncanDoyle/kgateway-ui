@@ -659,7 +659,8 @@ func (d *detail) delegationState(parent, child objects.Ref) string {
 
 // backendState is a Backend's state and Accepted condition: restricted when
 // the caller may not view it, omitted when it does not open (absent or not
-// admitted; admission never follows chains).
+// admitted; admission never follows chains). The state comes from the rule
+// set's computed.BackendJudge; without one the condition shows alone.
 func (d *detail) backendState(ref objects.Ref, link Link) *BackendStateDTO {
 	if !d.v.can(ref) {
 		return &BackendStateDTO{Restricted: true}
@@ -668,13 +669,29 @@ func (d *detail) backendState(ref objects.Ref, link Link) *BackendStateDTO {
 		return nil
 	}
 	u, _ := stored(d.p.Model, ref)
-	st, c := health.BackendState(u)
-	out := &BackendStateDTO{State: st}
+	out := &BackendStateDTO{}
+	c := objects.FindCondition(objects.DecodeBackend(u).Conditions, "Accepted")
+	if j := d.i.Rules.BackendJudge(); j != nil {
+		var v computed.BackendVerdict
+		v, c = j.JudgeBackend(u)
+		out.State = verdictState(v)
+	}
 	if c != nil {
 		cc := condition(u, *c)
 		out.Accepted = &cc
 	}
 	return out
+}
+
+// verdictState is a Backend verdict as a health state; unknown is never healthy.
+func verdictState(v computed.BackendVerdict) health.State {
+	switch v {
+	case computed.BackendRejected:
+		return health.StateError
+	case computed.BackendAccepted:
+		return health.StateHealthy
+	}
+	return health.StateUnknown
 }
 
 // ancestors is the up-chain of route. A hidden Gateway or ListenerSet step

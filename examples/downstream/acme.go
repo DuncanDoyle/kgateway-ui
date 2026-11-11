@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/clock"
@@ -163,9 +164,14 @@ func (acmeProxyStats) Interpret(t proxystats.Target, body []byte) (proxystats.Po
 // acmeRules is acme's computed rule set: kgateway 2.4's views under acme's name.
 // Embedding computed.Rules drops optional methods: kgw24's PolicyTargeter, so no
 // computed KGWUI-016, and the TargetStatusReporter a kgw25 wrapper must forward.
+// It forwards BackendJudge, so Backends keep their state.
 type acmeRules struct{ computed.Rules }
 
 func (acmeRules) Version() string { return "acme-2.4" }
+
+func (r acmeRules) JudgeBackend(b *unstructured.Unstructured) (computed.BackendVerdict, *metav1.Condition) {
+	return computed.Selection{Rules: r.Rules}.BackendJudge().JudgeBackend(b)
+}
 
 // acmeRuleSet selects acmeRules for every controller, for extension.WithComputedRules.
 func acmeRuleSet(string) computed.Selection {

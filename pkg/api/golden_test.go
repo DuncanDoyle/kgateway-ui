@@ -234,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 428
+	const want = 432
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -397,6 +397,7 @@ func findingsCases(t *testing.T) []goldenCase {
 	_, some := findingsWorld(t, hideBroken)
 	_, groups := groupsWorld(t, nil)
 	_, groupsHidden := groupsWorld(t, hideCart)
+	backends, backendID := backendFindingsWorld(t)
 	id := func(name string) string {
 		for _, f := range e.Current().Model.Installs[0].Health.Findings {
 			if f.Resource != nil && f.Resource.Name == name {
@@ -413,7 +414,30 @@ func findingsCases(t *testing.T) []goldenCase {
 		{"finding-detail-restricted", some, findingsBase + "/" + id("broken")},
 		{"findings-groups", groups, findingsBase + "?view=groups"},
 		{"findings-groups-restricted", groupsHidden, findingsBase + "?view=groups&severity=error"},
+		{"findings-backends", backends, findingsBase + "?limit=200"},
+		{"finding-detail-backend", backends, findingsBase + "/" + backendID},
 	}
+}
+
+// backendFindingsWorld routes shop/be-route to three Backends: be-bad
+// rejected with current evidence, be-old rejected without evidence and be-ok
+// accepted. It returns the server and be-bad's finding ID.
+func backendFindingsWorld(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	noEvidence := testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")
+	noEvidence.ObservedGeneration = 0
+	rt := testutil.WithRules(testutil.HTTPRoute("shop", "be-route", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		backendRule([]any{beRef("be-bad"), beRef("be-old"), beRef("be-ok")}))
+	e, srv, _ := startWith(t, setup{}, world(rt,
+		testutil.Backend("shop", "be-bad", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}),
+		testutil.Backend("shop", "be-old", []metav1.Condition{noEvidence}), testutil.Backend("shop", "be-ok", nil))...)
+	for _, f := range e.Current().Model.Installs[0].Health.Findings {
+		if f.Resource != nil && f.Resource.Name == "be-bad" {
+			return srv, f.ID
+		}
+	}
+	t.Fatal("no finding on be-bad")
+	return nil, ""
 }
 
 // TestGoldenDelegation pins the 2.4 bodies (design §7.6): the delegation

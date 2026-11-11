@@ -250,6 +250,15 @@ Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v
 
 ## Upgrade notes
 
+### Backend judgement in the kgateway pack (sub-phase 6.3)
+
+Nothing changes in the UI or API v1 for kgateway installs. Class-only installs no longer judge kgateway Backends: no KGWUI-002 on a Backend, and route details show its Accepted condition without a state.
+
+- The Backend status check (KGWUI-002 on Backends) moves from `health.Core()` to `health.Kgateway()`. `health.Upstream()` keeps its order.
+- `computed.BackendJudge` is a new optional rule set interface, read through `Selection.BackendJudge()`. The kgateway rule sets implement it with `kgwbackend.Judge`.
+- A wrapping rule set forwards `BackendJudge`, as it forwards `TargetStatusReporter`. One that only embeds `computed.Rules` shows Backends without a state.
+- `health.BackendState` keeps its signature and meaning; it calls the kgateway judgement directly.
+
 ### v0.6.0: generic Gateway API core (Phase 5)
 
 Nothing changes in the UI or API v1 for kgateway installs. Go callers meet two deliberate breaks: controller metrics leave `engine.Config` and `health.Input`, and `computed.Rules` loses `Delegation`. Both are below.
