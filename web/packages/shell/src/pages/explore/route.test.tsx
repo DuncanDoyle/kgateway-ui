@@ -8,6 +8,7 @@ import restrictedGolden from "../../../../../../pkg/api/testdata/golden/route-de
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
 import type { Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
 import { routeCopy } from "../../copy/explorer";
+import { trafficCopy } from "../../copy/traffic";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
 import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
@@ -316,18 +317,18 @@ it("stale route data turns every state on the page unknown", async () => {
   expect(backend("child")).not.toHaveTextContent("Reported by the controller");
 });
 
-it("each backendRef links to Other routes using this backend (routes?backend=…)", async () => {
+it("each backendRef links to its backend detail, and the route links to Traffic with route=", async () => {
   serve(api());
   mount(MID);
   await loaded();
-  const lookup = (name: string) =>
-    new URL(
-      within(backend(name)).getByRole("link", { name: "Other routes using this backend" }).getAttribute("href") ?? "",
-      "http://ui",
-    );
-  expect(lookup("cart-svc").pathname).toBe(`/i/${ID}/routes`);
-  expect(lookup("cart-svc").searchParams.get("backend")).toBe("core/Service/shop/cart-svc");
-  expect(lookup("be1").searchParams.get("backend")).toBe("gateway.kgateway.dev/Backend/shop/be1");
+  // The routes-using-this-backend lookup became the backend detail link (Phase 6 design §7.1).
+  expect(screen.queryByRole("link", { name: "Other routes using this backend" })).toBeNull();
+  const traffic = new URL(
+    screen.getByRole("link", { name: trafficCopy.routeEntry }).getAttribute("href") ?? "",
+    "http://ui",
+  );
+  expect(traffic.pathname).toBe(`/i/${ID}/traffic`);
+  expect(traffic.searchParams.get("route")).toBe(MID_PARAM);
   // A backend links to its backend detail (Phase 6 design §3) and shows its state.
   expect(hrefPath(within(backend("be1")).getByRole("link", { name: /shop\/be1/ }))).toBe(
     `/i/${ID}/backends/gateway.kgateway.dev/Backend/shop/be1`,
@@ -337,9 +338,6 @@ it("each backendRef links to Other routes using this backend (routes?backend=…
   );
   // A current Accepted=True reads "Configuration accepted", never "working".
   expect(within(backend("be1")).getByTestId("condition-Accepted")).toHaveTextContent("Configuration accepted");
-  // Delegation refs never match the backend filter, so they get no lookup.
-  const deleg = rule(1);
-  expect(within(deleg).queryByRole("link", { name: "Other routes using this backend" })).toBeNull();
 });
 
 it("delegation refs show their mode and status state", async () => {
@@ -428,11 +426,7 @@ it("restricted objects show no names or data", async () => {
   expect(be1).toHaveTextContent("Restricted");
   expect(within(be1).queryByTestId("condition-Accepted")).toBeNull();
   expect(within(be1).queryByRole("link", { name: /shop\/be1/ })).toBeNull();
-  // The backend filter cannot probe (§7.4 rule 2a), so a hidden Backend keeps its lookup link.
-  const look = within(be1).getByRole("link", { name: "Other routes using this backend" });
-  expect(new URL(look.getAttribute("href") ?? "", "http://ui").searchParams.get("backend")).toBe(
-    "gateway.kgateway.dev/Backend/shop/be1",
-  );
+  expect(within(be1).queryByRole("link")).toBeNull();
   // A hidden child of a name ref: written name as text, state Restricted.
   expect(within(backend("child")).queryByRole("link", { name: /shop\/child/ })).toBeNull();
   expect(backend("child")).toHaveTextContent("Restricted");
@@ -483,7 +477,7 @@ it("the header and tabs keep their size from loading to loaded", async () => {
 });
 
 describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", (theme) => {
-  it("up-chain links, the lookup link and the expanders have hover, active and focus-visible styles", async () => {
+  it("up-chain links, the Traffic and backend links and the expanders have hover, active and focus-visible styles", async () => {
     serve(api());
     mount(FAR, theme.id);
     await loaded();
@@ -500,7 +494,8 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
     els.push(
       step,
       within(r.container).getByRole("button", { name: "Show child routes" }),
-      within(r.container).getAllByRole("link", { name: "Other routes using this backend" })[0] as HTMLElement,
+      within(r.container).getByRole("link", { name: trafficCopy.routeEntry }),
+      within(r.container).getAllByRole("link", { name: /shop\/cart-svc/ })[0] as HTMLElement,
     );
     for (const el of els)
       for (const pseudo of [":hover", ":active", ":focus-visible"])

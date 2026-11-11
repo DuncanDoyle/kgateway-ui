@@ -58,12 +58,23 @@ export function matchSummary(r: PathRow): { text: string; full: string; unknown?
   return { text, full: parts.join("\n") };
 }
 
-const tcpLike = (r: PathRow) => r.routes[0]?.kind === "TCPRoute" || r.routes[0]?.kind === "TLSRoute";
+/** TCPRoute and TLSRoute carry connections, not requests. */
+export const tcpKind = (kind?: string) => kind === "TCPRoute" || kind === "TLSRoute";
+const tcpLike = (r: PathRow) => tcpKind(r.routes[0]?.kind);
 
 /** The share cell's text and the state its flag shows, if any (design §4.4). */
 export function shareText(r: PathRow): { text: string; flag?: { state: HealthState; text: string } } {
   // A redirect, direct response or rule without backends has no share.
   if (r.action !== "backend") return { text: "" };
+  if (r.shareState === "mirror") return { text: shareCopy.mirror(r.mirrorPercent ?? 0) };
+  return refShareText(r, tcpLike(r));
+}
+
+/** A backendRef's share and flag; tcp picks "connections fail" over "requests fail". */
+export function refShareText(
+  r: { share?: number; shareState?: PathRow["shareState"] },
+  tcp: boolean,
+): { text: string; flag?: { state: HealthState; text: string } } {
   const pct = shareCopy.percent(r.share ?? 0);
   switch (r.shareState) {
     case "shown":
@@ -71,14 +82,9 @@ export function shareText(r: PathRow): { text: string; flag?: { state: HealthSta
     case "no-traffic":
       return { text: pct, flag: { state: "unknown", text: shareCopy.noTraffic } };
     case "failing":
-      return {
-        text: pct,
-        flag: { state: "error", text: tcpLike(r) ? shareCopy.connectionsFail : shareCopy.requestsFail },
-      };
+      return { text: pct, flag: { state: "error", text: tcp ? shareCopy.connectionsFail : shareCopy.requestsFail } };
     case "may-fail":
       return { text: pct, flag: { state: "warning", text: shareCopy.mayFail } };
-    case "mirror":
-      return { text: shareCopy.mirror(r.mirrorPercent ?? 0) };
     default:
       return { text: shareCopy.notShown };
   }

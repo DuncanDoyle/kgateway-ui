@@ -27,6 +27,7 @@ export const trafficCopy = {
   gatewayChips: "Gateway", // S667
   namespaceChips: "Namespace", // S668
   gatewayEntry: "Paths through this Gateway", // S669
+  routeEntry: "Paths through this route", // S763
   tags: { gateway: "Gateway", listener: "Listener", route: "Route", backend: "Backend", namespace: "Namespace" }, // S611
 };
 

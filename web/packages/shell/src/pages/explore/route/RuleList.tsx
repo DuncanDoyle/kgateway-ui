@@ -2,8 +2,8 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { dump } from "js-yaml";
 import { useContext } from "react";
-import type { BackendRef, Condition, DelegationRef, Filter, Rule } from "../../../api/types";
-import { delegationCopy, routeCopy } from "../../../copy/explorer";
+import type { BackendRef, Condition, DelegationRef, Filter, Rule, TraceAttachment } from "../../../api/types";
+import { delegationCopy, routeCopy, traceCopy } from "../../../copy/explorer";
 import { ComputedBadge } from "../../../explore/ComputedBadge";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
@@ -13,11 +13,11 @@ import { HealthIcon } from "../../../health/HealthIcon";
 import { StaleView } from "../../../health/staleView";
 import { stateLabel } from "../../../health/state";
 import { YamlBlock } from "../../../resource/ResourceYaml";
-import { installPath } from "../../../shell/paths";
-import { InlineLink } from "../../../states/controls";
 import type { HealthState } from "../../../theme/tokens";
+import { tcpKind } from "../../traffic/pathText";
 import { MatchLine } from "./MatchLine";
-import { backendParam } from "./refs";
+import { RefFacts, RefWhy } from "./RefTrace";
+import { ShareBar } from "./ShareBar";
 
 // region Styles
 const Rules = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -97,6 +97,16 @@ const RuleBox = styled.section`
   }
   .nested {
     padding-left: ${(p) => p.theme.space(3)};
+  }
+  /* The rule's filters as written, in a quiet marked area. */
+  .filters {
+    padding: ${(p) => p.theme.space(2)};
+    border: 1px dashed ${(p) => p.theme.color.borderStrong};
+    border-radius: ${(p) => p.theme.radius.sm};
+  }
+  .refs {
+    display: grid;
+    gap: ${(p) => p.theme.space(2)};
   }
 `;
 const Config = styled(YamlBlock)`
@@ -234,8 +244,15 @@ function BackendCondition({ c, state }: { c: Condition; state: HealthState }) {
   );
 }
 
-function BackendItem({ b, installId }: { b: BackendRef; installId: string }) {
-  const lookup = `${installPath(installId, "routes")}?${new URLSearchParams({ backend: backendParam(b.ref) })}`;
+interface BackendItemProps {
+  b: BackendRef;
+  installId: string;
+  serves: TraceAttachment[];
+  tcp: boolean;
+}
+
+/** One backend line: the ref as written, then its share, endpoints, state and why (design §7.1). */
+function BackendItem({ b, installId, serves, tcp }: BackendItemProps) {
   return (
     <li className="backend" data-testid={`backend-${b.ref.name}`}>
       {b.delegation ? (
@@ -258,17 +275,18 @@ function BackendItem({ b, installId }: { b: BackendRef; installId: string }) {
               </span>
             ) : null}
             <span data-testid="weight">{routeCopy.weight(b.weight, b.weightDefaulted)}</span>
+            <RefFacts b={b} tcp={tcp} />
+            {/* The path problem covers the Backend's own state; without one, the Backend's state shows. */}
             {b.backend?.restricted ? (
               <span className="state">
                 <HealthIcon state="unknown" size={14} />
                 {routeCopy.restricted}
               </span>
-            ) : b.backend?.state ? (
+            ) : b.backend?.state && !b.problem ? (
               <HealthBadge state={b.backend.state} />
             ) : null}
-            {/* Delegation refs never match the backend filter (design §7.2), so only real backends get it. */}
-            <InlineLink to={lookup}>{routeCopy.otherRoutes}</InlineLink>
           </span>
+          <RefWhy b={b} serves={serves} />
           {b.backend?.accepted ? (
             <BackendCondition c={b.backend.accepted} state={b.backend.state ?? "unknown"} />
           ) : null}
@@ -287,12 +305,20 @@ function BackendItem({ b, installId }: { b: BackendRef; installId: string }) {
 // region Component
 interface RuleListProps {
   installId: string;
+  /** The route's kind: TCPRoute and TLSRoute rules have no matches or filters, and connections fail. */
+  kind: string;
   rules: Rule[];
+  /** The attachments the backend lines' signals index. */
+  serves?: TraceAttachment[];
   stylesOverride?: SerializedStyles;
 }
 
-/** Each spec rule as written: matches, filters with their config, and backendRefs or delegation refs. */
-export function RuleList({ installId, rules, stylesOverride }: RuleListProps) {
+/**
+ * The route trace (design §7.1): each spec rule's match, filters as written, share bar, and one line per backendRef
+ * or delegation ref with its share, endpoints and problem.
+ */
+export function RuleList({ installId, kind, rules, serves = [], stylesOverride }: RuleListProps) {
+  const tcp = tcpKind(kind);
   if (!rules.length) return <p>{routeCopy.noRules}</p>;
   return (
     <Rules stylesOverride={stylesOverride}>
@@ -304,37 +330,45 @@ export function RuleList({ installId, rules, stylesOverride }: RuleListProps) {
               {routeCopy.rule(r.index + 1)}
               {r.name ? <span className="name">{r.name}</span> : null}
             </h3>
-            <div>
-              <h4>{routeCopy.matches}</h4>
-              {/* Omitted matches arrive with the CRD default; only an explicit [] is empty (computed-rules §3.2). */}
-              {r.matches.length ? (
-                <ul>
-                  {r.matches.map((m, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: positional
-                    <li key={i} className="line" data-testid="match">
-                      <MatchLine m={m} />
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span className="muted" data-testid="match-empty">
-                  {routeCopy.emptyMatches}
-                </span>
-              )}
-            </div>
-            {r.filters.length ? (
+            {/* TCPRoute and TLSRoute rules match every connection and have no filters. */}
+            {tcp ? null : (
               <div>
-                <h4>{routeCopy.filters}</h4>
-                <FilterList filters={r.filters} installId={installId} />
+                <h4>{routeCopy.matches}</h4>
+                {/* Omitted matches arrive with the CRD default; only an explicit [] is empty (computed-rules §3.2). */}
+                {r.matches.length ? (
+                  <ul>
+                    {r.matches.map((m, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: positional
+                      <li key={i} className="line" data-testid="match">
+                        <MatchLine m={m} grpc={kind === "GRPCRoute"} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="muted" data-testid="match-empty">
+                    {routeCopy.emptyMatches}
+                  </span>
+                )}
               </div>
-            ) : null}
-            <div>
+            )}
+            {tcp ? null : (
+              <div className="filters" data-testid="rule-filters">
+                <h4>{routeCopy.filters}</h4>
+                {r.filters.length ? (
+                  <FilterList filters={r.filters} installId={installId} />
+                ) : (
+                  <span className="muted">{traceCopy.noFilters}</span>
+                )}
+              </div>
+            )}
+            <div className="refs">
               <h4>{routeCopy.backendRefs}</h4>
+              <ShareBar refs={r.backendRefs} tcp={tcp} />
               {r.backendRefs.length ? (
                 <ul>
                   {r.backendRefs.map((b, i) => (
                     // biome-ignore lint/suspicious/noArrayIndexKey: the same backend may repeat in a rule
-                    <BackendItem key={i} b={b} installId={installId} />
+                    <BackendItem key={i} b={b} installId={installId} serves={serves} tcp={tcp} />
                   ))}
                 </ul>
               ) : (

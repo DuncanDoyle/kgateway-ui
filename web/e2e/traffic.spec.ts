@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { PathsResponse } from "../packages/shell/src/api/types";
+import type { PathsResponse, RouteDetail } from "../packages/shell/src/api/types";
+import { traceCopy } from "../packages/shell/src/copy/explorer";
 import { endpointCopy, pathColumnCopy, summaryCopy, trafficCopy } from "../packages/shell/src/copy/traffic";
 import { stateLabel } from "../packages/shell/src/health/state";
 
@@ -152,5 +153,97 @@ for (const theme of themes) {
     await row.locator('td[data-col="state"]').hover();
     expect(await bg(row), "hover tints the row").not.toBe(rowRest);
     await shot(page, `hover-${theme.mode}`);
+  });
+}
+
+// The route trace on route detail (sub-phase 6.4).
+const routeUrl = (kind: string, name: string) => `${install}/routes/gateway.networking.k8s.io/${kind}/traffic/${name}`;
+
+async function routeDetail(page: Page, kind: string, name: string): Promise<RouteDetail> {
+  const res = await page.request.get(`${api}/routes/gateway.networking.k8s.io/${kind}/traffic/${name}`);
+  expect(res.ok(), `GET ${kind} ${name}`).toBeTruthy();
+  return (await res.json()) as RouteDetail;
+}
+
+const ruleOf = (page: Page, n: number) => page.getByRole("region", { name: new RegExp(`^Rule ${n}\\b`) });
+
+function traceShot(page: Page, name: string) {
+  const dir = process.env.TRAFFIC_SHOTS ?? test.info().project.outputDir;
+  return page.screenshot({ path: `${dir}/trace-${name}.png`, fullPage: true });
+}
+
+for (const [kind, name] of [
+  ["GRPCRoute", "grpc"],
+  ["TCPRoute", "tcp"],
+] as const) {
+  test(`the routes list opens the ${kind} trace`, async ({ page }) => {
+    await page.goto(`${install}/routes?namespace=traffic&kind=gateway.networking.k8s.io/${kind}`);
+    await page.getByRole("link", { name: `traffic/${name}`, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${routeUrl(kind, name)}(\\?|$)`));
+    await expect(page.getByTestId("detail-header")).toContainText(kind);
+    const d = await routeDetail(page, kind, name);
+    await expect(page.getByTestId("serves")).toHaveCount(d.serves?.length ?? 0);
+    const rule = ruleOf(page, 1);
+    if (kind === "GRPCRoute") await expect(rule.getByTestId("match")).toContainText("echo.Echo/Ping");
+    else await expect(rule.getByTestId("match")).toHaveCount(0);
+    await expect(rule.getByTestId("share")).toHaveText(`${pathColumnCopy.share} 100 %`);
+  });
+}
+
+test("the weighted HTTPRoute splits 25 % / 75 %, and the route opens Traffic with route=", async ({ page }) => {
+  await page.goto(routeUrl("HTTPRoute", "split"));
+  const rule = ruleOf(page, 1);
+  await expect(rule.getByTestId("share-segment")).toHaveText(["25 %", "75 %"]);
+  await expect(rule.getByTestId("share")).toHaveText([`${pathColumnCopy.share} 25 %`, `${pathColumnCopy.share} 75 %`]);
+  await expect(page.getByTestId("serves")).toContainText("hr.traffic.example");
+  await page.getByRole("link", { name: trafficCopy.routeEntry }).click();
+  await expect(page).toHaveURL(/\/traffic\?route=gateway.networking.k8s.io%2FHTTPRoute%2Ftraffic%2Fsplit/);
+  await expect(await dataRows(page)).toHaveCount(2);
+});
+
+test("the zero-endpoint backend's line shows its problem and opens backend detail", async ({ page }) => {
+  await asleepIsWarning(page);
+  await page.goto(routeUrl("HTTPRoute", "asleep"));
+  const d = await routeDetail(page, "HTTPRoute", "asleep");
+  const ref = d.rules[0]?.backendRefs[0];
+  expect(ref?.problem?.state, "the API's problem for the ref").toBe("warning");
+  const line = page.getByTestId("backend-asleep");
+  await expect(line.getByTestId("path-state")).toHaveText(stateLabel("warning"));
+  await expect(line.getByTestId("endpoints")).toHaveText(
+    `${pathColumnCopy.endpoints} ${endpointCopy.ready(0, ref?.endpoints?.total ?? 0)}`,
+  );
+  await expect(line.getByTestId("problem")).not.toBeEmpty();
+  await line.getByRole("link", { name: "traffic/asleep" }).click();
+  await expect(page).toHaveURL(new RegExp(`${install}/backends/-/Service/traffic/asleep`));
+});
+
+for (const theme of themes) {
+  test(`the route trace in ${theme.name}: real data, hover and active on its links`, async ({ page }) => {
+    await asleepIsWarning(page);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    for (const [kind, name, shotName] of [
+      ["HTTPRoute", "split", "http"],
+      ["HTTPRoute", "asleep", "http-asleep"],
+      ["GRPCRoute", "grpc", "grpc"],
+      ["TCPRoute", "tcp", "tcp"],
+    ] as const) {
+      await page.goto(routeUrl(kind, name));
+      if (kind === "HTTPRoute" && name === "split") await pickTheme(page, theme);
+      await expect(ruleOf(page, 1).getByTestId("share-bar")).toBeVisible();
+      await expect(page.getByRole("heading", { name: new RegExp(`^${traceCopy.serves}`) })).toBeVisible();
+      await traceShot(page, `${shotName}-${theme.mode}`);
+    }
+    const link = page.getByTestId("backend-web-b").getByRole("link", { name: "traffic/web-b" });
+    const name = link.locator('[data-part="name"]');
+    const look = () =>
+      name.evaluate((el) => `${getComputedStyle(el).textDecorationLine} ${getComputedStyle(el).color}`);
+    const rest = await look();
+    await link.hover();
+    const hover = await look();
+    expect(hover, "hover underlines the backend link").not.toBe(rest);
+    await page.mouse.down();
+    expect(await look(), "a press recolours it").not.toBe(hover);
+    await page.mouse.move(0, 0);
+    await page.mouse.up();
   });
 }

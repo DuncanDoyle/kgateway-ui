@@ -236,7 +236,6 @@ export const routeCopy = {
   mirrorTo: "Mirror to", // S80
   weight: (n: number, defaulted?: boolean) => `Weight ${n}${defaulted ? " (default)" : ""}`, // S81
   restricted: "Restricted", // S82
-  otherRoutes: "Other routes using this backend", // S83 (fixed)
   backendAccepted: "Configuration accepted", // S84 (fixed)
   backendStale: "Describes an older generation of the Backend.", // S85
   backendNoEvidence: "The controller does not say which version it checked.", // S86, after "Accepted: True."
@@ -648,4 +647,19 @@ export const dataPlaneCopy = {
   withheld: "Proxies may not be getting config updates", // S558, equal to health.WithheldMessage
   withheldSpan: (first: string, last: string) => `First logged ${first}, last ${last}`, // S559
   controllerLog: "Controller log", // S552
+};
+
+// region Route trace (Phase 6.4, ids in docs/phases/phase-6/phase-6.4-wording.md)
+/** The route trace on route detail (Phase 6 design §7); failure wording follows the protocol (§4.4). */
+export const traceCopy = {
+  serves: "Serves through", // S753
+  servesNone: "No path you can view reaches this route.", // S754
+  listener: (name: string, port?: number) => `Listener ${name}${port ? ` :${port}` : ""}`, // S755
+  grpcMethod: "gRPC method", // S756
+  noFilters: "No filters.", // S757
+  failShare: (pct: string, tcp: boolean) => `${pct} of ${tcp ? "connections" : "requests"} fail`, // S758
+  mayFailShare: (pct: string) => `${pct} may fail`, // S759
+  noTraffic: "No traffic: every weight is 0", // S760
+  barLabel: (parts: string[]) => `Share of this rule's requests: ${parts.join(", ")}`, // S761
+  onAttachment: (gateway: string, listener: string) => `On ${gateway}, listener ${listener}:`, // S762
 };

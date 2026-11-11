@@ -64,6 +64,17 @@ spec:
     - matches: [{ path: { type: PathPrefix, value: /weighted } }]
       backendRefs: [{ name: web-a, port: 8000, weight: 90 }, { name: web-b, port: 8000, weight: 10 }]
 ---
+# Weights 1 and 3 in one rule: 25 % and 75 % on the route trace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: split, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: http }]
+  hostnames: [hr.traffic.example]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /split } }]
+      backendRefs: [{ name: web-a, port: 8000, weight: 1 }, { name: web-b, port: 8000, weight: 3 }]
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata: { name: asleep, namespace: traffic, labels: { e2e: traffic } }
