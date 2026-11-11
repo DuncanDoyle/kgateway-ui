@@ -98,13 +98,15 @@ func detailURL(group, kind, name string) string {
 }
 
 // backendsCases are the backends goldens: the list, a Service detail with a
-// named targetPort and a Backend detail.
+// named targetPort, a Backend detail and a detail with an attributed ref.
 func backendsCases(t *testing.T) []goldenCase {
 	_, srv, _ := startWith(t, backendsSetup(nil, nil), backendsWorld()...)
+	_, ex, _ := startWith(t, explainSetup(nil), explainWorld()...)
 	return []goldenCase{
 		{"backends", srv, backendsURL + "?limit=200"},
 		{"backend-detail-service", srv, detailURL("-", "Service", "named-svc")},
 		{"backend-detail-backend", srv, detailURL("gateway.kgateway.dev", "Backend", "be-used")},
+		{"backend-detail-explained", ex, backendsURL + "/-/Service/store/cart"},
 	}
 }
 

@@ -133,6 +133,11 @@ func (h *handler) backendDetail(w http.ResponseWriter, r *http.Request) {
 	for _, c := range b.Consumers {
 		out.Consumers = append(out.Consumers, ConsumerDTO{Consumer: l.linked(c.Consumer), Role: c.Role, Field: c.Field, Port: c.Port})
 	}
+	for _, e := range refExplanations(i, b.Routes, ref) {
+		if v.can(e.route) {
+			out.Explanations = append(out.Explanations, explanationDTO(v, l, e))
+		}
+	}
 	switch {
 	case ref.Group == "" && ref.Kind == "Service":
 		h.serviceDetail(r.Context(), &out, p.Model, i.Resolved.ID(), b)

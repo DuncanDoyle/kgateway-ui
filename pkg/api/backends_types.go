@@ -84,11 +84,13 @@ type ServiceFactDTO struct {
 }
 
 // RefExplanationDTO explains one route ref to the backend that does not
-// resolve (design §10). Kind is attributed, candidate or waiting.
+// resolve (design §10). Kind is attributed, candidate or waiting. Ref is the
+// backendRefs index, -1 for a rule filter's mirror; Path is where the route writes it.
 type RefExplanationDTO struct {
 	Route       LinkedRef     `json:"route"`
 	Rule        int           `json:"rule"`
 	Ref         int           `json:"ref"`
+	Path        string        `json:"path"`
 	Kind        string        `json:"kind"`
 	Reason      string        `json:"reason,omitempty"`
 	Explanation string        `json:"explanation,omitempty"`

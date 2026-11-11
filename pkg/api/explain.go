@@ -3,10 +3,16 @@ package api
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -481,4 +487,213 @@ func (f facts) effective(e *computed.EffectiveEdge, deps explore.DepSet) Compute
 	}
 	c.Coverage = []string{string(computed.CoverageNone)}
 	return c
+}
+
+// Kinds of a reference explanation (design §10).
+const (
+	RefAttributed = "attributed"
+	RefCandidate  = "candidate"
+	RefWaiting    = "waiting"
+)
+
+// Reference explanation wording (design §10). The Service sentences match
+// KGWUI-013's; a candidate quotes the route's reason and guesses nothing.
+const (
+	refExplainNotPermitted   = "The controller does not permit this ref to another namespace."
+	refExplainNotFound       = "The controller cannot find this backend."
+	refExplainInvalidKind    = "The controller does not support this backend kind."
+	refExplainServiceMissing = "Service `%s` does not exist."
+	refExplainServicePort    = "Service `%s` has no port %d (ports: %s)."
+	refExplainCandidate      = "This route reports `ResolvedRefs=False` (%s) for one of these refs."
+	refExplainWaiting        = "Waiting for the controller: the route's status is older than its spec."
+)
+
+// refUse is one place a route writes a backend: rule and backendRefs index
+// (-1 for a rule filter's mirror), the path KGWUI-013/014 name, and the port.
+type refUse struct {
+	rule, ref int
+	path      string
+	port      int32
+}
+
+// refExplanation is one explanation before the caller's visibility applies;
+// f is the finding it rests on, nil when waiting.
+type refExplanation struct {
+	route        objects.Ref
+	use          refUse
+	kind, reason string
+	text         string
+	f            *health.Finding
+}
+
+// refExplanations explains each ref of routes to backend that the route's
+// status reports unresolved (design §10), routes in order and refs in spec
+// order. It reads the 013/014 attribution and evaluates no ReferenceGrant.
+func refExplanations(i *engine.InstallModel, routes []objects.Ref, backend objects.Ref) []refExplanation {
+	ix := i.Index
+	if ix == nil || len(routes) == 0 {
+		return nil
+	}
+	at := make(map[objects.Ref]int, len(routes))
+	for k, r := range routes {
+		at[r] = k
+	}
+	found := make([][]*health.Finding, len(routes))
+	for k := range i.Health.Findings {
+		f := &i.Health.Findings[k]
+		if f.Resource == nil || f.Code != health.CodeRefUnresolved && f.Code != health.CodeRefNotPermitted {
+			continue
+		}
+		if j, ok := at[*f.Resource]; ok {
+			found[j] = append(found[j], f)
+		}
+	}
+	var out []refExplanation
+	for k, route := range routes {
+		id, ok := ix.Row(route)
+		if !ok {
+			continue
+		}
+		row := &ix.Routes[id]
+		uses := refUses(row, backend)
+		if len(uses) == 0 {
+			continue
+		}
+		reason, stale := resolvedRefs(row, i.Resolved.ControllerNames)
+		for _, u := range uses {
+			e, ok := explainUse(found[k], u, reason)
+			if !ok && stale {
+				e, ok = refExplanation{kind: RefWaiting, text: refExplainWaiting}, true
+			}
+			if ok {
+				e.route, e.use = route, u
+				out = append(out, e)
+			}
+		}
+	}
+	return out
+}
+
+// refUses are the places row writes backend, in the order KGWUI-013/014 list refs.
+func refUses(row *explore.RouteRow, backend objects.Ref) []refUse {
+	var rules []objects.Rule
+	if row.View != nil {
+		rules = row.View.Rules
+	} else {
+		rules = objects.DecodeRouteRules(row.Obj)
+	}
+	var out []refUse
+	mirrors := func(fs []objects.Filter, rule, ref int, path string) {
+		for k, f := range fs {
+			if f.Mirror != nil && f.Mirror.Backend == backend {
+				out = append(out, refUse{rule, ref, fmt.Sprintf("%s.filters[%d].requestMirror.backendRef", path, k), f.Mirror.Port})
+			}
+		}
+	}
+	for i := range rules {
+		for j, br := range rules[i].BackendRefs {
+			path := fmt.Sprintf("spec.rules[%d].backendRefs[%d]", i, j)
+			if br.Ref == backend {
+				out = append(out, refUse{i, j, path, br.Port})
+			}
+			mirrors(br.Filters, i, j, path)
+		}
+		mirrors(rules[i].Filters, i, -1, fmt.Sprintf("spec.rules[%d]", i))
+	}
+	return out
+}
+
+// resolvedRefs reads the install's status parents of row: the first current
+// ResolvedRefs=False reason other than RefNotPermitted (KGWUI-013's), and
+// whether any ResolvedRefs=False describes an older generation.
+func resolvedRefs(row *explore.RouteRow, controllers []string) (reason string, stale bool) {
+	var parents []objects.RouteParentStatus
+	if row.View != nil {
+		parents = row.View.Parents
+	} else {
+		parents = objects.RouteParents(row.Obj)
+	}
+	for _, p := range parents {
+		c := objects.FindCondition(p.Conditions, "ResolvedRefs")
+		if c == nil || c.Status != metav1.ConditionFalse || !slices.Contains(controllers, p.ControllerName) {
+			continue
+		}
+		switch {
+		case objects.IsStale(row.Obj, *c):
+			stale = true
+		case reason == "" && c.Reason != reasonRefNotPermitted:
+			reason = c.Reason
+		}
+	}
+	return reason, stale
+}
+
+// reasonRefNotPermitted is KGWUI-014's reason.
+const reasonRefNotPermitted = "RefNotPermitted"
+
+// explainUse is u's explanation from fs, the route's 013 and 014 findings:
+// attributed when one attributes u, else a candidate when one names it.
+func explainUse(fs []*health.Finding, u refUse, reason013 string) (refExplanation, bool) {
+	var out refExplanation
+	found := false
+	for _, f := range fs {
+		ev, ok := f.Facts.(*health.RefsEvidence)
+		if !ok || !slices.ContainsFunc(ev.Candidates, func(c health.RefLocation) bool { return c.Path == u.path }) {
+			continue
+		}
+		reason := reason013
+		if f.Code == health.CodeRefNotPermitted {
+			reason = reasonRefNotPermitted
+		}
+		if ev.Attributed {
+			return refExplanation{kind: RefAttributed, reason: reason, text: attributedText(f, ev, u, reason), f: f}, true
+		}
+		if !found {
+			out, found = refExplanation{kind: RefCandidate, reason: reason, text: fmt.Sprintf(refExplainCandidate, reason), f: f}, true
+		}
+	}
+	return out, found
+}
+
+// attributedText is an attributed finding's explanation in plain words:
+// KGWUI-013's own explanation when it has one, else the route's reason.
+func attributedText(f *health.Finding, ev *health.RefsEvidence, u refUse, reason string) string {
+	c := ev.Candidates[0].Ref
+	switch ev.Explanation {
+	case health.RefExplainKindNotServed:
+		return f.Message
+	case health.RefExplainServiceMissing:
+		return fmt.Sprintf(refExplainServiceMissing, c.Namespace+"/"+c.Name)
+	case health.RefExplainServicePort:
+		ports := make([]string, len(ev.Ports))
+		for k, p := range ev.Ports {
+			ports[k] = strconv.Itoa(int(p))
+		}
+		return fmt.Sprintf(refExplainServicePort, c.Namespace+"/"+c.Name, u.port, strings.Join(ports, ", "))
+	}
+	switch reason {
+	case reasonRefNotPermitted:
+		return refExplainNotPermitted
+	case "BackendNotFound":
+		return refExplainNotFound
+	case "InvalidKind":
+		return refExplainInvalidKind
+	}
+	return f.Message
+}
+
+// explanationDTO is e for the caller of v, who may see its route. An
+// attribution resting on evidence the caller may not see quotes only the
+// route's status, as a candidate; a fix naming a hidden object is left out.
+func explanationDTO(v *view, l linker, e refExplanation) RefExplanationDTO {
+	out := RefExplanationDTO{Route: l.linked(e.route), Rule: e.use.rule, Ref: e.use.ref, Path: e.use.path, Kind: e.kind, Reason: e.reason, Explanation: e.text}
+	if e.kind != RefAttributed {
+		return out
+	}
+	if !v.allOf(e.f.Evidence) {
+		out.Kind, out.Explanation = RefCandidate, fmt.Sprintf(refExplainCandidate, e.reason)
+		return out
+	}
+	out.Fix = wireFix(v, l, diagnose.Fix(e.f))
+	return out
 }
