@@ -99,8 +99,8 @@ function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
 }
 
 /**
- * An edge in its state's stroke and pattern: solid healthy, dotted warning, dash-dot unknown. Error edges carry an
- * icon at their middle, and a broken one (every row fails) is also dashed. Unknown in a stale view.
+ * An edge in its state's stroke and pattern: solid healthy, dotted warning, dash-dot unknown, solid error.
+ * A broken edge (every row fails) is dashed and carries an error icon at its middle. Unknown in a stale view.
  */
 function MapEdgeLine({ id, sourceX, sourceY, targetX, targetY, data, style }: EdgeProps<MapFlowEdge>) {
   const state = useShownState(data?.state ?? "unknown");
@@ -116,7 +116,7 @@ function MapEdgeLine({ id, sourceX, sourceY, targetX, targetY, data, style }: Ed
   return (
     <>
       <BaseEdge id={id} path={path} style={style} className={`state-${state}${broken ? " broken" : ""}`} />
-      {state === "error" ? (
+      {broken ? (
         <EdgeLabelRenderer>
           <div
             className={`map-edge-icon${data?.dim ? " dim" : ""}`}
@@ -141,6 +141,8 @@ interface GatewayMapProps {
   onSelect: (id?: string) => void;
   /** A node to centre on; a new seq centres again. */
   focus?: { id: string; seq: number };
+  /** The query the graph's rows answer; a new one redraws the canvas and fits it, a poll keeps the view. */
+  view: string;
   stylesOverride?: SerializedStyles;
 }
 
@@ -148,7 +150,7 @@ interface GatewayMapProps {
  * The Gateway map canvas: React Flow with pan, zoom, fit to view and a minimap, styled from theme tokens (design §6).
  * Hovering a node lights every path through it and dims the rest; a click selects it.
  */
-export function GatewayMap({ graph, selected, onSelect, focus, stylesOverride }: GatewayMapProps) {
+export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverride }: GatewayMapProps) {
   const theme = useTheme();
   const [hovered, setHovered] = useState<string>();
   const flow = useRef<ReactFlowInstance<MapFlowNode, MapFlowEdge>>(undefined);
@@ -179,34 +181,53 @@ export function GatewayMap({ graph, selected, onSelect, focus, stylesOverride }:
   );
   const edges = useMemo(
     () =>
-      graph.edges.map(
-        (e): MapFlowEdge => ({
+      graph.edges.map((e): MapFlowEdge => {
+        // Under hover or selection a lit edge shows its state on the active node's paths; at rest, its worst row.
+        const on = lit?.edges.get(e.id);
+        return {
           id: e.id,
           type: "map",
           source: e.source,
           target: e.target,
-          data: { state: e.state, broken: e.broken, share: e.share, dim: !!lit && !lit.edges.has(e.id) },
+          data: { state: on?.state ?? e.state, broken: on?.broken ?? e.broken, share: e.share, dim: !!lit && !on },
           style: { strokeWidth: strokeWidth(e.share) },
-          className: lit ? (lit.edges.has(e.id) ? "lit" : "dim") : undefined,
-        }),
-      ),
+          className: lit ? (on ? "lit" : "dim") : undefined,
+        };
+      }),
     [graph, lit],
   );
-  // Another node set (a filter change) remounts the canvas, so it fits the new nodes; a poll keeps the view.
-  const ids = useMemo(() => graph.nodes.map((n) => n.id).join("\n"), [graph]);
-  // Each find request centres once; a later redraw keeps the view.
+  // A find request centres its node once; otherwise a selected node outside the canvas, which the side panel
+  // narrows, is panned back into view at the same zoom. Both measure the canvas itself, not React Flow's last size.
+  const box = useRef<HTMLDivElement>(null);
   const centred = useRef(0);
   useEffect(() => {
-    const p = focus && at.get(focus.id);
-    if (!focus || !p || !flow.current || focus.seq === centred.current) return;
-    centred.current = focus.seq;
-    const zoom = Math.max(flow.current.getZoom(), 0.8);
-    void flow.current.setCenter(p.x + NODE_W / 2, p.y + NODE_H / 2, { zoom, duration: reducedMotion() ? 0 : 300 });
-  }, [focus, at]);
+    const f = flow.current;
+    const rect = box.current?.getBoundingClientRect();
+    if (!f || !rect?.width) return;
+    const centre = (id: string, zoom: number) => {
+      const p = at.get(id);
+      if (!p) return;
+      const x = rect.width / 2 - (p.x + NODE_W / 2) * zoom;
+      const y = rect.height / 2 - (p.y + NODE_H / 2) * zoom;
+      void f.setViewport({ x, y, zoom }, { duration: reducedMotion() ? 0 : 300 });
+    };
+    const v = f.getViewport();
+    if (focus && focus.seq !== centred.current) {
+      centred.current = focus.seq;
+      centre(focus.id, Math.max(v.zoom, 0.8));
+      return;
+    }
+    const p = selected ? at.get(selected) : undefined;
+    if (!selected || !p) return;
+    const left = p.x * v.zoom + v.x;
+    const top = p.y * v.zoom + v.y;
+    if (left < 0 || top < 0 || left + NODE_W * v.zoom > rect.width || top + NODE_H * v.zoom > rect.height)
+      centre(selected, v.zoom);
+  }, [focus, selected, at]);
   return (
-    <MapCanvas data-testid="gateway-map" stylesOverride={stylesOverride}>
+    <MapCanvas ref={box} data-testid="gateway-map" stylesOverride={stylesOverride}>
       <ReactFlow
-        key={ids}
+        key={view}
         aria-label={mapCopy.canvas}
         nodes={nodes}
         edges={edges}

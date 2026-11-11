@@ -1,6 +1,6 @@
 import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { LinkedRef, PathSummary } from "../../api/types";
 import { listCopy } from "../../copy/explorer";
@@ -22,9 +22,11 @@ const fill = css`
   height: 100%;
   border-radius: 0;
 `;
-/** The canvas and the side panel over its right edge, so opening the panel moves nothing. */
-const Area = styled.div`
-  position: relative;
+/** The canvas, and the side panel in its own column when open, so the canvas shrinks rather than hides under it. */
+const Area = styled.div<{ $panel: boolean }>`
+  display: grid;
+  grid-template-columns: ${(p) => (p.$panel ? "minmax(0, 1fr) min(340px, 40%)" : "minmax(0, 1fr)")};
+  gap: ${(p) => p.theme.space(2)};
 `;
 /** The notes line keeps one line's height, so a note appearing moves nothing below it. */
 const Notes = styled(MapNote)`
@@ -57,7 +59,8 @@ const matches = (nodes: MapNode[], text: string) => {
 /** More routes or backends than LARGE_GATEWAY in the whole result. */
 const isLarge = (s: PathSummary) => s.routes > LARGE_GATEWAY || s.backends > LARGE_GATEWAY;
 
-type Opening = "pending" | "done" | { routes: number; backends: number };
+/** pending until the first summary; a large Gateway's counts, applied once the URL carries Problems only. */
+type Opening = "pending" | "done" | { routes: number; backends: number; applied: boolean };
 
 // region Component
 interface MapTabProps {
@@ -80,7 +83,8 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
     installId,
     `${gateway.namespace ?? ""}/${gateway.name}`,
     params,
-    opening === "pending" ? isLarge : undefined,
+    // Until the URL carries Problems only, a large Gateway's unfiltered walk stops after page one.
+    opening === "pending" || (typeof opening === "object" && !opening.applied) ? isLarge : undefined,
   );
   useEffect(() => {
     void load();
@@ -102,17 +106,36 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const summary = paths.summary;
   const large = opening === "pending" && !!summary && isLarge(summary);
   useEffect(() => {
+    if (typeof opening === "object" && !opening.applied && params.has("state"))
+      setOpening({ ...opening, applied: true });
     if (opening !== "pending" || !summary) return;
     if (large) {
-      setOpening({ routes: summary.routes, backends: summary.backends });
+      setOpening({ routes: summary.routes, backends: summary.backends, applied: false });
       setFilter({ state: PROBLEM_STATES });
     } else setOpening("done");
-  }, [opening, summary, large, setFilter]);
+  }, [opening, summary, large, setFilter, params]);
   const prompt = typeof opening === "object" && problemsOnly(params) ? opening : undefined;
 
   const graph = useMemo(() => gatewayGraph(gateway, paths.rows), [gateway, paths.rows]);
   const [selected, setSelected] = useState<string>();
+  // A selection from the map moves focus into the panel; one from the find box leaves it in the box.
+  const [panelFocus, setPanelFocus] = useState(false);
   const node = selected ? graph.nodes.find((n) => n.id === selected) : undefined;
+  const area = useRef<HTMLDivElement>(null);
+  const onSelect = useCallback((id?: string) => {
+    setSelected(id);
+    setPanelFocus(!!id);
+  }, []);
+  // Closing returns focus to the node when it was in the panel.
+  const close = () => {
+    const back = area.current?.querySelector("[data-testid=map-panel]")?.contains(document.activeElement);
+    const id = selected;
+    setSelected(undefined);
+    if (back && id)
+      requestAnimationFrame(() =>
+        area.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`)?.focus(),
+      );
+  };
   // Find: typing centres and selects the first match; Enter moves to the next.
   const [find, setFind] = useState("");
   const [at, setAt] = useState(0);
@@ -122,6 +145,7 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
     const n = list[k];
     if (!n) return;
     setSelected(n.id);
+    setPanelFocus(false);
     setFocus((f) => ({ id: n.id, seq: (f?.seq ?? 0) + 1 }));
     setAt(k + 1);
   };
@@ -158,29 +182,40 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         {prompt ? <span data-testid="map-large">{mapCopy.large(prompt.routes, prompt.backends)}</span> : null}
         {paths.truncated && summary ? (
           <span data-testid="map-truncated">{mapCopy.truncated(MAP_MAX_ROWS, summary.paths)}</span>
+        ) : paths.partial && summary ? (
+          <span data-testid="map-partial">{mapCopy.partial(paths.rows.length, summary.paths)}</span>
         ) : null}
         {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
       </Notes>
       {!summary || large ? (
         <Fallback />
       ) : (
-        <Area>
+        <Area
+          ref={area}
+          $panel={!!node}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && node) close();
+          }}
+        >
           <Suspense fallback={<Fallback />}>
             <GatewayMap
               graph={graph}
               selected={node?.id}
-              onSelect={setSelected}
+              onSelect={onSelect}
               focus={focus}
+              view={paths.query ?? ""}
               stylesOverride={stylesOverride}
             />
           </Suspense>
           {node ? (
             <SidePanel
+              key={node.id}
               installId={installId}
               gateway={gateway}
               node={node}
               rows={paths.rows}
-              onClose={() => setSelected(undefined)}
+              takeFocus={panelFocus}
+              onClose={close}
             />
           ) : null}
         </Area>

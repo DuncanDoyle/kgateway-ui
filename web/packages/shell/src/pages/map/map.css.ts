@@ -3,7 +3,7 @@ import styled from "@emotion/styled";
 
 // region Styles
 /** The map's height, shared by the loading fallback so nothing moves when the canvas arrives. */
-const MAP_H = "clamp(420px, 70vh, 760px)";
+export const MAP_H = "clamp(420px, 70vh, 760px)";
 
 /** The map's box: fixed height, themed border. */
 export const MapBox = styled.div<{ stylesOverride?: SerializedStyles }>`

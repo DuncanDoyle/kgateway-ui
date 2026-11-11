@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { type ApiError, apiFetch } from "../../api/client";
 import { forInstall, withQuery } from "../../api/exploreHooks";
@@ -33,6 +33,8 @@ export interface MapPaths {
   truncated: boolean;
   /** The result kept changing during the walk, so these rows are the last result that held still (or the last walk). */
   inconsistent: boolean;
+  /** The /paths URL these rows answer; it lags the page URL until a new query's rows arrive. */
+  query?: string;
 }
 
 /**
@@ -49,8 +51,11 @@ const WALK_RETRIES = 2;
 
 /** One walk over the pages; inconsistent when its pages never agreed on the result's counts. */
 interface MapResult {
+  key: string;
   pages: PathsResponse[];
   inconsistent: boolean;
+  /** The walk stopped before the last page, so the result is partial until a full walk replaces it. */
+  stopped?: boolean;
 }
 
 /** True when two pages report the same counts for the whole result, so the result did not change between them. */
@@ -76,7 +81,7 @@ async function fetchPages(
     let rows = 0;
     let consistent = true;
     for (let next: string | undefined = ""; next !== undefined && rows < MAP_MAX_ROWS; ) {
-      if (pages[0] && !wanted(pages[0])) return { pages, inconsistent: false };
+      if (pages[0] && !wanted(pages[0])) return { key: url, pages, inconsistent: false, stopped: true };
       const page: PathsResponse = await apiFetch(next ? `${url}&cursor=${encodeURIComponent(next)}` : url);
       if (pages[0] && !sameResult(pages[0], page)) {
         consistent = false;
@@ -87,9 +92,9 @@ async function fetchPages(
       next = page.next;
       onPage([...pages]);
     }
-    if (consistent) return { pages, inconsistent: false };
+    if (consistent) return { key: url, pages, inconsistent: false };
   }
-  return { pages: prev?.pages ?? pages, inconsistent: true };
+  return { key: url, pages: prev?.pages ?? pages, inconsistent: true };
 }
 
 /** A path's identity: Gateway, ListenerSet, listener, route chain, rule, backend, port and mirror. */
@@ -147,7 +152,7 @@ export function useMapPaths(
   const [progress, setProgress] = useState<{ key: string; pages: PathsResponse[] }>();
   const shown = useRef({ key, stopAt });
   shown.current = { key, stopAt };
-  const { data, error } = useSWR<MapResult, ApiError>(
+  const { data, error, mutate } = useSWR<MapResult, ApiError>(
     key,
     (k: string) =>
       fetchPages(
@@ -163,7 +168,14 @@ export function useMapPaths(
   const own = cache.get(key)?.data !== undefined;
   const loaded = own || !error ? data : undefined;
   const current = loaded?.pages ?? (progress?.key === key ? progress.pages : undefined);
+  const answers = loaded ? loaded.key : progress?.key === key ? key : undefined;
   const inconsistent = !!loaded?.inconsistent;
+  // A walk that stopped early is shown as partial (its last page has a next) and walked again in full
+  // once nothing asks it to stop, so it never stands in for the whole result.
+  const restart = own && !!data?.stopped && !stopAt;
+  useEffect(() => {
+    if (restart) void mutate();
+  }, [restart, mutate]);
   return useMemo(() => {
     const pages = current?.filter((p) => forInstall(p, installId));
     const first = pages?.[0];
@@ -179,6 +191,7 @@ export function useMapPaths(
       done: !!first && !more,
       truncated: !!first && first.summary.paths > MAP_MAX_ROWS,
       inconsistent,
+      query: answers,
     };
-  }, [current, inconsistent, installId, error]);
+  }, [current, inconsistent, installId, error, answers]);
 }

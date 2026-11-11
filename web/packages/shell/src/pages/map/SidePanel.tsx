@@ -1,7 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { X } from "lucide-react";
-import { useContext } from "react";
+import { useContext, useEffect, useRef } from "react";
 import type { Endpoints, LinkedRef, PathRow } from "../../api/types";
 import { listenerCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
@@ -17,22 +17,25 @@ import { refParam } from "../explore/detailParts";
 import { backendParam } from "../explore/route/refs";
 import { endpointsText } from "../traffic/pathText";
 import type { MapNode } from "./graph";
+import { MAP_H } from "./map.css";
 
 // region Styles
 const Panel = styled.aside<{ stylesOverride?: SerializedStyles }>`
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 5;
-  width: min(340px, 85%);
+  height: ${MAP_H};
   box-sizing: border-box;
   overflow-y: auto;
   padding: ${(p) => p.theme.space(3)};
   background: ${(p) => p.theme.color.surface};
   color: ${(p) => p.theme.color.text};
-  border-left: 1px solid ${(p) => p.theme.color.borderStrong};
-  box-shadow: -4px 0 16px color-mix(in srgb, ${(p) => p.theme.color.text} 12%, transparent);
+  border: 1px solid ${(p) => p.theme.color.border};
+  border-radius: ${(p) => p.theme.radius.md};
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
+  p {
+    margin: 0;
+  }
   font-size: ${(p) => p.theme.font.size.sm};
   header {
     display: flex;
@@ -142,6 +145,8 @@ interface SidePanelProps {
   node: MapNode;
   /** The map's rows; node.rows indexes them. */
   rows: PathRow[];
+  /** Move focus into the panel when it mounts; the map keys it by node, so another node mounts it again. */
+  takeFocus?: boolean;
   onClose: () => void;
   stylesOverride?: SerializedStyles;
 }
@@ -150,7 +155,11 @@ interface SidePanelProps {
  * A map node's state, the paths through it by state, its own problems, a backend's endpoints, and links to its
  * detail and to Traffic (design §6.1). A node's state names only its own signals, so the path counts say what fails through it.
  */
-export function SidePanel({ installId, gateway, node, rows, onClose, stylesOverride }: SidePanelProps) {
+export function SidePanel({ installId, gateway, node, rows, takeFocus, onClose, stylesOverride }: SidePanelProps) {
+  const self = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (takeFocus) self.current?.focus();
+  }, [takeFocus]);
   const stale = useContext(StaleView);
   const total = node.rows.length;
   const counts: Record<HealthState, number> = { error: 0, warning: 0, unknown: 0, healthy: 0 };
@@ -164,14 +173,7 @@ export function SidePanel({ installId, gateway, node, rows, onClose, stylesOverr
   const ports = node.kind === "backend" ? endpointsByPort(node, rows) : [];
   const kind = node.action ? mapCopy.action : node.kind === "listener" ? listenerCopy.listener : node.ref?.kind;
   return (
-    <Panel
-      aria-label={mapCopy.panel}
-      data-testid="map-panel"
-      stylesOverride={stylesOverride}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
+    <Panel ref={self} tabIndex={-1} aria-label={mapCopy.panel} data-testid="map-panel" stylesOverride={stylesOverride}>
       <header>
         <div>
           <div className="kind">
@@ -228,7 +230,7 @@ export function SidePanel({ installId, gateway, node, rows, onClose, stylesOverr
           <ul data-testid="map-panel-endpoints">
             {ports.map(([port, e]) => (
               <li key={port ?? "-"}>
-                {port !== undefined ? `${mapCopy.port(port)}: ` : ""}
+                {port !== undefined ? `${mapCopy.port(port)} ` : ""}
                 {endpointsText(e)}
               </li>
             ))}

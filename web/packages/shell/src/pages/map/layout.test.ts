@@ -1,5 +1,5 @@
 import type { LinkedRef, PathRow } from "../../api/types";
-import { buildGraph, type MapGraph } from "./graph";
+import { buildGraph, type MapGraph, throughNode } from "./graph";
 import { INDENT, layoutColumns, type Point, ROW_H } from "./layout";
 
 const ref = (kind: string, name: string, namespace = "shop"): LinkedRef => ({
@@ -265,4 +265,31 @@ it("a column with a node prev lacks is re-laid even when it is not in changed", 
   expect(after.get("g:gateway.networking.k8s.io/Gateway/infra/edge")).toEqual(
     before.get("g:gateway.networking.k8s.io/Gateway/infra/edge"),
   );
+});
+
+it("a lit edge shows its state on the active node's paths; at rest it shows its worst row", () => {
+  const g = buildGraph(
+    [
+      row("http", ["r1"], "svc-a", { shareState: "failing", problem: { state: "error", signals: [] } }),
+      row("http", ["r2"], "svc-b"),
+      row("http", ["r3"], "svc-c", { problem: { state: "warning", signals: [] } }),
+    ],
+    new Set(),
+  );
+  const trunk = "g:gateway.networking.k8s.io/Gateway/infra/edge>l:http";
+  const rest = g.edges.find((e) => e.id === trunk);
+  expect([rest?.state, rest?.broken]).toEqual(["error", false]);
+  // Hovering the healthy route: the trunk is healthy on its path, and the failing edge is not lit.
+  const healthy = throughNode(g, "r:gateway.networking.k8s.io/HTTPRoute/shop/r2");
+  expect(healthy.edges.get(trunk)).toEqual({ state: "healthy", broken: false });
+  expect(healthy.edges.has("r:gateway.networking.k8s.io/HTTPRoute/shop/r1>b:/Service/shop/svc-a")).toBe(false);
+  // Hovering the failing backend: every edge on its one path is broken.
+  const failing = throughNode(g, "b:/Service/shop/svc-a");
+  expect([...failing.edges.values()]).toEqual([
+    { state: "error", broken: true },
+    { state: "error", broken: true },
+    { state: "error", broken: true },
+  ]);
+  // The listener's paths mix states, so the trunk is the worst and not broken.
+  expect(throughNode(g, "l:http").edges.get(trunk)).toEqual({ state: "error", broken: false });
 });

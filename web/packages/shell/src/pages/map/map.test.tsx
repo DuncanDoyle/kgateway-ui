@@ -343,17 +343,47 @@ it("a Gateway with more than 60 routes opens on problems only after its first pa
     ),
   );
   expect(await screen.findByTestId("map-large")).toHaveTextContent(
-    "This Gateway has 61 routes and 4 backends, so the map opens on problems only.",
+    "This Gateway has 61 routes and 4 backends, so the map shows problems only. Narrow by kind or namespace, or clear Problems only to load every path.",
   );
   await screen.findByTestId("gateway-map");
   const unfiltered = pathCalls().filter((u) => !u.searchParams.has("state"));
   expect(unfiltered.map((u) => u.searchParams.get("cursor"))).toEqual([null]);
   expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]);
   expect(screen.getByRole("button", { name: "Problems only" })).toHaveAttribute("aria-pressed", "true");
-  // Releasing the chip shows every path and drops the prompt.
+  // Releasing the chip shows every path and drops the prompt. The stopped first walk is not the whole result:
+  // it shows as partial and is walked again in full.
   await userEvent.setup().click(screen.getByRole("button", { name: "Problems only" }));
   await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("state="));
   expect(screen.queryByTestId("map-large")).toBeNull();
+  // SWR's own revalidation may add a second full walk; the test SWR config does not dedupe.
+  await waitFor(() =>
+    expect(
+      pathCalls()
+        .filter((u) => !u.searchParams.has("state"))
+        .map((u) => u.searchParams.get("cursor"))
+        .slice(0, 4),
+    ).toEqual([null, null, "p1", "p2"]),
+  );
+  await waitFor(() => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(453));
+  expect(screen.queryByTestId("map-partial")).toBeNull();
+});
+
+it("a walk still loading says how many paths it shows so far", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  serve((u) => page(pageOf(u), 300));
+  const base = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const u = new URL(String(input), "http://ui");
+    if (u.pathname.endsWith("/paths") && pageOf(u) > 0) await gate;
+    return base(input);
+  });
+  mount("?tab=map");
+  expect(await screen.findByTestId("map-partial")).toHaveTextContent("Showing 200 of 300 paths. Loading the rest.");
+  release();
+  await waitFor(() => expect(screen.queryByTestId("map-partial")).toBeNull());
 });
 
 it("a Gateway at the threshold opens unfiltered, and a state in the URL is kept", async () => {
@@ -414,11 +444,16 @@ it("the side panel of a backend with no ready endpoints says what fails through 
     "href",
     `/i/${ID}/traffic?${new URLSearchParams({ gateway: "infra/edge", backend: "core/Service/shop/cart-svc" })}`,
   );
+  // The panel takes focus, in its own column beside the canvas.
+  expect(panel).toHaveFocus();
+  expect(panel.parentElement).toBe(map.parentElement);
   // The selected node keeps its paths lit; closing the panel clears both.
   expect(flowNode(map, "shop/backends")).not.toHaveClass("dim");
   expect(flowNode(map, "shop/api")).toHaveClass("dim");
   await user.click(within(panel).getByRole("button", { name: "Close details" }));
   expect(screen.queryByTestId("map-panel")).toBeNull();
+  // Focus goes back to the node.
+  await waitFor(() => expect(flowNode(map, "shop/cart-svc")).toHaveFocus());
   expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0);
 });
 
@@ -488,11 +523,14 @@ it("find selects the first node whose name matches, and Enter moves to the next"
   await user.type(box, "SVC");
   const svc = nodeNames(screen.getByTestId("gateway-map")).filter((n) => n.toLowerCase().includes("svc"));
   expect(svc.length).toBeGreaterThan(1);
-  const panel = await screen.findByRole("complementary", { name: "Node details" });
-  expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(svc[0] as string);
+  const heading = async () =>
+    within(await screen.findByRole("complementary", { name: "Node details" })).getByRole("heading", { level: 2 });
+  expect(await heading()).toHaveTextContent(svc[0] as string);
+  // A find keeps focus in the box, so typing goes on.
+  expect(box).toHaveFocus();
   expect(screen.getByTestId("map-found")).toHaveTextContent(`1 of ${svc.length}`);
   await user.type(box, "{Enter}");
-  expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(svc[1] as string);
+  expect(await heading()).toHaveTextContent(svc[1] as string);
   expect(screen.getByTestId("map-found")).toHaveTextContent(`2 of ${svc.length}`);
   await user.clear(box);
   await user.type(box, "nothing-here");
@@ -508,6 +546,24 @@ it("a result that kept changing shows a quiet notice", async () => {
   });
   mount("?tab=map");
   expect(await screen.findByTestId("map-inconsistent")).toHaveTextContent(
-    "The paths kept changing while the map loaded, so it may not match the cluster.",
+    "The paths changed while loading. The map may be out of date.",
   );
+});
+
+it("Escape closes the panel from the map and from the panel", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  fireEvent.click(within(flowNode(map, "shop/api")).getByTestId("map-node"));
+  expect(await screen.findByTestId("map-panel")).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  await waitFor(() => expect(flowNode(map, "shop/api")).toHaveFocus());
+  // Again, with focus on a map node.
+  fireEvent.click(within(flowNode(map, "shop/api")).getByTestId("map-node"));
+  await screen.findByTestId("map-panel");
+  flowNode(map, "shop/backends").focus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
 });

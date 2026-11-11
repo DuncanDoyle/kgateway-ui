@@ -42,10 +42,20 @@ export interface MapEdge {
   rows: number[];
 }
 
+/** A path row's state, and whether it fails (an error, or a failing share). */
+export interface RowMark {
+  state: HealthState;
+  fails: boolean;
+}
+
 export interface MapGraph {
   nodes: MapNode[];
   edges: MapEdge[];
+  /** Per input row, indexed as nodes' and edges' rows are. */
+  rows: RowMark[];
 }
+
+const fails = (r: Pick<PathRow, "problem" | "shareState">) => r.problem.state === "error" || r.shareState === "failing";
 
 const RANK: Record<HealthState, number> = { healthy: 0, unknown: 1, warning: 2, error: 3 };
 export const worse = (a: HealthState, b: HealthState) => (RANK[b] > RANK[a] ? b : a);
@@ -103,7 +113,7 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     }
     e.rows.push(i);
     e.state = worse(e.state, r.problem.state);
-    e.broken &&= r.problem.state === "error" || r.shareState === "failing";
+    e.broken &&= fails(r);
     if (share) {
       e.shares.push(r.shareState === "shown" ? r.share : undefined);
       e.rules.add(`${source}#${r.rule}`);
@@ -166,6 +176,7 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
   }
   return {
     nodes: [...nodes.values()],
+    rows: rows.map((r) => ({ state: r.problem.state, fails: fails(r) })),
     // Share is per rule: an edge over several rules shows it only when they agree.
     edges: [...edges.values()].map(({ shares, rules, ...e }) => {
       const shown = shares.length > 0 && shares.every((s) => s !== undefined);
@@ -191,12 +202,27 @@ export function gatewayGraph(gateway: LinkedRef, rows: PathRow[]): MapGraph {
   return g;
 }
 
-/** The nodes and edges on paths through node id: those that share a row with it (design §6.1, hover). */
-export function throughNode(g: MapGraph, id: string): { nodes: Set<string>; edges: Set<string> } {
+/** A lit edge's state on the active node's paths: the worst of the rows it shares with the node. */
+export interface LitEdge {
+  state: HealthState;
+  broken: boolean;
+}
+
+/**
+ * The nodes and edges on paths through node id: those that share a row with it (design §6.1, hover).
+ * Each edge carries its state over the shared rows only, so a healthy path's trunk does not read as failing.
+ */
+export function throughNode(g: MapGraph, id: string): { nodes: Set<string>; edges: Map<string, LitEdge> } {
   const rows = new Set(g.nodes.find((n) => n.id === id)?.rows);
   const shares = (r: number[]) => r.some((i) => rows.has(i));
-  return {
-    nodes: new Set([id, ...g.nodes.filter((n) => shares(n.rows)).map((n) => n.id)]),
-    edges: new Set(g.edges.filter((e) => shares(e.rows)).map((e) => e.id)),
-  };
+  const edges = new Map<string, LitEdge>();
+  for (const e of g.edges) {
+    const on = e.rows.filter((i) => rows.has(i)).map((i) => g.rows[i] as RowMark);
+    if (on.length)
+      edges.set(e.id, {
+        state: on.reduce<HealthState>((s, r) => worse(s, r.state), "healthy"),
+        broken: on.every((r) => r.fails),
+      });
+  }
+  return { nodes: new Set([id, ...g.nodes.filter((n) => shares(n.rows)).map((n) => n.id)]), edges };
 }

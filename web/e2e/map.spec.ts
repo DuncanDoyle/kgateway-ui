@@ -16,6 +16,7 @@ async function pickTheme(page: Page, theme: (typeof themes)[number]) {
   await page.getByRole("button", { name: /^Theme:/ }).click();
   await page.getByRole("menuitemradio", { name: theme.name, exact: true }).click();
   await expect(page.locator("html")).toHaveCSS("color-scheme", theme.mode);
+  await expect(page.getByRole("menu")).toBeHidden();
 }
 
 async function paths(page: Page, query: string): Promise<PathsResponse> {
@@ -57,7 +58,8 @@ const node = (map: Locator, name: string) =>
 
 function shot(page: Page, name: string) {
   const dir = process.env.MAP_SHOTS ?? test.info().project.outputDir;
-  return page.screenshot({ path: `${dir}/map-${name}.png` });
+  // Transitions finish first, so the shot never catches a fade half way.
+  return page.screenshot({ path: `${dir}/map-${name}.png`, animations: "disabled" });
 }
 
 test("hovering a route dims the nodes off its paths", async ({ page }) => {
@@ -70,6 +72,19 @@ test("hovering a route dims the nodes off its paths", async ({ page }) => {
   await expect(node(map, "http")).toHaveClass(/\blit\b/);
   await page.mouse.move(0, 0);
   await expect(map.locator(".react-flow__node.dim")).toHaveCount(0);
+});
+
+test("a lit edge shows its state on the hovered node's paths, not the worst row on it", async ({ page }) => {
+  const map = await openMap(page);
+  // The Gateway → http trunk carries the failing cross path, so at rest it is drawn as an error.
+  const trunk = map.locator(
+    '[data-id="g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http"] path.react-flow__edge-path',
+  );
+  await expect(trunk).toHaveClass(/state-error/);
+  await node(map, "traffic/weighted").hover();
+  await expect(trunk).toHaveClass(/state-healthy/);
+  await node(map, "traffic/cross").hover();
+  await expect(trunk).toHaveClass(/state-error broken/);
 });
 
 test("the broken backend is drawn broken, and its panel links to backend detail", async ({ page }) => {
@@ -86,8 +101,22 @@ test("the broken backend is drawn broken, and its panel links to backend detail"
   const healthy = map.locator(".react-flow__edge-path.state-healthy").first();
   expect(await healthy.evaluate((el) => getComputedStyle(el).strokeDasharray)).toBe("none");
 
+  const before = await map.boundingBox();
   await node(map, "shop/httpbin").click();
   const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  // The panel takes its own column: the canvas narrows and nothing overlaps.
+  await expect(panel).toBeFocused();
+  const after = await map.boundingBox();
+  const side = await panel.boundingBox();
+  expect(after && before && after.width < before.width).toBe(true);
+  expect(after && side && after.x + after.width <= side.x).toBe(true);
+  // The selected node stays inside the narrowed canvas.
+  await expect
+    .poll(async () => {
+      const sel = await node(map, "shop/httpbin").boundingBox();
+      return !!sel && !!after && sel.x + sel.width <= after.x + after.width;
+    })
+    .toBe(true);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("shop/httpbin");
   await expect(panel.getByTestId("map-panel-counts")).toContainText(mapCopy.fail(1, 1));
   const detail = panel.getByRole("link", { name: mapCopy.open });
@@ -140,7 +169,7 @@ for (const theme of themes) {
     await card.hover();
     const hover = await bg(card);
     expect(hover, "hover changes the card background").not.toBe(rest);
-    await expect(node(map, "traffic/cross")).toHaveCSS("opacity", "0.3");
+    await expect(node(map, "traffic/cross")).toHaveClass(/\bdim\b/);
     await shot(page, `${theme.mode}-hover`);
     await page.mouse.down();
     expect(await bg(card), "a press changes it again").not.toBe(hover);
