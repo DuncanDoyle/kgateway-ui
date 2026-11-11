@@ -1,5 +1,5 @@
 import type { SerializedStyles } from "@emotion/react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { LinkedRef, Page, PathRow } from "../../api/types";
 import { columnCopy } from "../../copy/explorer";
 import { cellCopy, endpointCopy, noteCopy, pathColumnCopy, trafficCopy } from "../../copy/traffic";
@@ -122,6 +122,8 @@ export function PathTable({
 }: PathTableProps) {
   const cols = useMemo(() => columns(installId), [installId]);
   const keys = useMemo(() => keyRows(page?.items ?? []), [page]);
+  // Stable between data changes: a new rowKey rebuilds the table's cell renderers, which remounts every cell.
+  const rowKey = useCallback((r: PathRow) => keys.get(r) ?? baseKey(r), [keys]);
   return (
     <ObjectTable
       label={trafficCopy.table}
@@ -129,7 +131,7 @@ export function PathTable({
       noun={trafficCopy.noun}
       columns={cols}
       rowRef={rowRef}
-      rowKey={(r) => keys.get(r) ?? baseKey(r)}
+      rowKey={rowKey}
       page={page}
       loading={!page}
       busy={busy}

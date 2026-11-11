@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router-dom";
 import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
@@ -314,4 +314,26 @@ it("an empty result hides the Narrow to line and keeps its filters as removable 
   await userEvent.click(screen.getByRole("button", { name: "Remove filter Gateway: infra/gone" }));
   await waitFor(() => expect(search().has("gateway")).toBe(false));
   expect(search().get("namespace")).toBe("x");
+});
+
+it("the clock tick neither remounts cells nor drops keyboard focus from a Why cell", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    serve(() => golden());
+    mount();
+    await within(table()).findAllByLabelText("shop/cart-svc");
+    const why = document.querySelector('td[data-col="why"] [tabindex="0"]') as HTMLElement;
+    const state = within(table()).getAllByTestId("path-state")[0] as HTMLElement;
+    why.focus();
+    expect(document.activeElement).toBe(why);
+    // Several ticks of the app clock, with no new data.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    expect(document.activeElement).toBe(why);
+    expect(why.isConnected).toBe(true);
+    expect(within(table()).getAllByTestId("path-state")[0]).toBe(state);
+  } finally {
+    vi.useRealTimers();
+  }
 });

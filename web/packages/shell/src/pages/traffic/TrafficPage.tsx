@@ -1,6 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
 import { useNow } from "../../api/clock";
 import { usePaths } from "../../api/exploreHooks";
 import { isStale } from "../../api/hooks";
@@ -86,6 +86,13 @@ function narrowOptions(values: string[], selected: string[]): FilterOption[] {
 }
 
 // region Component
+/** Provides the stale view from the app clock; only this re-renders on a tick, not the page or its table. */
+function StaleGate({ collectedAt, failed, children }: { collectedAt?: string; failed: boolean; children: ReactNode }) {
+  const now = useNow();
+  const stale = !!collectedAt && (failed || isStale(collectedAt, now));
+  return <StaleView.Provider value={stale}>{children}</StaleView.Provider>;
+}
+
 interface TrafficPageProps {
   stylesOverride?: SerializedStyles;
 }
@@ -96,9 +103,7 @@ interface TrafficPageProps {
  */
 export function TrafficPage({ stylesOverride }: TrafficPageProps = {}) {
   const l = useListPage<PathRow, PathsResponse>("paths", usePaths);
-  const now = useNow();
   const page = useMemo(() => (l.data ? toPage(l.data) : undefined), [l.data]);
-  const stale = !!l.data && (!!l.error || isStale(l.data.collectedAt, now));
   const summary = l.data?.summary;
   const gateways = listValues(l.params, "gateway");
   const namespace = listValues(l.params, "namespace").slice(0, 1);
@@ -198,7 +203,7 @@ export function TrafficPage({ stylesOverride }: TrafficPageProps = {}) {
       {summary?.notComputed ? (
         <PageState kind="empty" title={summaryCopy.notComputedTitle} message={summaryCopy.notComputed} />
       ) : (
-        <StaleView.Provider value={stale}>
+        <StaleGate collectedAt={l.data?.collectedAt} failed={!!l.error}>
           <PathSummary summary={summary} />
           <PathTable
             installId={l.id}
@@ -210,7 +215,7 @@ export function TrafficPage({ stylesOverride }: TrafficPageProps = {}) {
             onPage={l.setCursor}
             emptyTitle={l.filtered ? listCopy.emptyFiltered(trafficCopy.noun[1]) : listCopy.empty(trafficCopy.noun[1])}
           />
-        </StaleView.Provider>
+        </StaleGate>
       )}
     </ListFrame>
   );
