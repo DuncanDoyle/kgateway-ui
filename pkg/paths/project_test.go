@@ -132,7 +132,8 @@ func TestProjectListenerNotProgrammed(t *testing.T) {
 	gw := testutil.Gateway("infra", "edge", "kgateway", nil, testutil.Listener{Name: "http", Conds: []metav1.Condition{
 		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionFalse, "Invalid")}})
 	_, p, _ := project(t, endpointsSnap(t, svcs, eps, gw, accepted("r", svc("cart"))), "on")
-	if pr := p.Problems[0]; pr.State != health.StateError || !hasSignal(pr, "listener", health.StateError) || hasSignal(pr, "endpoints", health.StateError) {
+	noEndpoints := func(s paths.Signal) bool { return s.Code == health.CodeBackendNoReadyEndpoints }
+	if pr := p.Problems[0]; pr.State != health.StateError || !hasSignal(pr, "listener", health.StateError) || slices.ContainsFunc(pr.Signals, noEndpoints) {
 		t.Fatalf("problem %+v", pr)
 	}
 }

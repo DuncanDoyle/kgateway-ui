@@ -203,7 +203,7 @@ func Project(t *Topology, in ProjectInput) *Projection {
 		ra, rb := t.Rows[a], t.Rows[b]
 		return cmp.Or(cmp.Compare(stateRank(out.Problems[a].State), stateRank(out.Problems[b].State)),
 			t.Gateway(ra).Compare(t.Gateway(rb)), cmp.Compare(t.Listener(ra).Name, t.Listener(rb).Name),
-			p.compareChains(ra, rb), cmp.Compare(t.Rule(ra).Index, t.Rule(rb).Index))
+			t.compareChains(ra, rb), cmp.Compare(t.Rule(ra).Index, t.Rule(rb).Index))
 	})
 	return out
 }
@@ -252,10 +252,10 @@ func (p *Projection) Bytes() int {
 }
 
 // compareChains orders two rows' route chains, root first.
-func (p *projector) compareChains(a, b Row) int {
-	ca, cb := p.t.chain(a), p.t.chain(b)
+func (t *Topology) compareChains(a, b Row) int {
+	ca, cb := t.chain(a), t.chain(b)
 	for i := 0; i < len(ca) && i < len(cb); i++ {
-		if c := p.t.Refs[p.t.routes[ca[i]].ref].Compare(p.t.Refs[p.t.routes[cb[i]].ref]); c != 0 {
+		if c := t.Refs[t.routes[ca[i]].ref].Compare(t.Refs[t.routes[cb[i]].ref]); c != 0 {
 			return c
 		}
 	}
