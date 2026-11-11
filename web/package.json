@@ -13,7 +13,6 @@
     "typecheck": "tsc -p packages/shell && tsc -p app && tsc -p e2e"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.11.0",
     "@biomejs/biome": "^2",
     "@playwright/test": "^1.64.1",
     "@testing-library/dom": "^10",

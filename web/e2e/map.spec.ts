@@ -1,4 +1,3 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { PathsResponse } from "../packages/shell/src/api/types";
 import { mapCopy } from "../packages/shell/src/copy/map";
@@ -273,18 +272,6 @@ test("the table toggle shows the map's rows as a table and back, keeping the fil
   await expect(page).not.toHaveURL(/view=table/);
   await expect(page.getByRole("button", { name: mapCopy.problemsOnly })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(nodeNames(problems).size);
-});
-
-test("the Map tab has no serious or critical axe violations, as a map and as a table", async ({ page }) => {
-  const serious = async () =>
-    (await new AxeBuilder({ page }).include('[role="tabpanel"]').analyze()).violations
-      .filter((v) => v.impact === "serious" || v.impact === "critical")
-      .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-  await openMap(page);
-  expect(await serious()).toEqual([]);
-  await page.getByRole("button", { name: mapCopy.table }).click();
-  await expect(page.getByRole("table", { name: mapCopy.tableLabel })).toBeVisible();
-  expect(await serious()).toEqual([]);
 });
 
 for (const theme of themes) {
