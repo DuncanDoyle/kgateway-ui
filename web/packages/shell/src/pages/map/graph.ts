@@ -22,6 +22,8 @@ export interface MapNode {
   /** A delegated route's root route node; the route sits under it in the routes column. */
   delegatedUnder?: string;
   rows: number[];
+  /** The distinct row signals that name this node. */
+  problems: PathSignal[];
 }
 
 /**
@@ -50,6 +52,8 @@ export const worse = (a: HealthState, b: HealthState) => (RANK[b] > RANK[a] ? b 
 export const refLabel = (r: { namespace?: string; name: string }) =>
   r.namespace ? `${r.namespace}/${r.name}` : r.name;
 const same = (a?: LinkedRef, b?: LinkedRef) => !!a && !!b && refParam(a) === refParam(b);
+
+const signalKey = (s: PathSignal) => JSON.stringify([s.kind, s.code, s.title, s.ref && refParam(s.ref), s.state]);
 
 /** The node ids a row passes through. */
 interface RowIds {
@@ -81,10 +85,10 @@ function signalNode(s: PathSignal, r: PathRow, ids: RowIds): string {
 export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new Set()): MapGraph {
   const nodes = new Map<string, MapNode>();
   const edges = new Map<string, MapEdge & { shares: (number | undefined)[]; rules: Set<string> }>();
-  const node = (id: string, i: number, init: Omit<MapNode, "id" | "rows" | "state">) => {
+  const node = (id: string, i: number, init: Omit<MapNode, "id" | "rows" | "state" | "problems">) => {
     let n = nodes.get(id);
     if (!n) {
-      n = { id, ...init, state: "healthy", rows: [] };
+      n = { id, ...init, state: "healthy", rows: [], problems: [] };
       nodes.set(id, n);
     }
     if (n.rows[n.rows.length - 1] !== i) n.rows.push(i);
@@ -142,7 +146,11 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     let explained: HealthState = "healthy";
     for (const s of r.problem.signals) {
       const n = nodes.get(signalNode(s, r, ids));
-      if (n) n.state = worse(n.state, s.state);
+      if (n) {
+        n.state = worse(n.state, s.state);
+        const k = signalKey(s);
+        if (!n.problems.some((p) => signalKey(p) === k)) n.problems.push(s);
+      }
       explained = worse(explained, s.state);
     }
     if (RANK[r.problem.state] > RANK[explained]) {
@@ -164,5 +172,31 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
       const one = rules.size === 1 || shares.every((s) => s === shares[0]);
       return shown && one ? { ...e, share: Math.max(...(shares as number[])) } : e;
     }),
+  };
+}
+
+/** The graph of a Gateway's rows; a Gateway with no paths still shows itself, its state not known from paths. */
+export function gatewayGraph(gateway: LinkedRef, rows: PathRow[]): MapGraph {
+  const g = buildGraph(rows, new Set());
+  if (!g.nodes.some((n) => n.kind === "gateway"))
+    g.nodes.unshift({
+      id: `g:${refParam(gateway)}`,
+      kind: "gateway",
+      ref: gateway,
+      name: refLabel(gateway),
+      state: "unknown",
+      rows: [],
+      problems: [],
+    });
+  return g;
+}
+
+/** The nodes and edges on paths through node id: those that share a row with it (design §6.1, hover). */
+export function throughNode(g: MapGraph, id: string): { nodes: Set<string>; edges: Set<string> } {
+  const rows = new Set(g.nodes.find((n) => n.id === id)?.rows);
+  const shares = (r: number[]) => r.some((i) => rows.has(i));
+  return {
+    nodes: new Set([id, ...g.nodes.filter((n) => shares(n.rows)).map((n) => n.id)]),
+    edges: new Set(g.edges.filter((e) => shares(e.rows)).map((e) => e.id)),
   };
 }

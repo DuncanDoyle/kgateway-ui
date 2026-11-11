@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { type ApiError, apiFetch } from "../../api/client";
 import { forInstall, withQuery } from "../../api/exploreHooks";
@@ -62,11 +62,13 @@ const sameResult = (a: PathsResponse, b: PathsResponse) =>
  * The cursor is a keyset anchor, so a row whose state changes mid-walk can move before it and be skipped
  * (D-006). Every page carries the whole result's summary; when one differs from page one's, the walk restarts.
  * After WALK_RETRIES restarts the previous result is kept (or, on a first load, the last walk), marked inconsistent.
+ * The walk stops after any page once wanted(page one) is false.
  */
 async function fetchPages(
   url: string,
   prev: MapResult | undefined,
   onPage: (pages: PathsResponse[]) => void,
+  wanted: (first: PathsResponse) => boolean,
 ): Promise<MapResult> {
   let pages: PathsResponse[] = [];
   for (let attempt = 0; attempt <= WALK_RETRIES; attempt++) {
@@ -74,6 +76,7 @@ async function fetchPages(
     let rows = 0;
     let consistent = true;
     for (let next: string | undefined = ""; next !== undefined && rows < MAP_MAX_ROWS; ) {
+      if (pages[0] && !wanted(pages[0])) return { pages, inconsistent: false };
       const page: PathsResponse = await apiFetch(next ? `${url}&cursor=${encodeURIComponent(next)}` : url);
       if (pages[0] && !sameResult(pages[0], page)) {
         consistent = false;
@@ -130,16 +133,29 @@ const oldest = (pages: PathsResponse[]) =>
 /**
  * The paths through one Gateway (ns/name) under the page URL's filters: MAP_PAGE rows per request, in sequence,
  * up to MAP_MAX_ROWS. Each poll reloads every page; a first load shows its rows as they arrive.
+ * A walk stops after page one when stopAt says so for its summary, or once the URL has moved to another query.
  */
-export function useMapPaths(installId: string, gateway: string, params: URLSearchParams): MapPaths {
+export function useMapPaths(
+  installId: string,
+  gateway: string,
+  params: URLSearchParams,
+  stopAt?: (summary: PathSummary) => boolean,
+): MapPaths {
   const { cache } = useSWRConfig();
   const query = useMemo(() => mapQuery(params, gateway), [params, gateway]);
   const key = withQuery(`${installApi(installId)}/paths`, query);
   const [progress, setProgress] = useState<{ key: string; pages: PathsResponse[] }>();
+  const shown = useRef({ key, stopAt });
+  shown.current = { key, stopAt };
   const { data, error } = useSWR<MapResult, ApiError>(
     key,
     (k: string) =>
-      fetchPages(k, cache.get(k)?.data as MapResult | undefined, (pages) => setProgress({ key: k, pages })),
+      fetchPages(
+        k,
+        cache.get(k)?.data as MapResult | undefined,
+        (pages) => setProgress({ key: k, pages }),
+        (first) => shown.current.key === k && !shown.current.stopAt?.(first.summary),
+      ),
     // A filter change keeps the old map until the new rows arrive; once the new query fails they are dropped.
     { ...live, keepPreviousData: true },
   );

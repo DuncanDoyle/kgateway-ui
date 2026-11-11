@@ -9,4 +9,24 @@ export const mapCopy = {
   truncated: (shown: number, total: number) =>
     `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths. Narrow the filters to see the rest.`, // S769
   action: "Action", // S770
+  problemsOnly: "Problems only", // S771
+  find: "Find a node", // S772
+  findPlaceholder: "Find a listener, route or backend", // S773
+  found: (at: number, of: number) => `${at} of ${of}`, // S774
+  notFound: "No match", // S775
+  large: (routes: number, backends: number) =>
+    `This Gateway has ${routes} routes and ${backends} backends, so the map opens on problems only. Narrow by kind or namespace to see more.`, // S776
+  inconsistent: "The paths kept changing while the map loaded, so it may not match the cluster.", // S777
+  panel: "Node details", // S778
+  close: "Close details", // S779
+  fail: (n: number, of: number) => `${n} of ${of} paths through this node fail`, // S780
+  warn: (n: number, of: number) => `${n} of ${of} paths through this node have a warning`, // S781
+  unknown: (n: number, of: number) => `${n} of ${of} paths through this node are unknown`, // S782
+  healthy: (of: number) => `${of} of ${of} paths through this node are healthy`, // S783
+  problems: "Problems", // S784
+  noProblems: "Nothing on this node itself.", // S785
+  endpoints: "Endpoints", // S786
+  port: (port: number) => `Port ${port}`, // S787
+  open: "Open details", // S788
+  traffic: "Show these paths in Traffic", // S789
 };

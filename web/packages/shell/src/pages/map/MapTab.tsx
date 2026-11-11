@@ -1,20 +1,37 @@
 import { css, type SerializedStyles } from "@emotion/react";
-import { lazy, Suspense, useEffect, useMemo } from "react";
-import { useLocation } from "react-router-dom";
-import type { LinkedRef } from "../../api/types";
+import styled from "@emotion/styled";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import type { LinkedRef, PathSummary } from "../../api/types";
 import { listCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { summaryCopy, trafficCopy } from "../../copy/traffic";
+import type { ParamChanges } from "../../shell/urlParams";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
+import { PROBLEM_STATES } from "../backends/BackendsPage";
 import { StaleGate } from "../traffic/StaleGate";
+import { gatewayGraph, type MapNode } from "./graph";
+import { MapToolbar, problemsOnly } from "./MapToolbar";
 import { MapBox, MapNote } from "./map.css";
-import { MAP_MAX_ROWS, useMapPaths } from "./mapData";
+import { LARGE_GATEWAY, MAP_MAX_ROWS, useMapPaths } from "./mapData";
+import { SidePanel } from "./SidePanel";
 
 // region Styles
 const fill = css`
   height: 100%;
   border-radius: 0;
+`;
+/** The canvas and the side panel over its right edge, so opening the panel moves nothing. */
+const Area = styled.div`
+  position: relative;
+`;
+/** The notes line keeps one line's height, so a note appearing moves nothing below it. */
+const Notes = styled(MapNote)`
+  min-height: 1.5em;
+  span + span::before {
+    content: " ";
+  }
 `;
 
 // region Helpers
@@ -31,6 +48,17 @@ function Fallback() {
   );
 }
 
+/** The nodes whose name contains text, ignoring case. */
+const matches = (nodes: MapNode[], text: string) => {
+  const t = text.trim().toLowerCase();
+  return t ? nodes.filter((n) => n.name.toLowerCase().includes(t)) : [];
+};
+
+/** More routes or backends than LARGE_GATEWAY in the whole result. */
+const isLarge = (s: PathSummary) => s.routes > LARGE_GATEWAY || s.backends > LARGE_GATEWAY;
+
+type Opening = "pending" | "done" | { routes: number; backends: number };
+
 // region Component
 interface MapTabProps {
   installId: string;
@@ -38,15 +66,73 @@ interface MapTabProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** Gateway detail's Map tab: the paths through the Gateway under the URL's filters, drawn as a map (design §6). */
+/**
+ * Gateway detail's Map tab: the paths through the Gateway under the URL's filters, drawn as a map (design §6),
+ * with find, filter chips and a side panel for the selected node. A large Gateway opens on problems only.
+ */
 export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const { search } = useLocation();
+  const navigate = useNavigate();
   const params = useMemo(() => new URLSearchParams(search), [search]);
-  const paths = useMapPaths(installId, `${gateway.namespace ?? ""}/${gateway.name}`, params);
+  // A large Gateway, by the first page's summary of the whole result, opens on problems only (design §6.1).
+  const [opening, setOpening] = useState<Opening>(() => (params.has("state") ? "done" : "pending"));
+  const paths = useMapPaths(
+    installId,
+    `${gateway.namespace ?? ""}/${gateway.name}`,
+    params,
+    opening === "pending" ? isLarge : undefined,
+  );
   useEffect(() => {
     void load();
   }, []);
-  if (paths.error && !paths.summary)
+  // The detail page owns the URL params and adopts a replace it did not write, as it does a link.
+  const setFilter = useCallback(
+    (changes: ParamChanges) => {
+      const q = new URLSearchParams(search);
+      for (const [k, v] of Object.entries(changes)) {
+        if (v) q.set(k, v);
+        else q.delete(k);
+      }
+      const s = q.toString();
+      if (s !== new URLSearchParams(search).toString()) navigate({ search: s ? `?${s}` : "" }, { replace: true });
+    },
+    [search, navigate],
+  );
+
+  const summary = paths.summary;
+  const large = opening === "pending" && !!summary && isLarge(summary);
+  useEffect(() => {
+    if (opening !== "pending" || !summary) return;
+    if (large) {
+      setOpening({ routes: summary.routes, backends: summary.backends });
+      setFilter({ state: PROBLEM_STATES });
+    } else setOpening("done");
+  }, [opening, summary, large, setFilter]);
+  const prompt = typeof opening === "object" && problemsOnly(params) ? opening : undefined;
+
+  const graph = useMemo(() => gatewayGraph(gateway, paths.rows), [gateway, paths.rows]);
+  const [selected, setSelected] = useState<string>();
+  const node = selected ? graph.nodes.find((n) => n.id === selected) : undefined;
+  // Find: typing centres and selects the first match; Enter moves to the next.
+  const [find, setFind] = useState("");
+  const [at, setAt] = useState(0);
+  const [focus, setFocus] = useState<{ id: string; seq: number }>();
+  const found = useMemo(() => matches(graph.nodes, find), [graph.nodes, find]);
+  const goTo = (list: MapNode[], k: number) => {
+    const n = list[k];
+    if (!n) return;
+    setSelected(n.id);
+    setFocus((f) => ({ id: n.id, seq: (f?.seq ?? 0) + 1 }));
+    setAt(k + 1);
+  };
+  const onFind = (text: string) => {
+    setFind(text);
+    setAt(0);
+    goTo(matches(graph.nodes, text), 0);
+  };
+  const onFindNext = () => goTo(found, at % Math.max(found.length, 1));
+
+  if (paths.error && !summary)
     return (
       <PageState
         kind="error"
@@ -55,19 +141,50 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         copyText={paths.error.message}
       />
     );
-  if (paths.summary?.notComputed)
+  if (summary?.notComputed)
     return <PageState kind="empty" title={summaryCopy.notComputedTitle} message={summaryCopy.notComputed} />;
-  if (!paths.summary) return <Fallback />;
   return (
     <StaleGate collectedAt={paths.collectedAt} failed={!!paths.error}>
-      {paths.truncated && (
-        <MapNote role="status" data-testid="map-truncated">
-          {mapCopy.truncated(MAP_MAX_ROWS, paths.summary.paths)}
-        </MapNote>
+      <MapToolbar
+        params={params}
+        onFilter={setFilter}
+        facets={summary?.facets}
+        find={find}
+        onFind={onFind}
+        onFindNext={onFindNext}
+        found={{ at: Math.max(at, 1), of: found.length }}
+      />
+      <Notes role="status" data-testid="map-notes">
+        {prompt ? <span data-testid="map-large">{mapCopy.large(prompt.routes, prompt.backends)}</span> : null}
+        {paths.truncated && summary ? (
+          <span data-testid="map-truncated">{mapCopy.truncated(MAP_MAX_ROWS, summary.paths)}</span>
+        ) : null}
+        {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
+      </Notes>
+      {!summary || large ? (
+        <Fallback />
+      ) : (
+        <Area>
+          <Suspense fallback={<Fallback />}>
+            <GatewayMap
+              graph={graph}
+              selected={node?.id}
+              onSelect={setSelected}
+              focus={focus}
+              stylesOverride={stylesOverride}
+            />
+          </Suspense>
+          {node ? (
+            <SidePanel
+              installId={installId}
+              gateway={gateway}
+              node={node}
+              rows={paths.rows}
+              onClose={() => setSelected(undefined)}
+            />
+          ) : null}
+        </Area>
       )}
-      <Suspense fallback={<Fallback />}>
-        <GatewayMap gateway={gateway} rows={paths.rows} stylesOverride={stylesOverride} />
-      </Suspense>
     </StaleGate>
   );
 }

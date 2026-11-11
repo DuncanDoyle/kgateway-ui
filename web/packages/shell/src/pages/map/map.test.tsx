@@ -1,4 +1,4 @@
-import { renderHook, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { SWRConfig } from "swr";
@@ -289,4 +289,225 @@ it("2,500 matching paths load 2,000 in ten requests and say so", async () => {
   ]);
   // One route node per loaded row, plus the Gateway, listener and backend.
   await waitFor(() => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(2003));
+});
+
+// region Task 45: hover, side panel, find, chips, large Gateways
+
+/** The map's node cards by name. */
+const nodeNames = (map: HTMLElement) =>
+  within(map)
+    .getAllByTestId("map-node")
+    .map((n) => n.querySelector(".name")?.textContent ?? "");
+/** The React Flow wrapper of the node card named name. */
+const flowNode = (map: HTMLElement, name: string) =>
+  within(map)
+    .getAllByTestId("map-node")
+    .find((n) => n.querySelector(".name")?.textContent === name)
+    ?.closest(".react-flow__node") as HTMLElement;
+const refName = (r: { namespace?: string; name: string }) => (r.namespace ? `${r.namespace}/${r.name}` : r.name);
+
+it("hovering a route lights every node on the rows through it and dims the rest", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  await user.hover(flowNode(map, "shop/mirror-only"));
+  // The oracle: every Gateway, listener, route and backend named by a row that passes through the route.
+  const through = edgePaths().rows.filter((r) => r.routes.some((x) => x.name === "mirror-only"));
+  const want = new Set(
+    through.flatMap((r) => [
+      refName(r.gateway),
+      r.listener.name,
+      ...r.routes.map(refName),
+      ...(r.backend ? [refName(r.backend)] : []),
+    ]),
+  );
+  const lit = nodeNames(map).filter((n) => !flowNode(map, n).classList.contains("dim"));
+  expect(new Set(lit)).toEqual(want);
+  // shop/backends shares no row with it, although it shares a backend.
+  expect(flowNode(map, "shop/backends")).toHaveClass("dim");
+  await user.unhover(flowNode(map, "shop/mirror-only"));
+  await waitFor(() => expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0));
+});
+
+it("a Gateway with more than 60 routes opens on problems only after its first page, with a prompt to narrow", async () => {
+  // 61 routes over 450 paths: three pages unfiltered, but only the first is read.
+  serve((u) => {
+    const p = page(pageOf(u), u.searchParams.has("state") ? 3 : 450);
+    return { ...p, summary: { ...p.summary, routes: u.searchParams.has("state") ? 3 : 61 } };
+  });
+  mount("?tab=map");
+  await waitFor(() =>
+    expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe(
+      "error,warning,unknown",
+    ),
+  );
+  expect(await screen.findByTestId("map-large")).toHaveTextContent(
+    "This Gateway has 61 routes and 4 backends, so the map opens on problems only.",
+  );
+  await screen.findByTestId("gateway-map");
+  const unfiltered = pathCalls().filter((u) => !u.searchParams.has("state"));
+  expect(unfiltered.map((u) => u.searchParams.get("cursor"))).toEqual([null]);
+  expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]);
+  expect(screen.getByRole("button", { name: "Problems only" })).toHaveAttribute("aria-pressed", "true");
+  // Releasing the chip shows every path and drops the prompt.
+  await userEvent.setup().click(screen.getByRole("button", { name: "Problems only" }));
+  await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("state="));
+  expect(screen.queryByTestId("map-large")).toBeNull();
+});
+
+it("a Gateway at the threshold opens unfiltered, and a state in the URL is kept", async () => {
+  serve((u) => {
+    const p = page(pageOf(u), 60);
+    return { ...p, summary: { ...p.summary, routes: 60, backends: 60 } };
+  });
+  mount("?tab=map&state=error");
+  await screen.findByTestId("gateway-map");
+  expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe("error");
+  expect(screen.queryByTestId("map-large")).toBeNull();
+});
+
+it("the side panel of a backend with no ready endpoints says what fails through it and links to detail and Traffic", async () => {
+  const cart = (edgePaths().rows.find((r) => r.backend?.name === "cart-svc") as PathRow).backend as LinkedRef;
+  const signal = {
+    kind: "finding" as const,
+    code: "KGWUI-023",
+    title: "No ready endpoints",
+    ref: cart,
+    state: "warning" as const,
+  };
+  serve(() => {
+    const b = edgePaths();
+    const rows = b.rows.map((r) =>
+      r.backend?.name === "cart-svc"
+        ? {
+            ...r,
+            endpoints: { source: "slices", readAt: now(), complete: "complete" as const, ready: 0, total: 2 },
+            problem: { state: "warning" as const, signals: [signal] },
+          }
+        : r,
+    );
+    return { ...b, rows };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  // d3-zoom's mousedown handler needs a real window; a click alone selects.
+  fireEvent.click(within(flowNode(map, "shop/cart-svc")).getByTestId("map-node"));
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(panel).getByRole("heading", { name: "shop/cart-svc" })).toBeVisible();
+  expect(panel).toHaveTextContent("Warning");
+  const n = edgePaths().rows.filter((r) => r.backend?.name === "cart-svc").length;
+  expect(within(panel).getByTestId("map-panel-counts")).toHaveTextContent(
+    `0 of ${n} paths through this node fail${n} of ${n} paths through this node have a warning`,
+  );
+  expect(within(panel).getByTestId("map-panel-problems")).toHaveTextContent(
+    "No ready endpoints (Service shop/cart-svc)",
+  );
+  const port = edgePaths().rows.find((r) => r.backend?.name === "cart-svc")?.port;
+  expect(within(panel).getByTestId("map-panel-endpoints")).toHaveTextContent(`Port ${port}: 0/2 ready`);
+  expect(within(panel).getByRole("link", { name: "Open details" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/backends/-/Service/shop/cart-svc`,
+  );
+  expect(within(panel).getByRole("link", { name: "Show these paths in Traffic" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/traffic?${new URLSearchParams({ gateway: "infra/edge", backend: "core/Service/shop/cart-svc" })}`,
+  );
+  // The selected node keeps its paths lit; closing the panel clears both.
+  expect(flowNode(map, "shop/backends")).not.toHaveClass("dim");
+  expect(flowNode(map, "shop/api")).toHaveClass("dim");
+  await user.click(within(panel).getByRole("button", { name: "Close details" }));
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0);
+});
+
+it("a route whose backend fails reads healthy itself, and its panel counts the failing paths through it", async () => {
+  const be1 = edgePaths().rows.find((r) => r.backend?.name === "be1") as PathRow;
+  const signal = {
+    kind: "finding" as const,
+    code: "KGWUI-002",
+    title: "Backend not accepted",
+    ref: be1.backend,
+    state: "error" as const,
+  };
+  serve(() => {
+    const b = edgePaths();
+    return {
+      ...b,
+      rows: b.rows.map((r) =>
+        r.backend?.name === "be1" ? { ...r, problem: { state: "error" as const, signals: [signal] } } : r,
+      ),
+    };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  fireEvent.click(within(flowNode(map, "shop/backends")).getByTestId("map-node"));
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  const through = edgePaths().rows.filter((r) => r.routes[0]?.name === "backends").length;
+  expect(panel).toHaveTextContent("Healthy");
+  expect(within(panel).getByTestId("map-panel-counts")).toHaveTextContent(
+    `1 of ${through} paths through this node fail`,
+  );
+  expect(within(panel).getByText("Nothing on this node itself.")).toBeVisible();
+});
+
+it("chips update the server query live and live in the URL", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Problems only" }));
+  await waitFor(() =>
+    expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]),
+  );
+  await user.click(
+    within(screen.getByRole("group", { name: "Route kind" })).getByRole("button", { name: "GRPCRoute" }),
+  );
+  await waitFor(() => expect(pathCalls().at(-1)?.searchParams.get("kind")).toBe("GRPCRoute"));
+  // Namespace chips come from the summary's facets.
+  await user.click(
+    within(screen.getByRole("group", { name: "Route namespaces" })).getByRole("button", { name: "shop" }),
+  );
+  await waitFor(() => expect(pathCalls().at(-1)?.searchParams.get("namespace")).toBe("shop"));
+  const url = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect([url.get("tab"), url.get("state"), url.get("kind"), url.get("namespace")]).toEqual([
+    "map",
+    "error,warning,unknown",
+    "GRPCRoute",
+    "shop",
+  ]);
+});
+
+it("find selects the first node whose name matches, and Enter moves to the next", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  const box = screen.getByRole("searchbox", { name: "Find a node" });
+  await user.type(box, "SVC");
+  const svc = nodeNames(screen.getByTestId("gateway-map")).filter((n) => n.toLowerCase().includes("svc"));
+  expect(svc.length).toBeGreaterThan(1);
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(svc[0] as string);
+  expect(screen.getByTestId("map-found")).toHaveTextContent(`1 of ${svc.length}`);
+  await user.type(box, "{Enter}");
+  expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(svc[1] as string);
+  expect(screen.getByTestId("map-found")).toHaveTextContent(`2 of ${svc.length}`);
+  await user.clear(box);
+  await user.type(box, "nothing-here");
+  expect(screen.getByTestId("map-found")).toHaveTextContent("No match");
+});
+
+it("a result that kept changing shows a quiet notice", async () => {
+  let calls = 0;
+  serve((u) => {
+    const n = pageOf(u);
+    const p = page(n, 300);
+    return { ...p, summary: { ...p.summary, paths: 300 + calls++ } };
+  });
+  mount("?tab=map");
+  expect(await screen.findByTestId("map-inconsistent")).toHaveTextContent(
+    "The paths kept changing while the map loaded, so it may not match the cluster.",
+  );
 });

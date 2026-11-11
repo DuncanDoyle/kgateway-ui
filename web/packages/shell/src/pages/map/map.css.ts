@@ -52,6 +52,50 @@ export const MapCanvas = styled(MapBox)`
   .react-flow__handle {
     opacity: 0;
   }
+  /* Edge states differ by pattern as well as colour; error edges also carry an icon (design §6.1). */
+  .react-flow__edge-path.state-healthy {
+    stroke: ${(p) => p.theme.color.status.healthy.fg};
+  }
+  .react-flow__edge-path.state-warning {
+    stroke: ${(p) => p.theme.color.status.warning.fg};
+    stroke-dasharray: 2 5;
+    stroke-linecap: round;
+  }
+  .react-flow__edge-path.state-unknown {
+    stroke: ${(p) => p.theme.color.status.unknown.fg};
+    stroke-dasharray: 10 4 2 4;
+  }
+  .react-flow__edge-path.state-error {
+    stroke: ${(p) => p.theme.color.status.error.fg};
+  }
+  .react-flow__edge-path.state-error.broken {
+    stroke-dasharray: 8 6;
+  }
+  .map-edge-icon {
+    position: absolute;
+    pointer-events: none;
+    display: flex;
+  }
+  /* Hover: the paths through a node stay, the rest dims. */
+  .react-flow__node,
+  .react-flow__edge,
+  .map-edge-icon {
+    transition: opacity 120ms ease-out;
+  }
+  .react-flow__node.dim,
+  .map-edge-icon.dim {
+    opacity: 0.3;
+  }
+  .react-flow__edge.dim {
+    opacity: 0.15;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .react-flow__node,
+    .react-flow__edge,
+    .map-edge-icon {
+      transition: none;
+    }
+  }
   .react-flow__minimap {
     border: 1px solid ${(p) => p.theme.color.border};
     border-radius: ${(p) => p.theme.radius.sm};
