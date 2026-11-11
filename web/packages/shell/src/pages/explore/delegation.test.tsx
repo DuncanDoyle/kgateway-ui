@@ -96,7 +96,8 @@ function rowPage(rows: DelegationRow[], u: URL): Page<DelegationRow> {
 function api(o: { name: string; d: RouteDetail; rows?: (u: URL) => Reply; meta?: MetaResponse }) {
   return (u: URL): Reply | undefined => {
     if (u.pathname === "/api/v1/meta") return o.meta ?? meta;
-    if (u.pathname === detailApi(`shop/${o.name}`)) return o.d;
+    // Stamped per response, like the server, so a test that advances the clock keeps the detail fresh.
+    if (u.pathname === detailApi(`shop/${o.name}`)) return { ...o.d, collectedAt: now() };
     if (u.pathname === `${detailApi(`shop/${o.name}`)}/delegation`) return o.rows?.(u);
     if (u.pathname === `${API}/routes`) return { install: ID, items: [], total: 0, collectedAt: now() };
     return undefined;
