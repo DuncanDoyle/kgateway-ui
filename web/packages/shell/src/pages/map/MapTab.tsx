@@ -1,5 +1,5 @@
 import { css, type SerializedStyles } from "@emotion/react";
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import type { LinkedRef } from "../../api/types";
 import { listCopy } from "../../copy/explorer";
@@ -18,8 +18,9 @@ const fill = css`
 `;
 
 // region Helpers
-// React Flow loads with the map only, as its own chunk (design §6.2).
-const GatewayMap = lazy(() => import("./GatewayMap"));
+// React Flow loads with the map only, as its own chunk (design §6.2); MapTab starts it on mount, beside the first page.
+const load = () => import("./GatewayMap");
+const GatewayMap = lazy(load);
 
 /** Holds the map's place while its chunk or its first page loads. */
 function Fallback() {
@@ -42,6 +43,9 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const { search } = useLocation();
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const paths = useMapPaths(installId, `${gateway.namespace ?? ""}/${gateway.name}`, params);
+  useEffect(() => {
+    void load();
+  }, []);
   if (paths.error && !paths.summary)
     return (
       <PageState

@@ -1,13 +1,15 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router-dom";
+import { SWRConfig } from "swr";
 import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
 import type { GatewayDetail, PathsResponse } from "../../api/types";
-import { renderWithTheme } from "../../test/render";
+import { renderWithTheme, testSWR } from "../../test/render";
 import { defaultThemes } from "../../theme/themes";
 import { GatewayPage } from "../explore/GatewayPage";
+import { useMapPaths } from "./mapData";
 
 const ID = "kgw.kgateway";
 const API = `/api/v1/installs/${ID}`;
@@ -139,3 +141,17 @@ it.each(defaultThemes.map((t) => [t.id, t] as const))(
     expect(css).toContain(`--xy-edge-stroke:${theme.color.textMuted}`);
   },
 );
+
+it("the map's paths tell loading, more pages to come and done apart", async () => {
+  let next: string | undefined = "n2";
+  serve(() => ({ ...edgePaths(), next }));
+  const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={testSWR()}>{children}</SWRConfig>;
+  const params = new URLSearchParams();
+  const first = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
+  expect(first.result.current).toMatchObject({ loading: true, partial: false, done: false });
+  await waitFor(() => expect(first.result.current).toMatchObject({ loading: false, partial: true, done: false }));
+  first.unmount();
+  next = undefined;
+  const last = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
+  await waitFor(() => expect(last.result.current).toMatchObject({ loading: false, partial: false, done: true }));
+});

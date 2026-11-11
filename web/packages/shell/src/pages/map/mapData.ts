@@ -14,6 +14,12 @@ export interface MapPaths {
   summary?: PathSummary;
   collectedAt?: string;
   error?: ApiError;
+  /** No page has arrived and none has failed yet. */
+  loading: boolean;
+  /** Rows have arrived and more pages of the result remain. */
+  partial: boolean;
+  /** Every row of the result has arrived. */
+  done: boolean;
 }
 
 /**
@@ -31,7 +37,15 @@ export function useMapPaths(installId: string, gateway: string, params: URLSearc
   const query = useMemo(() => mapQuery(params, gateway), [params, gateway]);
   const { data, error } = usePaths(installId, query);
   return useMemo(
-    () => ({ rows: data?.rows ?? [], summary: data?.summary, collectedAt: data?.collectedAt, error }),
+    () => ({
+      rows: data?.rows ?? [],
+      summary: data?.summary,
+      collectedAt: data?.collectedAt,
+      error,
+      loading: !data && !error,
+      partial: !!data?.next,
+      done: !!data && !data.next,
+    }),
     [data, error],
   );
 }
