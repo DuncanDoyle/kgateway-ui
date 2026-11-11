@@ -404,3 +404,112 @@ export interface DelegationRow {
   computed: Computed;
   observed: { entry?: ParentStatus; parentCondition?: Condition };
 }
+
+/** Mirrors the path DTOs of pkg/api/paths_types.go (sub-phase 6.2, design §4, §5, §9.5). */
+
+/** A path row's listener; protocol and port are absent when the spec has no such listener. */
+export interface PathListener {
+  name: string;
+  protocol?: string;
+  port?: number;
+}
+/** A GRPCRouteMatch as written. */
+export interface GRPCMatch {
+  method?: { type?: string; service?: string; method?: string };
+  headers?: KeyMatch[];
+}
+/** One existing signal on a path's chain; code is a finding code, condition type, capability state or view C reason. */
+export interface PathSignal {
+  kind: "gateway" | "listener" | "route-status" | "waiting" | "finding" | "delegation" | "coverage";
+  code?: string;
+  ref?: LinkedRef;
+  state: HealthState;
+  reason?: string;
+}
+/** A path's worst state and its signals that are not healthy. */
+export interface PathProblem {
+  state: HealthState;
+  signals: PathSignal[];
+}
+/** A backend port and its Service port name, when known. */
+export interface BackendPort {
+  port: number;
+  name?: string;
+}
+/** The proxy process a per-proxy endpoints source reads (#35); never set yet. */
+export interface EndpointsRuntime {
+  install: string;
+  gateway: LinkedRef;
+  proxy: string;
+  instance: string;
+}
+/** One endpoint of a backend detail read. */
+export interface Endpoint {
+  address: string;
+  port?: number;
+  ready: boolean;
+  serving: boolean;
+  terminating: boolean;
+  pod?: string;
+}
+/** One backend port's endpoints from one source; ready and total only when the read establishes a count. */
+export interface Endpoints {
+  source: string;
+  port?: BackendPort;
+  runtime?: EndpointsRuntime;
+  readAt: string;
+  complete: "complete" | "partial" | "failed" | "unavailable" | "stale" | "not-applicable";
+  ready?: number;
+  total?: number;
+  items?: Endpoint[];
+}
+/**
+ * One path: Gateway → listener → hostnames → route chain → rule → backend.
+ * matches is null on a delegated row whose view C match is unknown ("match unknown").
+ */
+export interface PathRow {
+  gateway: LinkedRef;
+  listenerSet?: LinkedRef;
+  listener: PathListener;
+  hostnames: string[];
+  routes: LinkedRef[];
+  delegated: boolean;
+  rule: number;
+  matches: Match[] | null;
+  grpcMatches?: GRPCMatch[];
+  action: "backend" | "redirect" | "direct-response" | "none" | "delegate";
+  delegation?: DelegationRef;
+  backend?: LinkedRef;
+  port?: number;
+  weight: number;
+  share?: number;
+  shareState: "shown" | "not-shown" | "no-traffic" | "failing" | "may-fail" | "mirror";
+  mirror: boolean;
+  mirrorPercent?: number;
+  problem: PathProblem;
+  endpoints?: Endpoints;
+  note?: "unknown" | "unconfirmable" | "not-computed";
+}
+/** Counts of filtered visible paths and the distinct routes, Gateways and backends they reach. */
+export interface PathCounts {
+  paths: number;
+  routes: number;
+  gateways: number;
+  backends: number;
+}
+/** The whole filtered result the caller may see; hidden says some paths were left out. */
+export interface PathSummary extends PathCounts {
+  byState: Record<HealthState, PathCounts>;
+  endpointsNotRead?: boolean;
+  hidden?: boolean;
+  unmemoised?: boolean;
+}
+/** GET …/paths. */
+export interface PathsResponse {
+  install: string;
+  rows: PathRow[];
+  next?: string;
+  prev?: string;
+  summary: PathSummary;
+  collectedAt: string;
+}

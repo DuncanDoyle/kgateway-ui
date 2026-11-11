@@ -20,6 +20,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/overview"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 	"github.com/DuncanDoyle/snellius/pkg/platform"
 	"github.com/DuncanDoyle/snellius/pkg/version"
 )
@@ -45,7 +46,10 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 		cfg.commands = diagnose.Kubectl{}
 	}
 	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor,
-		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor}
+		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor, pathMemo: cfg.pathMemo}
+	if h.pathMemo == nil {
+		h.pathMemo = paths.NewMemo(nil)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -66,6 +70,7 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation", h.routeDelegation)
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
 	mux.HandleFunc("GET /api/v1/installs/{id}/refs", h.refs)
+	mux.HandleFunc("GET /api/v1/installs/{id}/paths", h.pathList)
 	mountExts(mux, cfg.ext)
 	// Unknown /api/ paths, extension ones included, get a JSON 404, never the SPA.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
@@ -85,6 +90,8 @@ type handler struct {
 	featuresFor func(install.Install) []string
 	packs       []string
 	kindFor     func(install.Install, objects.GroupKind) bool
+	// pathMemo holds the path topologies and projections; one per handler.
+	pathMemo *paths.Memo
 }
 
 // commandsOf is i's next-step commands: its own, else the handler's.

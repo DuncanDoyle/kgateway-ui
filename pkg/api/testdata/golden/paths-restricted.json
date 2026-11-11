@@ -1,0 +1,252 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "rows": [
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "endpoints": {
+          "complete": "complete",
+          "port": {
+            "name": "http",
+            "port": 80
+          },
+          "readAt": "2026-10-17T12:00:00Z",
+          "ready": 1,
+          "source": "kubernetes",
+          "total": 1
+        },
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning"
+            }
+          ],
+          "state": "warning"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "on-other",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 25,
+        "shareState": "shown",
+        "weight": 1
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "other-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning"
+            },
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "other-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "warning"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "on-other",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 75,
+        "shareState": "shown",
+        "weight": 3
+      },
+      {
+        "action": "redirect",
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/old"
+            }
+          }
+        ],
+        "mirror": false,
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning"
+            }
+          ],
+          "state": "warning"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "on-other",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 1,
+        "shareState": "not-shown",
+        "weight": 0
+      }
+    ],
+    "summary": {
+      "backends": 2,
+      "byState": {
+        "error": {
+          "backends": 0,
+          "gateways": 0,
+          "paths": 0,
+          "routes": 0
+        },
+        "healthy": {
+          "backends": 0,
+          "gateways": 0,
+          "paths": 0,
+          "routes": 0
+        },
+        "unknown": {
+          "backends": 0,
+          "gateways": 0,
+          "paths": 0,
+          "routes": 0
+        },
+        "warning": {
+          "backends": 2,
+          "gateways": 1,
+          "paths": 3,
+          "routes": 1
+        }
+      },
+      "gateways": 1,
+      "hidden": true,
+      "paths": 3,
+      "routes": 1
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

@@ -35,6 +35,8 @@ import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listeners
 import meta from "../../../../../pkg/api/testdata/golden/meta.json";
 import notFound from "../../../../../pkg/api/testdata/golden/not-found.json";
 import overview from "../../../../../pkg/api/testdata/golden/overview.json";
+import pathsGolden from "../../../../../pkg/api/testdata/golden/paths.json";
+import pathsRestrictedGolden from "../../../../../pkg/api/testdata/golden/paths-restricted.json";
 import processesGolden from "../../../../../pkg/api/testdata/golden/processes.json";
 import processesRestrictedGolden from "../../../../../pkg/api/testdata/golden/processes-restricted.json";
 import refsGolden from "../../../../../pkg/api/testdata/golden/refs.json";
@@ -61,6 +63,7 @@ import type {
   AllowedRoutes,
   AncestorPath,
   AncestorStep,
+  BackendPort,
   BackendRef,
   BackendState,
   Candidate,
@@ -81,7 +84,10 @@ import type {
   EffectiveContext,
   EffectiveEdge,
   EffectiveRule,
+  Endpoint,
+  Endpoints,
   EndpointsEvidence,
+  EndpointsRuntime,
   ErrorResponse,
   Evidence,
   Filter,
@@ -95,6 +101,7 @@ import type {
   GatewayListRow,
   GatewayProcesses,
   GatewayRow,
+  GRPCMatch,
   GrantShape,
   GroupKind,
   GroupList,
@@ -123,8 +130,15 @@ import type {
   ParentRef,
   ParentStatus,
   ParentSummary,
+  PathCounts,
+  PathListener,
   PathMatch,
+  PathProblem,
+  PathRow,
+  PathSignal,
   PathStep,
+  PathSummary,
+  PathsResponse,
   ProbeFacts,
   ProcessEvidence,
   ProcessesResponse,
@@ -1105,6 +1119,108 @@ const gatewayDetail = shape<GatewayDetail>(
   },
   { health: healthState },
 );
+// Paths (sub-phase 6.2).
+const pathCounts = shape<PathCounts>({ paths: "!", routes: "!", gateways: "!", backends: "!" });
+const endpoints = shape<Endpoints>(
+  { source: "!", port: "?", runtime: "?", readAt: "!", complete: "!", ready: "?", total: "?", items: "?" },
+  {
+    port: shape<BackendPort>({ port: "!", name: "?" }),
+    runtime: shape<EndpointsRuntime>({ install: "!", gateway: "!", proxy: "!", instance: "!" }, { gateway: linkedRef }),
+    items: shape<Endpoint>({ address: "!", port: "?", ready: "!", serving: "!", terminating: "!", pod: "?" }),
+  },
+  { complete: { complete: 1, partial: 1, failed: 1, unavailable: 1, stale: 1, "not-applicable": 1 } },
+);
+const pathRow = shape<PathRow>(
+  {
+    gateway: "!",
+    listenerSet: "?",
+    listener: "!",
+    hostnames: "!",
+    routes: "!",
+    delegated: "!",
+    rule: "!",
+    matches: "!",
+    grpcMatches: "?",
+    action: "!",
+    delegation: "?",
+    backend: "?",
+    port: "?",
+    weight: "!",
+    share: "?",
+    shareState: "!",
+    mirror: "!",
+    mirrorPercent: "?",
+    problem: "!",
+    endpoints: "?",
+    note: "?",
+  },
+  {
+    gateway: linkedRef,
+    listenerSet: linkedRef,
+    listener: shape<PathListener>({ name: "!", protocol: "?", port: "?" }),
+    routes: linkedRef,
+    matches: match,
+    grpcMatches: shape<GRPCMatch>({ method: "?", headers: "?" }, { headers: keyMatch }),
+    delegation: shape<DelegationRef>(
+      { mode: "!", namespace: "!", name: "?", label: "?", state: "?", selected: "?", attached: "?", computed: "?" },
+      { computed },
+      delegationRefEnums,
+    ),
+    backend: linkedRef,
+    problem: shape<PathProblem>(
+      { state: "!", signals: "!" },
+      {
+        signals: shape<PathSignal>(
+          { kind: "!", code: "?", ref: "?", state: "!", reason: "?" },
+          { ref: linkedRef },
+          {
+            kind: {
+              gateway: 1,
+              listener: 1,
+              "route-status": 1,
+              waiting: 1,
+              finding: 1,
+              delegation: 1,
+              coverage: 1,
+            },
+            state: healthState,
+          },
+        ),
+      },
+      { state: healthState },
+    ),
+    endpoints,
+  },
+  {
+    action: { backend: 1, redirect: 1, "direct-response": 1, none: 1, delegate: 1 },
+    shareState: { shown: 1, "not-shown": 1, "no-traffic": 1, failing: 1, "may-fail": 1, mirror: 1 },
+    note: { unknown: 1, unconfirmable: 1, "not-computed": 1 },
+  },
+);
+const pathsResponse = shape<PathsResponse>(
+  { install: "!", rows: "!", next: "?", prev: "?", summary: "!", collectedAt: "!" },
+  {
+    rows: pathRow,
+    summary: shape<PathSummary>(
+      {
+        paths: "!",
+        routes: "!",
+        gateways: "!",
+        backends: "!",
+        byState: "!",
+        endpointsNotRead: "?",
+        hidden: "?",
+        unmemoised: "?",
+      },
+      {
+        byState: shape<PathSummary["byState"]>(
+          { healthy: "!", warning: "!", error: "!", unknown: "!" },
+          { healthy: pathCounts, warning: pathCounts, error: pathCounts, unknown: pathCounts },
+        ),
+      },
+    ),
+  },
+);
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
 function problems(s: Shape, v: unknown, path: string): string[] {
   if (Array.isArray(v)) return v.flatMap((e, i) => problems(s, e, `${path}[${i}]`));
@@ -1239,6 +1355,8 @@ describe("types.ts matches the golden v1 wire format", () => {
       findingDetail,
     ],
     ["refs-restricted", refsRestrictedGolden.body satisfies Wide<TrailRefs>, trailRefs],
+    ["paths", pathsGolden.body satisfies Wide<PathsResponse>, pathsResponse],
+    ["paths-restricted", pathsRestrictedGolden.body satisfies Wide<PathsResponse>, pathsResponse],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });
@@ -1448,5 +1566,17 @@ describe("types.ts matches the golden v1 wire format", () => {
       processesGolden.body.proxies.items.some((g) => "skew" in g && g.skew && g.set.processes[0]?.restartsRecent),
     ).toBe(true);
     expect(processesGolden.body.proxies.items.some((g) => !g.set.observed && g.health === "unknown")).toBe(true);
+  });
+
+  it("covers 6.2 paths: actions, shares, mirrors, ListenerSet rows, endpoints and hidden rows", () => {
+    const rows = pathsGolden.body.rows;
+    expect(new Set(rows.map((r) => r.action))).toEqual(new Set(["backend", "redirect", "delegate", "none"]));
+    expect(rows.some((r) => r.mirror && r.mirrorPercent === 100)).toBe(true);
+    expect(rows.some((r) => "listenerSet" in r)).toBe(true);
+    expect(rows.some((r) => r.delegated)).toBe(true);
+    expect(rows.some((r) => r.endpoints?.complete === "complete" && r.endpoints.ready === 1)).toBe(true);
+    expect(rows.some((r) => r.endpoints?.complete === "not-applicable")).toBe(true);
+    expect(pathsRestrictedGolden.body.summary.hidden).toBe(true);
+    expect(pathsRestrictedGolden.body.rows.every((r) => r.gateway.name !== "edge")).toBe(true);
   });
 });

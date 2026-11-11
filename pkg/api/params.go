@@ -13,6 +13,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 )
 
 // listKind is the list a query is parsed for.
@@ -198,5 +199,83 @@ func parseDelegationQuery(r *http.Request) (explore.DelegationQuery, error) {
 		q.Outcomes = append(q.Outcomes, computed.RowOutcome(v))
 	}
 	q.Cursor = vals.Get("cursor")
+	return q, nil
+}
+
+// Path list parameters (design §5). pathsSingle are allowed at most once.
+var (
+	pathsParams = []string{"gateway", "listener", "route", "backend", "namespace", "state", "kind", "mirror", "q", "sort", "cursor", "limit"}
+	pathsSingle = []string{"listener", "route", "namespace", "kind", "mirror", "q", "sort", "cursor", "limit"}
+)
+
+// parsePathsQuery parses r's query for GET …/paths. It rejects unknown and
+// repeated single-valued parameters and malformed values; paths.Run validates
+// the rest (states, mirror, sort keys, cursors).
+func parsePathsQuery(r *http.Request) (paths.Query, error) {
+	var q paths.Query
+	vals, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return q, badParam("malformed query: %v", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(vals)) {
+		if !slices.Contains(pathsParams, name) {
+			return q, badParam("unknown parameter %q", name)
+		}
+		if len(vals[name]) > 1 && slices.Contains(pathsSingle, name) {
+			return q, badParam("parameter %q given more than once", name)
+		}
+	}
+	for _, v := range vals["gateway"] {
+		ns, name, ok := strings.Cut(v, "/")
+		if !ok || ns == "" || name == "" || strings.Contains(name, "/") {
+			return q, badParam("gateway %q: want namespace/name", v)
+		}
+		q.Gateways = append(q.Gateways, objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: ns, Name: name})
+	}
+	for _, name := range []string{"listener", "namespace", "kind"} {
+		if vals.Has(name) && vals.Get(name) == "" {
+			return q, badParam("%s: want a value", name)
+		}
+	}
+	q.Listener, q.Namespace, q.Kind = vals.Get("listener"), vals.Get("namespace"), vals.Get("kind")
+	if vals.Has("route") {
+		ref, err := parseRef(vals.Get("route"), "route")
+		if err != nil {
+			return q, err
+		}
+		q.Route = &ref
+	}
+	for _, v := range vals["backend"] {
+		ref, err := parseRef(v, "backend")
+		if err != nil {
+			return q, err
+		}
+		q.Backends = append(q.Backends, ref)
+	}
+	for _, v := range vals["state"] {
+		q.States = append(q.States, health.State(v))
+	}
+	q.Mirror, q.Q, q.Cursor = vals.Get("mirror"), vals.Get("q"), vals.Get("cursor")
+	if v := vals.Get("limit"); vals.Has("limit") {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > paths.MaxLimit {
+			return q, badParam("limit %q: want 1–%d", v, paths.MaxLimit)
+		}
+		q.Limit = n
+	}
+	if v := vals.Get("sort"); vals.Has("sort") {
+		key, dir, _ := strings.Cut(v, ".")
+		switch dir {
+		case "", "asc":
+		case "desc":
+			q.Desc = true
+		default:
+			return q, badParam("sort %q", v)
+		}
+		if key == "" {
+			return q, badParam("sort %q", v)
+		}
+		q.Sort = key
+	}
 	return q, nil
 }

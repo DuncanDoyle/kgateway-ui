@@ -42,11 +42,14 @@ type Memo struct {
 }
 
 // NewMemo returns an empty memo whose projections expire by c; nil is the real clock.
-func NewMemo(c clock.PassiveClock) *Memo {
+func NewMemo(c clock.PassiveClock) *Memo { return NewMemoCap(c, TopologyCap) }
+
+// NewMemoCap is NewMemo with a topology cap of capBytes instead of TopologyCap.
+func NewMemoCap(c clock.PassiveClock, capBytes int) *Memo {
 	if c == nil {
 		c = clock.RealClock{}
 	}
-	return &Memo{clock: c, cap: TopologyCap, installs: map[string]*memoEntry{}}
+	return &Memo{clock: c, cap: capBytes, installs: map[string]*memoEntry{}}
 }
 
 // memoEntry is one install's generation. proj projects topo for model.
