@@ -45,9 +45,11 @@ export const MapCanvas = styled(MapBox)`
     --xy-selection-border: 1px dotted ${(p) => p.theme.color.accentText};
     font-family: ${(p) => p.theme.font.ui};
   }
+  /* A neutral ring, so keyboard focus never reads as the accent selection border. */
   .react-flow__node:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-    outline-offset: 2px;
+    outline: 2px solid ${(p) => p.theme.color.textMuted};
+    outline-offset: 4px;
+    border-radius: ${(p) => p.theme.radius.md};
   }
   .react-flow__handle {
     opacity: 0;

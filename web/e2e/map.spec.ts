@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { PathsResponse } from "../packages/shell/src/api/types";
 import { mapCopy } from "../packages/shell/src/copy/map";
@@ -213,5 +214,109 @@ for (const theme of themes) {
     expect(await bg(close), "hover changes the close button").not.toBe(closeRest);
     await page.mouse.move(5, 5);
     await shot(page, `${theme.mode}-panel`);
+  });
+}
+
+// region Task 46: keyboard navigation and table view
+
+/** The map node that has focus, read by its card name. */
+const focusedName = (page: Page) =>
+  page.evaluate(() => document.activeElement?.querySelector(".name")?.textContent ?? "");
+
+test("keyboard only: Tab into the map, arrow to a backend, Enter opens its panel and Escape returns", async ({
+  page,
+}) => {
+  const map = await openMap(page);
+  // Start in the toolbar and Tab forward until a map node has focus; the map is one tab stop.
+  await page.getByRole("button", { name: mapCopy.table }).focus();
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press("Tab");
+    if (await page.evaluate(() => document.activeElement?.classList.contains("react-flow__node"))) break;
+  }
+  const gateway = map.locator(".react-flow__node:focus");
+  await expect(gateway).toHaveAttribute("aria-label", /^Gateway traffic\/traffic, /);
+  // Right along the edges: listener, route, backend.
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  const backend = map.locator(".react-flow__node:focus");
+  await expect(backend).toHaveAttribute("aria-label", /^Service /);
+  const name = await focusedName(page);
+  // Keyboard focus lights the backend's paths and dims the rest, as hover does.
+  await expect(backend).toHaveClass(/\blit\b/);
+  await expect(map.locator(".react-flow__node.dim").first()).toBeAttached();
+  await page.keyboard.press("Enter");
+  const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  await expect(panel).toBeFocused();
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText(name);
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(node(map, name)).toBeFocused();
+});
+
+test("the table toggle shows the map's rows as a table and back, keeping the filters", async ({ page }) => {
+  const problems = await paths(page, "&state=error&state=warning&state=unknown");
+  const map = await openMap(page);
+  await page.getByRole("button", { name: mapCopy.problemsOnly }).click();
+  await expect(map.getByTestId("map-node")).toHaveCount(nodeNames(problems).size);
+  const toggle = page.getByRole("button", { name: mapCopy.table });
+  await toggle.click();
+  await expect(page).toHaveURL(/view=table/);
+  await expect(page).toHaveURL(/state=error%2Cwarning%2Cunknown/);
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const table = page.getByRole("table", { name: mapCopy.tableLabel });
+  // The same rows as the map's query; the header row is not a path.
+  await expect(table.getByRole("row")).toHaveCount(problems.rows.length + 1);
+  await page.reload();
+  await expect(page.getByRole("table", { name: mapCopy.tableLabel }).getByRole("row")).toHaveCount(
+    problems.rows.length + 1,
+  );
+  await page.getByRole("button", { name: mapCopy.table }).click();
+  await expect(page).not.toHaveURL(/view=table/);
+  await expect(page.getByRole("button", { name: mapCopy.problemsOnly })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(nodeNames(problems).size);
+});
+
+test("the Map tab has no serious or critical axe violations, as a map and as a table", async ({ page }) => {
+  const serious = async () =>
+    (await new AxeBuilder({ page }).include('[role="tabpanel"]').analyze()).violations
+      .filter((v) => v.impact === "serious" || v.impact === "critical")
+      .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
+  await openMap(page);
+  expect(await serious()).toEqual([]);
+  await page.getByRole("button", { name: mapCopy.table }).click();
+  await expect(page.getByRole("table", { name: mapCopy.tableLabel })).toBeVisible();
+  expect(await serious()).toEqual([]);
+});
+
+for (const theme of themes) {
+  test(`keyboard focus and the table view in the ${theme.mode} theme`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const map = await openMap(page);
+    await pickTheme(page, theme);
+    await page.locator(".react-flow__controls-fitview").click();
+    // Focus from the keyboard: the ring is neutral, not the accent selection border.
+    await page.getByRole("button", { name: mapCopy.table }).focus();
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press("Tab");
+      if (await page.evaluate(() => document.activeElement?.classList.contains("react-flow__node"))) break;
+    }
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    const focused = map.locator(".react-flow__node:focus");
+    // The ring takes the muted text colour, as the find status line does.
+    const ring = await focused.evaluate((el) => getComputedStyle(el).outlineColor);
+    const muted = await page.getByTestId("map-found").evaluate((el) => getComputedStyle(el).color);
+    expect(ring).toBe(muted);
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-keyboard-focus`);
+
+    const toggle = page.getByRole("button", { name: mapCopy.table });
+    const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rest = await bg(toggle);
+    await toggle.hover();
+    expect(await bg(toggle), "hover changes the toggle").not.toBe(rest);
+    await toggle.click();
+    await expect(page.getByRole("table", { name: mapCopy.tableLabel })).toBeVisible();
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-table`);
   });
 }

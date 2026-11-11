@@ -17,15 +17,17 @@ import {
   ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FocusEvent, type KeyboardEvent, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { listenerCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { cellCopy } from "../../copy/traffic";
 import { HealthBadge } from "../../health/HealthBadge";
 import { HealthIcon } from "../../health/HealthIcon";
-import { useShownState } from "../../health/staleView";
+import { StaleView, useShownState } from "../../health/staleView";
+import { stateLabel } from "../../health/state";
 import type { HealthState } from "../../theme/tokens";
 import { type MapEdge, type MapGraph, type MapNode, throughNode } from "./graph";
+import { ARROWS, type ArrowKey, nextNode } from "./keyboard";
 import { layoutColumns } from "./layout";
 import { MapCanvas } from "./map.css";
 
@@ -76,6 +78,17 @@ const kindLabel = (n: MapNode) =>
 
 /** Stroke width: 1.5 px, or 1.5–6 px by share where the share is shown (design §4.4). */
 const strokeWidth = (share?: number) => (share === undefined ? 1.5 : 1.5 + (Math.min(100, share) / 100) * 4.5);
+
+/** A node's accessible name: kind, name and state, plus how many of its paths fail when any do. */
+function nodeLabel(g: MapGraph, n: MapNode, stale: boolean): string {
+  const base = mapCopy.nodeLabel(kindLabel(n), n.name, stateLabel(stale ? "unknown" : n.state));
+  const failing = n.rows.filter((i) => g.rows[i]?.state === "error").length;
+  return failing && !stale ? `${base}, ${mapCopy.fail(failing, n.rows.length)}` : base;
+}
+
+/** The map node a key or focus event comes from, when the event's target is the node itself. */
+const nodeId = (t: EventTarget | null) =>
+  t instanceof HTMLElement && t.classList.contains("react-flow__node") ? (t.dataset.id ?? undefined) : undefined;
 
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -152,14 +165,50 @@ interface GatewayMapProps {
 
 /**
  * The Gateway map canvas: React Flow with pan, zoom, fit to view and a minimap, styled from theme tokens (design §6).
- * Hovering a node lights every path through it and dims the rest; a click selects it.
+ * Hovering or focusing a node lights every path through it and dims the rest; a click, Enter or Space selects it.
+ * Arrow keys move focus between connected nodes; one node at a time is in the tab order.
  */
 export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverride }: GatewayMapProps) {
   const theme = useTheme();
+  const stale = useContext(StaleView);
   const [hovered, setHovered] = useState<string>();
+  // focused lights its paths while a node has focus; last keeps the node Tab returns to.
+  const [focused, setFocused] = useState<string>();
+  const [last, setLast] = useState<string>();
+  // Whether the last input was a pointer press rather than a key.
+  const pointer = useRef(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const press = () => {
+      pointer.current = true;
+    };
+    const key = () => {
+      pointer.current = false;
+    };
+    // React Flow redraws a node that leaves and re-enters the visible area as a new element; focus follows it.
+    const lost = (e: Event) => {
+      const id = nodeId(e.target);
+      const t = e.target as HTMLElement;
+      if (!id || (e as globalThis.FocusEvent).relatedTarget || !box.current?.contains(t)) return;
+      requestAnimationFrame(() => {
+        if (t.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+        box.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`)?.focus();
+      });
+    };
+    document.addEventListener("pointerdown", press, true);
+    document.addEventListener("keydown", key, true);
+    document.addEventListener("focusout", lost, true);
+    return () => {
+      document.removeEventListener("pointerdown", press, true);
+      document.removeEventListener("keydown", key, true);
+      document.removeEventListener("focusout", lost, true);
+    };
+  }, []);
   const flow = useRef<ReactFlowInstance<MapFlowNode, MapFlowEdge>>(undefined);
   const at = useMemo(() => layoutColumns(graph), [graph]);
-  const active = hovered ?? selected;
+  const active = hovered ?? focused ?? selected;
+  const has = (id?: string) => !!id && graph.nodes.some((n) => n.id === id);
+  const tabStop = has(last) ? last : has(selected) ? selected : graph.nodes.find((n) => n.kind === "gateway")?.id;
   const lit = useMemo(() => (active ? throughNode(graph, active) : undefined), [graph, active]);
   const nodes = useMemo(
     () =>
@@ -179,9 +228,11 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
           width: NODE_W,
           height: NODE_H,
           className: lit ? (lit.nodes.has(n.id) ? "lit" : "dim") : undefined,
+          ariaLabel: nodeLabel(graph, n, stale),
+          domAttributes: { tabIndex: n.id === tabStop ? 0 : -1 },
         }),
       ),
-    [graph, at, lit, selected],
+    [graph, at, lit, selected, stale, tabStop],
   );
   const edges = useMemo(
     () =>
@@ -202,7 +253,6 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
   );
   // A find request centres its node once; otherwise a selected node outside the canvas, which the side panel
   // narrows, is panned back into view at the same zoom. Both measure the canvas itself, not React Flow's last size.
-  const box = useRef<HTMLDivElement>(null);
   const centred = useRef(0);
   // The containment pan runs once per selection, so a poll's redraw never moves a node the user panned away.
   const checked = useRef<string>(undefined);
@@ -232,8 +282,53 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
     if (left < 0 || top < 0 || left + NODE_W * v.zoom > rect.width || top + NODE_H * v.zoom > rect.height)
       centre(selected, v.zoom);
   }, [focus, selected, at]);
+  // Moves focus to a node; one that onlyRenderVisibleElements left out is centred first, then focused once drawn.
+  const moveTo = (id: string) => {
+    setLast(id);
+    const find = () => box.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+    const el = find();
+    if (el) return el.focus();
+    const f = flow.current;
+    const p = at.get(id);
+    if (!f || !p) return;
+    void f.setCenter(p.x + NODE_W / 2, p.y + NODE_H / 2, { zoom: f.getViewport().zoom, duration: 0 });
+    let tries = 5;
+    const retry = () => {
+      const n = find();
+      if (n) n.focus();
+      else if (tries-- > 0) requestAnimationFrame(retry);
+    };
+    requestAnimationFrame(retry);
+  };
+  const onKeyDown = (e: KeyboardEvent) => {
+    const id = nodeId(e.target);
+    if (!id) return;
+    if (ARROWS.includes(e.key)) {
+      e.preventDefault();
+      const to = nextNode(graph, id, e.key as ArrowKey, at);
+      if (to) moveTo(to);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setLast(id);
+      onSelect(id);
+    }
+  };
   return (
-    <MapCanvas ref={box} data-testid="gateway-map" stylesOverride={stylesOverride}>
+    <MapCanvas
+      ref={box}
+      data-testid="gateway-map"
+      stylesOverride={stylesOverride}
+      onKeyDown={onKeyDown}
+      onFocus={(e: FocusEvent) => {
+        const id = nodeId(e.target);
+        // Only keyboard focus lights paths; focus that follows a pointer press leaves the view as it is.
+        setFocused(id && !pointer.current ? id : undefined);
+        if (id) setLast(id);
+      }}
+      onBlur={(e: FocusEvent) => {
+        if (!nodeId(e.relatedTarget)) setFocused(undefined);
+      }}
+    >
       <ReactFlow
         key={view}
         aria-label={mapCopy.canvas}
@@ -244,6 +339,12 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
         colorMode={theme.mode}
         nodesDraggable={false}
         nodesConnectable={false}
+        edgesFocusable={false}
+        ariaLabelConfig={{
+          "node.a11yDescription.default": mapCopy.keys,
+          "node.a11yDescription.keyboardDisabled": mapCopy.keys,
+          "edge.a11yDescription.default": "",
+        }}
         onInit={(i) => {
           flow.current = i;
         }}

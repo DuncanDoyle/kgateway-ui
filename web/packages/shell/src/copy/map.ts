@@ -34,4 +34,10 @@ export const mapCopy = {
     `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths. Loading the rest.`, // S791
   shown: (shown: number, total: number) =>
     `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths.`, // S793
+  nodeLabel: (kind: string, name: string, state: string) => `${kind} ${name}, ${state}`, // S794
+  keys: "Arrow keys move along the paths. Enter opens details. Escape closes them.", // S795
+  keyboard: "Keyboard", // S796
+  table: "Table", // S797
+  tableTip: "Show these paths as a table", // S798
+  tableLabel: "Paths through this Gateway", // S799
 };

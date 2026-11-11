@@ -578,3 +578,104 @@ it("Escape closes the panel from the map and from the panel", async () => {
   await user.keyboard("{Escape}");
   expect(screen.queryByTestId("map-panel")).toBeNull();
 });
+
+// region Task 46: keyboard navigation and table view
+
+/** The name on a React Flow node wrapper's card. */
+const nameOf = (el: Element | null) => el?.querySelector(".name")?.textContent ?? "";
+
+it("arrow keys move focus along connections, focus lights the paths, Enter opens the panel and Escape returns", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  // One tab stop: the Gateway, until another node takes focus.
+  const stops = [...map.querySelectorAll<HTMLElement>(".react-flow__node")].filter((n) => n.tabIndex === 0);
+  expect(stops.map(nameOf)).toEqual(["infra/edge"]);
+  stops[0]?.focus();
+  await user.keyboard("{ArrowRight}");
+  const rows = edgePaths().rows;
+  const listener = nameOf(document.activeElement);
+  expect(rows.map((r) => r.listener.name)).toContain(listener);
+  // Up and down stay in the listeners column.
+  await user.keyboard("{ArrowDown}{ArrowUp}");
+  expect(new Set(rows.map((r) => r.listener.name))).toContain(nameOf(document.activeElement));
+  const back = nameOf(document.activeElement);
+  await user.keyboard("{ArrowRight}");
+  const route = nameOf(document.activeElement);
+  // The route is a root route attached to the focused listener.
+  expect(rows.some((r) => r.listener.name === back && refName(r.routes[0] as LinkedRef) === route)).toBe(true);
+  expect((document.activeElement as HTMLElement).tabIndex).toBe(0);
+  // Keyboard focus lights the paths through the node, as hover does.
+  const want = new Set(
+    rows
+      .filter((r) => r.routes.some((x) => refName(x) === route))
+      .flatMap((r) => [
+        refName(r.gateway),
+        r.listener.name,
+        ...r.routes.map(refName),
+        ...(r.backend ? [refName(r.backend)] : []),
+      ]),
+  );
+  const lit = nodeNames(map).filter((n) => !flowNode(map, n).classList.contains("dim"));
+  // Action nodes (a rule with no backend) carry no ref name, so they are left out of the comparison.
+  expect(new Set(lit.filter((n) => n.includes("/") || rows.some((r) => r.listener.name === n)))).toEqual(want);
+  await user.keyboard("{Enter}");
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(route);
+  expect(panel).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  await waitFor(() => expect(nameOf(document.activeElement)).toBe(route));
+});
+
+it("each node's accessible name gives its kind, name, state and failing paths", async () => {
+  serve(() => {
+    const b = edgePaths();
+    const rows = b.rows.map((r) =>
+      r.backend?.name === "cart-svc" && r.routes[0]?.name === "backends"
+        ? { ...r, problem: { state: "error" as const, signals: [] } }
+        : r,
+    );
+    return { ...b, rows };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  // The failing row's state lands on its backend; the Gateway itself stays healthy but counts the failing path.
+  expect(flowNode(map, "shop/cart-svc")).toHaveAttribute(
+    "aria-label",
+    "Service shop/cart-svc, Error, 1 of 2 paths through this node fail",
+  );
+  expect(flowNode(map, "infra/edge")).toHaveAttribute(
+    "aria-label",
+    "Gateway infra/edge, Healthy, 1 of 8 paths through this node fail",
+  );
+  expect(flowNode(map, "shop/via-ls")).toHaveAttribute("aria-label", "HTTPRoute shop/via-ls, Healthy");
+  // The map's own key help replaces React Flow's default description, which offers to delete nodes.
+  expect(map).toHaveTextContent("Arrow keys move along the paths. Enter opens details. Escape closes them.");
+  expect(map).not.toHaveTextContent(/delete/i);
+});
+
+it("the table toggle shows the map's rows as a path table, keeps the filters and lives in the URL", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map&kind=HTTPRoute");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  const toggle = screen.getByRole("button", { name: "Table" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  const calls = pathCalls().length;
+  await user.click(toggle);
+  const table = await screen.findByRole("table", { name: "Paths through this Gateway" });
+  // The same rows as the map's query: one per distinct path.
+  expect(within(table).getAllByRole("row").length - 1).toBe(dedupeRows(edgePaths().rows).length);
+  expect(screen.queryByTestId("gateway-map")).toBeNull();
+  expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
+  // The toggle refetches nothing: the table draws the rows the map loaded.
+  expect(pathCalls()).toHaveLength(calls);
+  let url = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect([url.get("tab"), url.get("kind"), url.get("view")]).toEqual(["map", "HTTPRoute", "table"]);
+  await user.click(screen.getByRole("button", { name: "Table" }));
+  await screen.findByTestId("gateway-map");
+  url = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect([url.get("tab"), url.get("kind"), url.get("view")]).toEqual(["map", "HTTPRoute", null]);
+});

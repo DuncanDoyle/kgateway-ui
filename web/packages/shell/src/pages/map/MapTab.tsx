@@ -2,7 +2,7 @@ import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import type { LinkedRef, PathSummary } from "../../api/types";
+import type { LinkedRef, Page, PathRow, PathSummary } from "../../api/types";
 import { listCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { summaryCopy, trafficCopy } from "../../copy/traffic";
@@ -10,6 +10,7 @@ import type { ParamChanges } from "../../shell/urlParams";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import { PROBLEM_STATES } from "../backends/BackendsPage";
+import { PathTable } from "../traffic/PathTable";
 import { StaleGate } from "../traffic/StaleGate";
 import { gatewayGraph, type MapNode } from "./graph";
 import { MapToolbar, problemsOnly } from "./MapToolbar";
@@ -59,6 +60,11 @@ const matches = (nodes: MapNode[], text: string) => {
 /** More routes or backends than LARGE_GATEWAY in the whole result. */
 const isLarge = (s: PathSummary) => s.routes > LARGE_GATEWAY || s.backends > LARGE_GATEWAY;
 
+/** The table view's fixed order: the rows as the map loaded them, problems first. */
+const NO_SORT = { key: "problem", desc: false };
+/** The Gateway column repeats the Gateway this tab belongs to. */
+const OMIT = ["gateway"] as const;
+
 /** pending until the first summary; a large Gateway's counts, applied once the URL carries Problems only. */
 type Opening = "pending" | "done" | { routes: number; backends: number; applied: boolean };
 
@@ -71,7 +77,8 @@ interface MapTabProps {
 
 /**
  * Gateway detail's Map tab: the paths through the Gateway under the URL's filters, drawn as a map (design §6),
- * with find, filter chips and a side panel for the selected node. A large Gateway opens on problems only.
+ * with find, filter chips and a side panel for the selected node, or as a table of the same rows.
+ * A large Gateway opens on problems only.
  */
 export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const { search } = useLocation();
@@ -117,6 +124,16 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const prompt = typeof opening === "object" && problemsOnly(params) ? opening : undefined;
 
   const graph = useMemo(() => gatewayGraph(gateway, paths.rows), [gateway, paths.rows]);
+  // ?view=table shows the map's rows as a path table, the map's accessible equivalent (design §6.1, item 8).
+  const table = params.get("view") === "table";
+  const page = useMemo<Page<PathRow> | undefined>(
+    () =>
+      paths.collectedAt
+        ? { install: installId, items: paths.rows, total: paths.rows.length, collectedAt: paths.collectedAt }
+        : undefined,
+    [installId, paths.rows, paths.collectedAt],
+  );
+  const filtered = ["state", "kind", "namespace", "q"].some((k) => params.has(k));
   const [selected, setSelected] = useState<string>();
   // A selection from the map moves focus into the panel; one from the find box leaves it in the box.
   const [panelFocus, setPanelFocus] = useState(false);
@@ -177,6 +194,8 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         onFind={onFind}
         onFindNext={onFindNext}
         found={{ at: Math.max(at, 1), of: found.length }}
+        table={table}
+        onTable={(on) => setFilter({ view: on ? "table" : null })}
       />
       <Notes role="status" data-testid="map-notes">
         {prompt ? <span data-testid="map-large">{mapCopy.large(prompt.routes, prompt.backends)}</span> : null}
@@ -192,6 +211,19 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
       </Notes>
       {!summary || large ? (
         <Fallback />
+      ) : table ? (
+        <PathTable
+          installId={installId}
+          label={mapCopy.tableLabel}
+          page={page}
+          busy={false}
+          sort={NO_SORT}
+          onSort={() => {}}
+          onPage={() => {}}
+          emptyTitle={filtered ? listCopy.emptyFiltered(trafficCopy.noun[1]) : listCopy.empty(trafficCopy.noun[1])}
+          omit={OMIT}
+          sortable={false}
+        />
       ) : (
         <Area
           ref={area}
