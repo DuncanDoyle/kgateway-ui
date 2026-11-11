@@ -134,6 +134,7 @@ it("keeps the public export surface", () => {
         "Attachment",
         "BackendConsumer",
         "BackendDetail",
+        "BackendKind",
         "BackendPort",
         "BackendRef",
         "BackendRow",

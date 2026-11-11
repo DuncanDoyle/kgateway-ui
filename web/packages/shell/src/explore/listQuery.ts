@@ -5,7 +5,7 @@ import { useInstallId } from "../shell/extension";
 import { type ParamChanges, useUrlParams } from "../shell/urlParams";
 
 // region Helpers
-export type ListName = "routes" | "gateways" | "listenersets" | "findings" | "processes" | "paths";
+export type ListName = "routes" | "gateways" | "listenersets" | "findings" | "processes" | "paths" | "backends";
 
 /** The params each list's server documents (design §7.2), in the order they are sent. listener is 2.3 and never sent. */
 const API_PARAMS: Record<ListName, string[]> = {
@@ -15,6 +15,7 @@ const API_PARAMS: Record<ListName, string[]> = {
   findings: ["severity", "code", "kind", "namespace", "group", "q", "sort", "cursor"],
   processes: ["health", "q", "skew", "restarts", "cursor"],
   paths: ["gateway", "listener", "route", "backend", "namespace", "state", "kind", "mirror", "q", "sort", "cursor"],
+  backends: ["kind", "namespace", "state", "used", "gateway", "q", "sort", "cursor"],
 };
 /** The server's default sort per list, as the URL writes it. */
 const DEFAULT_SORT: Record<ListName, string> = {
@@ -24,11 +25,15 @@ const DEFAULT_SORT: Record<ListName, string> = {
   findings: "rank.asc",
   processes: "name.asc",
   paths: "problem.asc",
+  backends: "problem.asc",
 };
 /** Repeatable params; the page URL holds them comma-joined (no value of theirs can contain a comma). */
 const REPEATED = new Set(["namespace", "kind", "state", "health", "backend", "severity", "code", "gateway"]);
 /** Params a list takes once although other lists repeat them; only the first URL value is sent. */
-const SINGLE: Partial<Record<ListName, Set<string>>> = { paths: new Set(["namespace", "kind"]) };
+const SINGLE: Partial<Record<ListName, Set<string>>> = {
+  paths: new Set(["namespace", "kind"]),
+  backends: new Set(["namespace", "kind"]),
+};
 /** Params that filter rows; Clear filters removes these and keeps the sort. */
 export const FILTER_PARAMS = [
   "namespace",
@@ -37,6 +42,7 @@ export const FILTER_PARAMS = [
   "listener",
   "route",
   "mirror",
+  "used",
   "parent",
   "attachment",
   "state",

@@ -163,6 +163,7 @@ it("the header's install nav links only to pages that exist, and navigates", asy
     ["Gateways", "/i/kgw.kgateway/gateways"],
     ["Routes", "/i/kgw.kgateway/routes"],
     ["Traffic", "/i/kgw.kgateway/traffic"],
+    ["Backends", "/i/kgw.kgateway/backends"],
     ["ListenerSets", "/i/kgw.kgateway/listenersets"],
     ["Findings", "/i/kgw.kgateway/findings"],
     ["Processes", "/i/kgw.kgateway/processes"],

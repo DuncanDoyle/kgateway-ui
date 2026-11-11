@@ -86,6 +86,6 @@ export { Shell } from "./shell/Shell";
 export { Tooltip } from "./shell/Tooltip";
 export type { Crumb } from "./shell/trail";
 export { useLinkVia } from "./shell/trail";
-export type { Vocabulary } from "./shell/vocabulary";
+export type { BackendKind, Vocabulary } from "./shell/vocabulary";
 export { PageState } from "./states/PageState";
 export { Shimmer } from "./states/Shimmer";

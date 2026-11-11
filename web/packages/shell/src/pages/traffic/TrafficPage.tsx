@@ -1,9 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
-import styled from "@emotion/styled";
-import { type ReactNode, useMemo } from "react";
-import { useNow } from "../../api/clock";
+import { useMemo } from "react";
 import { usePaths } from "../../api/exploreHooks";
-import { isStale } from "../../api/hooks";
 import type { Page, PathRow, PathsResponse } from "../../api/types";
 import { listCopy } from "../../copy/explorer";
 import { summaryCopy, trafficCopy } from "../../copy/traffic";
@@ -11,36 +8,14 @@ import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
 import { HealthIcon } from "../../health/HealthIcon";
-import { StaleView } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
 import { PageState } from "../../states/PageState";
 import type { HealthState } from "../../theme/tokens";
 import { refText } from "../explore/listParts";
+import { Narrow, narrowOptions, single } from "./narrow";
 import { PathSummary } from "./PathSummary";
 import { PathTable } from "./PathTable";
-
-// region Styles
-/** One line of chips taken from the shown rows; it scrolls sideways, so its height never changes. */
-const Narrow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: ${(p) => p.theme.space(2)};
-  height: 40px;
-  margin: -${(p) => p.theme.space(1)} 0 ${(p) => p.theme.space(2)};
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  white-space: nowrap;
-  .label {
-    flex: none;
-    margin-left: ${(p) => p.theme.space(1)};
-    font-size: ${(p) => p.theme.font.size.sm};
-    color: ${(p) => p.theme.color.textMuted};
-  }
-  > div {
-    flex-wrap: nowrap;
-  }
-`;
+import { StaleGate } from "./StaleGate";
 
 // region Helpers
 const STATES: HealthState[] = ["error", "warning", "unknown", "healthy"];
@@ -57,11 +32,6 @@ const mirrorOptions: FilterOption[] = [
   { value: "only", label: trafficCopy.mirrorOnly },
   { value: "exclude", label: trafficCopy.mirrorExclude },
 ];
-/** The most chips per group in the Narrow to line; selected values always show. */
-const NARROW_MAX = 50;
-
-/** The newly pressed value of a single-valued chip group, or "" when the pressed one was released. */
-const single = (prev: string[], next: string[]) => next.find((v) => !prev.includes(v)) ?? "";
 
 /** A ref param in words: "Kind ns/name" for group/kind/ns/name; anything else as written. */
 function refTag(v: string): string {
@@ -79,19 +49,7 @@ const toPage = (d: PathsResponse): Page<PathRow> => ({
   collectedAt: d.collectedAt,
 });
 
-/** The server's facet values in its name order, the selected ones first so they can always be released. */
-function narrowOptions(values: string[], selected: string[]): FilterOption[] {
-  const rest = values.filter((v) => !selected.includes(v));
-  return [...selected, ...rest].slice(0, Math.max(NARROW_MAX, selected.length)).map((v) => ({ value: v, label: v }));
-}
-
 // region Component
-/** Provides the stale view from the app clock; only this re-renders on a tick, not the page or its table. */
-function StaleGate({ collectedAt, failed, children }: { collectedAt?: string; failed: boolean; children: ReactNode }) {
-  const now = useNow();
-  const stale = !!collectedAt && (failed || isStale(collectedAt, now));
-  return <StaleView.Provider value={stale}>{children}</StaleView.Provider>;
-}
 
 interface TrafficPageProps {
   stylesOverride?: SerializedStyles;

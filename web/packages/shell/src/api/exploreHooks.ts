@@ -4,6 +4,9 @@ import type { ApiError } from "./client";
 import { apiFetch } from "./client";
 import { installApi, live, POLL_MS } from "./hooks";
 import type {
+  BackendDetail,
+  BackendRow,
+  BackendsResponse,
   DelegationRow,
   GatewayDetail,
   GatewayListRow,
@@ -90,6 +93,17 @@ export function useListenerSets(id: string, query: URLSearchParams) {
 /** GET …/paths: the install's paths, filtered, sorted and paged by the server (Phase 6 design §5). */
 export function usePaths(id: string, query: URLSearchParams) {
   return useList<PathRow, PathsResponse>(id, "paths", query);
+}
+
+/** GET …/backends: the install's backends, filtered, sorted and paged by the server (Phase 6 design §8.1). */
+export function useBackends(id: string, query: URLSearchParams) {
+  return useList<BackendRow, BackendsResponse>(id, "backends", query);
+}
+
+/** GET …/backends/{group}/{kind}/{ns}/{name}, "-" for the empty group (design §8.2). */
+export function useBackendDetail(id: string, r: Ref) {
+  const path = `backends/${seg(r.group || "-")}/${seg(r.kind)}/${seg(r.namespace ?? "")}/${seg(r.name)}`;
+  return useDetail<BackendDetail>(id, path);
 }
 
 /** GET …/gateways/{ns}/{name}. */

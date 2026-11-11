@@ -1,5 +1,5 @@
 # Traffic scenario (Phase 6 design §5), applied after backends.yaml: one Gateway, traffic/traffic, whose paths
-# traffic.spec.ts asserts on. Every object carries e2e=traffic. setup.sh sets the TCPRoute's served version.
+# traffic.spec.ts and backends.spec.ts assert on. Every object carries e2e=traffic. setup.sh sets the TCPRoute's served version.
 apiVersion: v1
 kind: Namespace
 metadata: { name: traffic, labels: { team: a, e2e: traffic } }
@@ -103,3 +103,16 @@ metadata: { name: tcp, namespace: traffic, labels: { e2e: traffic } }
 spec:
   parentRefs: [{ name: traffic, sectionName: tcp }]
   rules: [{ backendRefs: [{ name: web-b, port: 8000 }] }]
+---
+# A GatewayExtension whose ext-auth service is a Service no route writes: a non-route consumer (design §8.3).
+apiVersion: v1
+kind: Service
+metadata: { name: authz, namespace: traffic, labels: { e2e: traffic } }
+spec: { selector: { app: echo }, ports: [{ name: grpc, port: 9001, targetPort: 8080 }] }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata: { name: authz, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  type: ExtAuth
+  extAuth: { grpcService: { backendRef: { name: authz, port: 9001 } } }

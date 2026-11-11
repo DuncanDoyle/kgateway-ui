@@ -1,4 +1,4 @@
-import type { GRPCMatch, PathRow } from "../../api/types";
+import type { Endpoints, GRPCMatch, PathRow } from "../../api/types";
 import { routeCopy } from "../../copy/explorer";
 import { cellCopy, endpointCopy, shareCopy, signalDetail, signalText } from "../../copy/traffic";
 import type { HealthState } from "../../theme/tokens";
@@ -86,8 +86,11 @@ export function shareText(r: PathRow): { text: string; flag?: { state: HealthSta
 
 /** The endpoints cell's text: a count only when the read established one. */
 export function endpointText(r: PathRow): string | undefined {
-  const e = r.endpoints;
-  if (!e) return undefined;
+  return r.endpoints ? endpointsText(r.endpoints) : undefined;
+}
+
+/** One endpoints summary in words: a count only when the read established one, never "0" for a read that did not. */
+export function endpointsText(e: Endpoints): string {
   switch (e.complete) {
     case "complete":
       return e.ready !== undefined && e.total !== undefined
@@ -101,13 +104,17 @@ export function endpointText(r: PathRow): string | undefined {
       return endpointCopy.unavailable;
     case "stale":
       return endpointCopy.stale;
+    case "timed-out":
+      return endpointCopy.timedOut;
+    case "busy":
+      return endpointCopy.busy;
     default:
       return endpointCopy.notApplicable;
   }
 }
 
 /** The problem's signals, one per line, for the state's tooltip and the Why column. */
-export const signalLines = (r: PathRow) => r.problem.signals.map(signalText);
+export const signalLines = (r: Pick<PathRow, "problem">) => r.problem.signals.map(signalText);
 
 /** The signals with their codes, for tooltips. */
-export const signalDetails = (r: PathRow) => r.problem.signals.map(signalDetail);
+export const signalDetails = (r: Pick<PathRow, "problem">) => r.problem.signals.map(signalDetail);

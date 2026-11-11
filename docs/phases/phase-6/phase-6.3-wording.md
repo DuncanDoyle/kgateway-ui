@@ -1,0 +1,85 @@
+# Sub-phase 6.3 — Wording
+
+77 strings, five options each; all new SPA copy of the Backends list and backend detail (`web/packages/shell/src/copy/backends.ts`), two endpoint states in `copy/traffic.ts`, and the kgateway web pack's Backend chip and type label (`kgateway/webPack.tsx`).
+
+Option 1 is the drafted text and is used provisionally; the Choice column is for the picker. Placeholders stay in order; condition types, reasons and kinds are unchanged. Ids run from S672 and are not contiguous by position: S741–S749 were added after S740, and S699 is not used.
+
+| # | id | File:line | Where | Placeholders | Option 1 (draft) | Option 2 | Option 3 | Option 4 | Option 5 | Choice |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | S672 | `copy/traffic.ts:87` | Endpoints summary: the scoped read timed out | none | Timed out | Read timed out | Took too long | Timed out reading | No answer in time | |
+| 2 | S673 | `copy/traffic.ts:88` | Endpoints summary: the reader is at its limit | none | Busy, retry | Busy, try again | Reader busy | Too busy, retry | Busy right now | |
+| 3 | S674 | `copy/backends.ts:12` | Nav entry, page title and table label | none | Backends | Backend services | Destinations | Upstreams | Targets | |
+| 4 | S675 | `copy/backends.ts:13` | Search box label (screen readers) | none | Filter backends | Search backends | Find backends | Filter the backend list | Backend filter | |
+| 5 | S676 | `copy/backends.ts:14` | Search placeholder | none | Filter by namespace or name | Namespace or name | Search namespace/name | Find by namespace or name | Type a namespace or name | |
+| 6 | S677 | `copy/backends.ts:16` | Show chip group label (screen readers) | none | Show | Show only | Filter | Quick filters | Limit to | |
+| 7 | S678 | `copy/backends.ts:17` | Chip: backends with a problem (error, warning, unknown) | none | Problems | With problems | Not healthy | Needs attention | Issues | |
+| 8 | S679 | `copy/backends.ts:18` | Chip: Services only | none | Services | Services only | Kubernetes Services | Service backends | Just Services | |
+| 9 | S744 | `kgateway/webPack.tsx:30` | Chip: kgateway Backend resources only (pack copy) | none | Backend resources | Backend objects | Backends (kgateway) | Backend kind | Backend CRs | |
+| 10 | S680 | `copy/backends.ts:19` | Chip: backends nothing uses | none | Unused | Not used | Unreferenced | Idle | No users | |
+| 11 | S681 | `copy/backends.ts:20` | Namespace quick-chip group label (screen readers) | none | Backend namespaces | Namespaces | Namespace filter | Narrow to namespace | Backend namespace filter | |
+| 12 | S682 | `copy/backends.ts:21` | Note: backends left out for the viewer (D-077) | none | Some backends are hidden from you. | Some backends are hidden. | You cannot see every backend. | Some backends are not shown to you. | Backends you cannot view are left out. | |
+| 13 | S683 | `copy/backends.ts:25` | Column: the backend | none | Backend | Name | Backend name | Object | Service or Backend | |
+| 14 | S684 | `copy/backends.ts:26` | Column: routes, Gateways and other users | none | Used by | Users | Referenced by | Sent from | Used in | |
+| 15 | S685 | `copy/backends.ts:27` | Column: state and signals | none | Problem | State | Health | Status | Why | |
+| 16 | S686 | `copy/backends.ts:38` | Used by cell | `{routes}`, `{gateways}`, `{others}` with nouns | {routes} routes · {gateways} Gateways · {others} others | {routes} routes on {gateways} Gateways, {others} others | Routes {routes} · Gateways {gateways} · Others {others} | {routes} routes, {gateways} Gateways, {others} other users | {routes} routes ({gateways} Gateways) + {others} others | |
+| 17 | S687 | `copy/backends.ts:39` | Used by cell: nothing uses it | none | Not used | Unused | Nothing | No users | None | |
+| 18 | S688 | `copy/backends.ts:40` | Used by cell: routes write it but no accepted attachment reaches it (design §8.1 wording) | none | 0 confirmed exposures | none confirmed | not confirmed | 0 confirmed paths | no accepted path | |
+| 19 | S689 | `copy/backends.ts:44` | Endpoints cell: one referenced port | `{port}`, `{text}` | {port}: {text} | Port {port}: {text} | {port} → {text} | :{port} {text} | {text} on {port} | |
+| 20 | S690 | `copy/backends.ts:53` | Status line: who sends traffic here | `{routes}`, `{gateways}` with nouns | {routes} routes on {gateways} Gateways send traffic here | {routes} routes on {gateways} Gateways route here | Traffic reaches it from {routes} routes on {gateways} Gateways | {routes} routes via {gateways} Gateways use it | {routes} routes and {gateways} Gateways send it traffic | |
+| 21 | S691 | `copy/backends.ts:54` | Status line: other users | `{n}` with noun | {n} other objects use it | {n} other objects reference it | it has {n} other users | {n} non-route objects use it | {n} other objects depend on it | |
+| 22 | S692 | `copy/backends.ts:55` | Status line: nothing uses it | none | Nothing uses this backend | No route or other object uses this backend | This backend is unused | Nothing sends traffic here | No one uses this backend | |
+| 23 | S693 | `copy/backends.ts:56` | Status line phrase: KGWUI-023 | `{fail}` = requests/connections fail | no endpoint is ready, so {fail} | no ready endpoints, so {fail} | nothing is ready to serve, so {fail} | it has no ready endpoint, so {fail} | no endpoint can take traffic, so {fail} | |
+| 24 | S694 | `copy/backends.ts:57` | Status line phrase: KGWUI-002 | `{fail}` | the controller does not accept it, so {fail} | the controller rejects it, so {fail} | it is not accepted, so {fail} | the controller refused it, so {fail} | its configuration is not accepted, so {fail} | |
+| 25 | S695 | `copy/backends.ts:58` | Status line phrase: Service not in the cache | none | it is not seen in the cluster yet | the Service is not in the cluster yet | it does not exist in the cluster yet | it is not found yet | the cluster has no such Service yet | |
+| 26 | S748 | `copy/backends.ts:59` | Status line phrase: a referenced port is not on the cached Service | none | a referenced port is not seen on the Service yet | a referenced port is missing on the Service | the Service lacks a referenced port | a route uses a port the Service does not have | one referenced port is not on the Service | |
+| 27 | S696 | `copy/backends.ts:60` | Status line phrase: 023 holding or skipping | none | its endpoints are still being checked | endpoints are being checked | checking its endpoints | its endpoints are not checked yet | endpoint check in progress | |
+| 28 | S697 | `copy/backends.ts:61` | Status line phrase: waiting for the controller | none | it is waiting for the controller | waiting for the controller | the controller has not reported yet | no status from the controller yet | the controller has not ruled yet | |
+| 29 | S698 | `copy/backends.ts:62` | Status line phrase: endpoints capability off/denied/failing | none | its endpoints were not read | endpoints were not read | its endpoints are unknown | endpoints could not be read | no endpoint data | |
+| 30 | S700 | `copy/backends.ts:63` | Status line phrase: a worse state from its paths | none | some paths to it have a problem | some of its paths have a problem | a path to it has a problem | its paths report problems | some routes to it have problems | |
+| 31 | S701 | `copy/backends.ts:64` | Status line phrase: nothing wrong | none | no problem found | no problems | all good | nothing wrong found | healthy | |
+| 32 | S702 | `copy/backends.ts:65` | Status line phrase: stale data | none | its state is unknown while the data is out of date | state unknown: data is out of date | the data is stale, so its state is unknown | its state is unknown until data refreshes | out-of-date data, state unknown | |
+| 33 | S703 | `copy/backends.ts:91` | Section title (approved mockup wording) | none | How this backend is exposed | Paths to this backend | How traffic reaches it | Exposure | Where it is exposed | |
+| 34 | S704 | `copy/backends.ts:92` | Link to Traffic filtered by backend= | none | Open in Traffic | Show in Traffic | All paths in Traffic | View in Traffic | Traffic for this backend | |
+| 35 | S705 | `copy/backends.ts:93` | Empty table: no paths | none | No route sends traffic here. | No paths to this backend. | Nothing routes here. | No route reaches this backend. | No traffic paths. | |
+| 36 | S706 | `copy/backends.ts:94` | Heading: non-route consumers | none | Other users | Used by other objects | Other consumers | Not via routes | Other references | |
+| 37 | S707 | `copy/backends.ts:95` | Consumer line lead | `{kind}` | Used by {kind} | Referenced by {kind} | {kind} | Consumer {kind} | Named by {kind} | |
+| 38 | S708 | `copy/backends.ts:97` | Consumer line: field label | none | Field | At | Path | Via | Set in | |
+| 39 | S741 | `copy/backends.ts:98` | Exposure table label (screen readers) | none | Paths to this backend | Exposure paths | Backend paths | Paths | Paths reaching this backend | |
+| 40 | S709 | `copy/backends.ts:102` | Endpoints source title | `{port}`, `{name}` | Port {port} ({name}) | {port}/{name} | Port {port}, {name} | :{port} ({name}) | {name} port {port} | |
+| 41 | S710 | `copy/backends.ts:103` | Source label for the Kubernetes read | none | From Kubernetes | Kubernetes | Source: Kubernetes | Read from Kubernetes | EndpointSlices | |
+| 42 | S711 | `copy/backends.ts:104` | Read time | `{ago}` | Read {ago} | Read at {ago} | As of {ago} | Updated {ago} | Fetched {ago} | |
+| 43 | S712 | `copy/backends.ts:105` | Note: counts come from the cache | none | Cached counts. The endpoints were not read for this page. | From the cache; not read for this page. | Cached counts only. | These counts are cached. | Counts from the cache, not a fresh read. | |
+| 44 | S713 | `copy/backends.ts:106` | Button: read again | none | Retry | Try again | Read again | Reload | Refresh | |
+| 45 | S714 | `copy/backends.ts:107` | Endpoint table column | none | Address | IP | Endpoint | Address:port | Host | |
+| 46 | S715 | `copy/backends.ts:108` | Endpoint table column | none | Ready | Is ready | Ready? | Readiness | Up | |
+| 47 | S716 | `copy/backends.ts:109` | Endpoint table column | none | Serving | Is serving | Serving? | Serves | Accepting | |
+| 48 | S717 | `copy/backends.ts:110` | Endpoint table column | none | Terminating | Is terminating | Terminating? | Stopping | Shutting down | |
+| 49 | S718 | `copy/backends.ts:111` | Endpoint table column | none | Pod | Target Pod | Pod name | Backed by | Workload | |
+| 50 | S719 | `copy/backends.ts:112` | Boolean cell | none | Yes | True | ✓ yes | On | Y | |
+| 51 | S720 | `copy/backends.ts:113` | Boolean cell | none | No | False | ✗ no | Off | N | |
+| 52 | S721 | `copy/backends.ts:114` | Complete read with no endpoints on this port | none | No endpoints in this read. | The read found no endpoints. | No endpoints. | Nothing found on this port. | Zero endpoints read. | |
+| 53 | S722 | `copy/backends.ts:115` | Note on a partial read | none | Only part of the endpoints were read. | Partial read. | Not every endpoint was read. | Some endpoints were not read. | The list is incomplete. | |
+| 54 | S723 | `copy/backends.ts:116` | Cached count | `{ready}`, `{total}` | {ready}/{total} ready, cached | {ready}/{total} ready (cached) | Cached: {ready}/{total} ready | {ready} of {total} ready, from cache | {ready}/{total} ready earlier | |
+| 55 | S724 | `copy/backends.ts:117` | Quiet placeholder for the per-proxy view (#35); promises nothing | none | Endpoints as each proxy sees them are not shown here. | Per-proxy endpoints are not shown. | This page does not show the proxies' view. | Proxy-side endpoints: not shown. | The proxies' own view is not part of this page. | |
+| 56 | S725 | `copy/backends.ts:118` | No referenced port | none | No port of this backend is referenced. | No port is referenced. | Routes name no port here. | No referenced ports. | Nothing references a port. | |
+| 57 | S742 | `copy/backends.ts:119` | Endpoints table label (screen readers) | `{port}` | Endpoints on {port} | {port} endpoints | Endpoints of {port} | Endpoint list, {port} | Addresses on {port} | |
+| 58 | S726 | `copy/backends.ts:123` | Section title | none | Port chain | Ports | Port mapping | How ports map | Port path | |
+| 59 | S727 | `copy/backends.ts:124` | Chain step | none | Route port | Ref port | backendRef port | Written port | Requested port | |
+| 60 | S728 | `copy/backends.ts:125` | Chain step | none | Service port | Port on Service | Service | Matched port | Svc port | |
+| 61 | S729 | `copy/backends.ts:126` | Chain step | none | Target port | targetPort | Container port | Forwards to | Target | |
+| 62 | S730 | `copy/backends.ts:127` | Chain step | none | Slice ports | Observed ports | EndpointSlice ports | Seen ports | Endpoint ports | |
+| 63 | S731 | `copy/backends.ts:128` | Chain step: no slice port | none | none observed | none seen | none | not observed | no ports seen | |
+| 64 | S732 | `copy/backends.ts:129` | Chain fact | `{port}` | The Service has no port {port}. | No Service port {port}. | Port {port} is not on the Service. | The Service does not expose {port}. | Service lacks port {port}. | |
+| 65 | S733 | `copy/backends.ts:130` | Chain fact (complete read only) | `{name}` | No slice has a port named {name}. | No slice port is named {name}. | Slices have no {name} port. | No endpoint port {name}. | {name} is not on any slice. | |
+| 66 | S749 | `copy/backends.ts:131` | Chain fact for an unnamed Service port (complete read only) | none | No slice has a port for this Service port. | No slice port matches this Service port. | Slices have no matching port. | No endpoint port matches. | No slice serves this port. | |
+| 67 | S734 | `copy/backends.ts:132` | Named targetPort, not resolved to a container port | `{name}` | {name} (named, not resolved) | {name} (name only) | {name}, unresolved | named {name} | {name} (by name) | |
+| 68 | S735 | `copy/backends.ts:136` | Section title | none | Reference explanations | Why refs fail | Unresolved references | Reference problems | Refs that do not resolve | |
+| 69 | S736 | `copy/backends.ts:137` | Candidate explanation (design §10 wording) | `{reason}` | This route reports ResolvedRefs=False ({reason}) for one of these refs. | ResolvedRefs=False ({reason}) on this route; it does not say which ref. | The route's ResolvedRefs is False ({reason}) for one of its refs. | One of this route's refs fails: ResolvedRefs=False ({reason}). | The controller reports ResolvedRefs=False ({reason}) without naming the ref. | |
+| 70 | S737 | `copy/backends.ts:138` | Waiting explanation (D-014) | none | Waiting for the controller. | The controller has not reported yet. | Not reconciled yet. | Waiting for status. | Status not updated yet. | |
+| 71 | S738 | `copy/backends.ts:139` | Label before the route's reason | none | Reason | Controller reason | Reported reason | Why | Cause | |
+| 72 | S743 | `copy/backends.ts:140` | Label before the ref's JSON path | none | Written at | At | Field | Location | Path | |
+| 73 | S746 | `copy/backends.ts:144` | Section title for a Service | none | Service facts | Service | About the Service | Service details | Cached facts | |
+| 74 | S747 | `copy/backends.ts:145` | Type label when no pack names it | none | Type | Kind of backend | Backend type | Variant | Spec type | |
+| 75 | S745 | `kgateway/webPack.tsx:31` | Backend spec.type label (pack copy) | none | Backend type | Type | spec.type | Backend kind | Kind of Backend | |
+| 76 | S739 | `copy/backends.ts:147` | Fact label | none | Service type | Type | spec.type | Service kind | Kind | |
+| 77 | S740 | `copy/backends.ts:148` | Fact label | none | Ports | Service ports | Port list | Exposed ports | Ports (name) | |

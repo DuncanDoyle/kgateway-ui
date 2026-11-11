@@ -7,6 +7,7 @@ import { delegationCopy, routeCopy } from "../../../copy/explorer";
 import { ComputedBadge } from "../../../explore/ComputedBadge";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
+import { backendPath } from "../../../explore/objectPath";
 import { HealthBadge } from "../../../health/HealthBadge";
 import { HealthIcon } from "../../../health/HealthIcon";
 import { StaleView } from "../../../health/staleView";
@@ -243,7 +244,13 @@ function BackendItem({ b, installId }: { b: BackendRef; installId: string }) {
         <>
           <span className="line">
             <span>
-              <span className="muted">{b.ref.kind}</span> <LinkedName refValue={b.ref} installId={installId} />
+              <span className="muted">{b.ref.kind}</span>{" "}
+              {/* Backend detail, unless the caller may not see the backend: then its name stays text. */}
+              <LinkedName
+                refValue={b.ref}
+                installId={installId}
+                to={b.backend?.restricted ? undefined : backendPath(installId, b.ref)}
+              />
             </span>
             {b.port ? (
               <span>

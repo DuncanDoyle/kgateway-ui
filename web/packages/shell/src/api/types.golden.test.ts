@@ -1,4 +1,5 @@
 import backendDetailBackendGolden from "../../../../../pkg/api/testdata/golden/backend-detail-backend.json";
+import backendDetailExplainedGolden from "../../../../../pkg/api/testdata/golden/backend-detail-explained.json";
 import backendDetailServiceGolden from "../../../../../pkg/api/testdata/golden/backend-detail-service.json";
 import backendsGolden from "../../../../../pkg/api/testdata/golden/backends.json";
 import badRequestGolden from "../../../../../pkg/api/testdata/golden/bad-request.json";
@@ -1305,7 +1306,7 @@ const backendDetail = shape<BackendDetail>(
       noSlicePort: "?",
     }),
     explanations: shape<RefExplanation>(
-      { route: "!", rule: "!", ref: "!", kind: "!", reason: "?", explanation: "?", fix: "?" },
+      { route: "!", rule: "!", ref: "!", path: "!", kind: "!", reason: "?", explanation: "?", fix: "?" },
       { route: linkedRef, fix: suggestedFix },
       { kind: { attributed: 1, candidate: 1, waiting: 1 } },
     ),
@@ -1452,6 +1453,7 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["backends", backendsGolden.body satisfies Wide<BackendsResponse>, backendsResponse],
     ["backend-detail-service", backendDetailServiceGolden.body satisfies Wide<BackendDetail>, backendDetail],
     ["backend-detail-backend", backendDetailBackendGolden.body satisfies Wide<BackendDetail>, backendDetail],
+    ["backend-detail-explained", backendDetailExplainedGolden.body satisfies Wide<BackendDetail>, backendDetail],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });

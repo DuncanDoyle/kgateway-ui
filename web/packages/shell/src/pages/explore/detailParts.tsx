@@ -113,6 +113,8 @@ interface DetailFrameProps {
   extraTabs?: ExtraTab[];
   /** Refs the page's data links, for the trail above the header. */
   trailRefs?: readonly LinkedRef[];
+  /** False for an object the cache keeps only facts of, such as a Service: no YAML tab. */
+  yaml?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
@@ -128,6 +130,7 @@ export function DetailFrame({
   sideWhenWide,
   extraTabs,
   trailRefs,
+  yaml = true,
   stylesOverride,
 }: DetailFrameProps) {
   const wide = useTwoColumns();
@@ -138,8 +141,11 @@ export function DetailFrame({
   const contributed = useShownDetailTabs(installId, refValue, data, coreIds, asked);
   const sections = useSideSectionContributions(refValue);
   const tabs = useMemo(
-    () => [...TABS, ...[...(extraTabs ?? []), ...contributed].map(({ id, label }) => ({ id, label }))],
-    [extraTabs, contributed],
+    () => [
+      ...TABS.filter((t) => yaml || t.id !== "yaml"),
+      ...[...(extraTabs ?? []), ...contributed].map(({ id, label }) => ({ id, label })),
+    ],
+    [extraTabs, contributed, yaml],
   );
   const tab = tabs.find((t) => t.id === asked)?.id ?? "overview";
   const extra = extraTabs?.find((t) => t.id === tab);

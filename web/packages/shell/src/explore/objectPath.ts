@@ -6,6 +6,15 @@ export function resourcePath(installId: string, r: Ref): string {
   return installPath(installId, `r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`);
 }
 
+/** Path of the backend detail page of r (Phase 6 design §8.2), "-" for the empty group. */
+export function backendPath(installId: string, r: Ref): string {
+  const seg = encodeURIComponent;
+  return installPath(
+    installId,
+    `backends/${seg(r.group || "-")}/${seg(r.kind)}/${seg(r.namespace ?? "")}/${seg(r.name)}`,
+  );
+}
+
 // region Helpers
 const GATEWAY_API = "gateway.networking.k8s.io";
 

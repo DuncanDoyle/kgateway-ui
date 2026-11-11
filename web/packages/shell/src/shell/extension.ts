@@ -90,6 +90,9 @@ export interface CorePages {
   ProcessesPage?: ComponentType;
   /** The Traffic path list at traffic (Phase 6 sub-phase 6.2). */
   TrafficPage?: ComponentType;
+  /** The Backends list at backends and backend detail at backends/:group/:kind/:ns/:name (sub-phase 6.3). */
+  BackendsPage?: ComponentType;
+  BackendPage?: ComponentType;
   /** Replaces the install page's Needs attention and Processes block (sub-phase 3.2). */
   DiagnosticsSection?: ComponentType<DiagnosticsSectionProps>;
 }

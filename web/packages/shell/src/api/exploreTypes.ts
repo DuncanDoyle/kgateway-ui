@@ -586,11 +586,13 @@ export interface ServiceFact {
   type: string;
   ports: BackendPort[];
 }
-/** One route ref to the backend that does not resolve. */
+/** One route ref to the backend that does not resolve; ref is -1 for a rule filter's mirror, and path tells them apart. */
 export interface RefExplanation {
   route: LinkedRef;
   rule: number;
   ref: number;
+  /** Where the route writes the ref, e.g. spec.rules[0].backendRefs[0]. */
+  path: string;
   kind: "attributed" | "candidate" | "waiting";
   reason?: string;
   explanation?: string;

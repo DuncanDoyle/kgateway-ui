@@ -117,6 +117,8 @@ function download(text: string, file: string) {
 interface SuggestedFixProps {
   fix: SuggestedFixData;
   installId: string;
+  /** The heading's id, unique per page when several fixes show. */
+  headingId?: string;
   stylesOverride?: SerializedStyles;
 }
 
@@ -124,7 +126,7 @@ interface SuggestedFixProps {
  * The one change the evidence leaves (design §7.7, §17.2): the object, the fragment's location, the YAML to copy or
  * download, and the basis. A new object is created with kubectl create, which fails on a taken name (R89).
  */
-export function SuggestedFixView({ fix, installId, stylesOverride }: SuggestedFixProps) {
+export function SuggestedFixView({ fix, installId, headingId = "finding-fix", stylesOverride }: SuggestedFixProps) {
   const [copied, setCopied] = useState<string>();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -145,8 +147,8 @@ export function SuggestedFixView({ fix, installId, stylesOverride }: SuggestedFi
   };
   const CopyIcon = copied === diagnosticsCopy.copied ? Check : Copy;
   return (
-    <Section aria-labelledby="finding-fix">
-      <h2 id="finding-fix">{findingsCopy.suggestedFix}</h2>
+    <Section aria-labelledby={headingId}>
+      <h2 id={headingId}>{findingsCopy.suggestedFix}</h2>
       <Body stylesOverride={stylesOverride}>
         <p>{withCode(fix.title)}</p>
         <Facts>

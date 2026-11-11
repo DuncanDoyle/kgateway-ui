@@ -2,6 +2,7 @@ import styled from "@emotion/styled";
 import { useCallback, useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useFeatureCheck } from "../api/hooks";
+import { backendsCopy } from "../copy/backends";
 import { navCopy } from "../copy/explorer";
 import { trafficCopy } from "../copy/traffic";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerTint } from "./headerTint";
@@ -67,6 +68,7 @@ export const installNavEntries: InstallNavEntry[] = [
   { label: navCopy.gateways, to: "gateways" },
   { label: navCopy.routes, to: "routes" },
   { label: trafficCopy.title, to: "traffic" },
+  { label: backendsCopy.title, to: "backends" },
   { label: navCopy.listenerSets, to: "listenersets" },
   { label: navCopy.findings, to: "findings" },
   { label: navCopy.processes, to: "processes", feature: "processes" },

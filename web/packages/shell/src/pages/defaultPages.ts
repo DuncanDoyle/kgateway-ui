@@ -1,4 +1,6 @@
 import type { CorePages } from "../shell/extension";
+import { BackendPage } from "./backends/BackendPage";
+import { BackendsPage } from "./backends/BackendsPage";
 import { ClusterLanding } from "./ClusterLanding";
 import { GatewayPage } from "./explore/GatewayPage";
 import { GatewaysPage } from "./explore/GatewaysPage";
@@ -29,4 +31,6 @@ export const defaultPages: Required<CorePages> = {
   DiagnosticsSection,
   ProcessesPage,
   TrafficPage,
+  BackendsPage,
+  BackendPage,
 };

@@ -337,3 +337,11 @@ it("the clock tick neither remounts cells nor drops keyboard focus from a Why ce
     vi.useRealTimers();
   }
 });
+
+it("a backend cell opens its backend detail", async () => {
+  serve(() => golden());
+  mount();
+  const [cell] = await within(table()).findAllByLabelText("shop/cart-svc");
+  const link = (cell as HTMLElement).closest("a") ?? within(cell as HTMLElement).getByRole("link");
+  expect(link.getAttribute("href")?.split("?")[0]).toBe(`/i/${ID}/backends/-/Service/shop/cart-svc`);
+});

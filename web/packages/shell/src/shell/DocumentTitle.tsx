@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { matchPath, useLocation } from "react-router-dom";
 import { useInstalls } from "../api/hooks";
 import { aboutCopy } from "../copy/about";
+import { backendsCopy } from "../copy/backends";
 import { navCopy } from "../copy/explorer";
 import { useShellExtension } from "./extension";
 import { installLabel } from "./InstallName";
@@ -18,9 +19,11 @@ const PAGES: [string, (p: Record<string, string | undefined>) => string][] = [
   ["gateways", () => navCopy.gateways],
   ["routes", () => navCopy.routes],
   ["listenersets", () => navCopy.listenerSets],
+  ["backends", () => backendsCopy.title],
   ["gateways/:ns/:name", (p) => `Gateway ${dec(p.ns)}/${dec(p.name)}`],
   ["routes/:group/:kind/:ns/:name", (p) => `${dec(p.kind)} ${dec(p.ns)}/${dec(p.name)}`],
   ["listenersets/:group/:kind/:ns/:name", (p) => `${dec(p.kind)} ${dec(p.ns)}/${dec(p.name)}`],
+  ["backends/:group/:kind/:ns/:name", (p) => `${dec(p.kind)} ${dec(p.ns)}/${dec(p.name)}`],
 ];
 
 /** The page part of the title for pathname, or undefined for the bare product name; label names an install by its ID. */

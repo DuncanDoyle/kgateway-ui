@@ -3,6 +3,7 @@ import { useContext } from "react";
 import type { LinkedRef, PathRow } from "../../api/types";
 import { columnCopy, routeCopy } from "../../copy/explorer";
 import { actionCopy, cellCopy, noteCopy, shareCopy } from "../../copy/traffic";
+import { backendPath } from "../../explore/objectPath";
 import { HealthIcon } from "../../health/HealthIcon";
 import { StaleView, useShownState } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
@@ -69,7 +70,7 @@ const Flag = styled.span<{ $state: HealthState }>`
 
 // region Component
 /** The row's state with icon, colour and text; its signals in a tooltip. Under a stale view it shows unknown. */
-export function StateCell({ r }: { r: PathRow }) {
+export function StateCell({ r }: { r: Pick<PathRow, "problem"> }) {
   const state = useShownState(r.problem.state);
   const lines = state === r.problem.state ? signalDetails(r) : [];
   const badge = (
@@ -123,7 +124,7 @@ export function TargetCell({ r, installId }: { r: PathRow; installId: string }) 
     return (
       <Tooltip label={`${r.backend.kind} ${refText(r.backend)}${port}`} stylesOverride={nameTip}>
         <Pair>
-          <NameCell r={r.backend} installId={installId} />
+          <NameCell r={r.backend} installId={installId} to={backendPath(installId, r.backend)} />
           {port ? <span className="second">{port}</span> : null}
           {r.mirror ? <Tag>{columnCopy.mirror}</Tag> : null}
         </Pair>
@@ -160,7 +161,7 @@ export function ShareCell({ r }: { r: PathRow }) {
 }
 
 /** The signals behind the state in plain words, codes in the tooltip; blank under a stale view, as the state is. */
-export function WhyCell({ r }: { r: PathRow }) {
+export function WhyCell({ r }: { r: Pick<PathRow, "problem" | "note"> }) {
   if (useContext(StaleView)) return null;
   const note = r.note ? [noteCopy[r.note]] : [];
   const lines = [...signalLines(r), ...note];

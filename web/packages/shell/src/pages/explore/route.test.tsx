@@ -328,14 +328,15 @@ it("each backendRef links to Other routes using this backend (routes?backend=…
   expect(lookup("cart-svc").pathname).toBe(`/i/${ID}/routes`);
   expect(lookup("cart-svc").searchParams.get("backend")).toBe("core/Service/shop/cart-svc");
   expect(lookup("be1").searchParams.get("backend")).toBe("gateway.kgateway.dev/Backend/shop/be1");
-  // A Backend links to its YAML view and shows its state.
+  // A backend links to its backend detail (Phase 6 design §3) and shows its state.
   expect(hrefPath(within(backend("be1")).getByRole("link", { name: /shop\/be1/ }))).toBe(
-    `/i/${ID}/r/gateway.kgateway.dev/Backend/shop/be1`,
+    `/i/${ID}/backends/gateway.kgateway.dev/Backend/shop/be1`,
+  );
+  expect(hrefPath(within(backend("cart-svc")).getByRole("link", { name: /shop\/cart-svc/ }))).toBe(
+    `/i/${ID}/backends/-/Service/shop/cart-svc`,
   );
   // A current Accepted=True reads "Configuration accepted", never "working".
   expect(within(backend("be1")).getByTestId("condition-Accepted")).toHaveTextContent("Configuration accepted");
-  // Services have no page: their names are text.
-  expect(within(backend("cart-svc")).queryAllByRole("link")).toHaveLength(1);
   // Delegation refs never match the backend filter, so they get no lookup.
   const deleg = rule(1);
   expect(within(deleg).queryByRole("link", { name: "Other routes using this backend" })).toBeNull();

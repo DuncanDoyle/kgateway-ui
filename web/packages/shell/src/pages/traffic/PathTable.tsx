@@ -98,6 +98,8 @@ function columns(installId: string): ObjectColumn<PathRow>[] {
 // region Component
 interface PathTableProps {
   installId: string;
+  /** The table's accessible name; Traffic's by default. */
+  label?: string;
   page?: Page<PathRow>;
   busy: boolean;
   onClearFilters?: () => void;
@@ -105,12 +107,17 @@ interface PathTableProps {
   onSort: (key: string) => void;
   onPage: (cursor: string) => void;
   emptyTitle: string;
+  /** Column ids left out, e.g. the backend's own column on its detail page. */
+  omit?: readonly string[];
+  /** False for a fixed order, as on backend detail: no header sorts, and an empty footer collapses. */
+  sortable?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
 /** One row per path, problems first by default: Gateway → listener → route → rule → backend (design §4.1). */
 export function PathTable({
   installId,
+  label = trafficCopy.table,
   page,
   busy,
   onClearFilters,
@@ -118,15 +125,24 @@ export function PathTable({
   onSort,
   onPage,
   emptyTitle,
+  omit,
+  sortable = true,
   stylesOverride,
 }: PathTableProps) {
-  const cols = useMemo(() => columns(installId), [installId]);
+  const omitKey = omit?.join(",") ?? "";
+  const cols = useMemo(
+    () =>
+      columns(installId)
+        .filter((c) => !omitKey.split(",").includes(c.id))
+        .map((c) => (sortable ? c : { ...c, sortKey: undefined })),
+    [installId, omitKey, sortable],
+  );
   const keys = useMemo(() => keyRows(page?.items ?? []), [page]);
   // Stable between data changes: a new rowKey rebuilds the table's cell renderers, which remounts every cell.
   const rowKey = useCallback((r: PathRow) => keys.get(r) ?? baseKey(r), [keys]);
   return (
     <ObjectTable
-      label={trafficCopy.table}
+      label={label}
       installId={installId}
       noun={trafficCopy.noun}
       columns={cols}
@@ -141,6 +157,7 @@ export function PathTable({
       onSort={onSort}
       onPage={onPage}
       showDenied={false}
+      collapseEmptyFooter={!sortable}
       stylesOverride={stylesOverride}
     />
   );
