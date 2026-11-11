@@ -27,6 +27,8 @@ export interface MapPaths {
   loading: boolean;
   /** Rows have arrived and more pages of the result remain. */
   partial: boolean;
+  /** A walk over this query's pages is running now. */
+  walking: boolean;
   /** Every row of the result has arrived. */
   done: boolean;
   /** The result has more than MAP_MAX_ROWS paths (summary.paths); the map loads only the first MAP_MAX_ROWS. */
@@ -152,7 +154,7 @@ export function useMapPaths(
   const [progress, setProgress] = useState<{ key: string; pages: PathsResponse[] }>();
   const shown = useRef({ key, stopAt });
   shown.current = { key, stopAt };
-  const { data, error, mutate } = useSWR<MapResult, ApiError>(
+  const { data, error, mutate, isValidating } = useSWR<MapResult, ApiError>(
     key,
     (k: string) =>
       fetchPages(
@@ -192,6 +194,7 @@ export function useMapPaths(
       truncated: !!first && first.summary.paths > MAP_MAX_ROWS,
       inconsistent,
       query: answers,
+      walking: isValidating,
     };
-  }, [current, inconsistent, installId, error, answers]);
+  }, [current, inconsistent, installId, error, answers, isValidating]);
 }

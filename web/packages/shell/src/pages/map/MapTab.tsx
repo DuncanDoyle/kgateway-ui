@@ -183,7 +183,10 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         {paths.truncated && summary ? (
           <span data-testid="map-truncated">{mapCopy.truncated(MAP_MAX_ROWS, summary.paths)}</span>
         ) : paths.partial && summary ? (
-          <span data-testid="map-partial">{mapCopy.partial(paths.rows.length, summary.paths)}</span>
+          // "Loading the rest" only while a walk runs; a walk that ended short says what it shows.
+          <span data-testid="map-partial">
+            {(paths.walking ? mapCopy.partial : mapCopy.shown)(paths.rows.length, summary.paths)}
+          </span>
         ) : null}
         {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
       </Notes>

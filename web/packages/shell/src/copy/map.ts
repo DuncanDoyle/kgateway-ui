@@ -23,6 +23,7 @@ export const mapCopy = {
   warn: (n: number, of: number) => `${n} of ${of} paths through this node have a warning`, // S781
   unknown: (n: number, of: number) => `${n} of ${of} paths through this node are unknown`, // S782
   healthy: (of: number) => `All ${of} paths are healthy`, // S783
+  healthyOne: "Its one path is healthy", // S792
   problems: "Problems", // S784
   noProblems: "Nothing on this node itself.", // S785
   endpoints: "Endpoints", // S786
@@ -31,4 +32,6 @@ export const mapCopy = {
   traffic: "Show these paths in Traffic", // S789
   partial: (shown: number, total: number) =>
     `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths. Loading the rest.`, // S791
+  shown: (shown: number, total: number) =>
+    `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths.`, // S793
 };

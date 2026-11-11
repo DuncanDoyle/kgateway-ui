@@ -81,6 +81,16 @@ test("a lit edge shows its state on the hovered node's paths, not the worst row 
     '[data-id="g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http"] path.react-flow__edge-path',
   );
   await expect(trunk).toHaveClass(/state-error/);
+  await expect(trunk).not.toHaveClass(/broken/);
+  // Partly failing: a hollow ring, not the broken edge's filled icon, so it differs from healthy without colour.
+  const ring = map.locator('.map-edge-mark[data-edge="g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http"]');
+  await expect(ring).toHaveClass(/\bpartial\b/);
+  await expect(ring.getByTestId("health-icon-error")).toHaveCount(0);
+  const cross = map.locator(
+    '.map-edge-mark[data-edge="r:gateway.networking.k8s.io/HTTPRoute/traffic/cross>b:/Service/shop/httpbin"]',
+  );
+  await expect(cross).toHaveClass(/\bbroken\b/);
+  await expect(cross.getByTestId("health-icon-error")).toHaveCount(1);
   await node(map, "traffic/weighted").hover();
   await expect(trunk).toHaveClass(/state-healthy/);
   await node(map, "traffic/cross").hover();
@@ -119,6 +129,8 @@ test("the broken backend is drawn broken, and its panel links to backend detail"
     .toBe(true);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("shop/httpbin");
   await expect(panel.getByTestId("map-panel-counts")).toContainText(mapCopy.fail(1, 1));
+  // The minimap steps aside while the panel narrows the canvas.
+  await expect(map.locator(".react-flow__minimap")).toHaveCount(0);
   const detail = panel.getByRole("link", { name: mapCopy.open });
   await expect(detail).toHaveAttribute("href", `${install}/backends/-/Service/shop/httpbin`);
   await expect(panel.getByRole("link", { name: mapCopy.traffic })).toHaveAttribute(
@@ -127,6 +139,23 @@ test("the broken backend is drawn broken, and its panel links to backend detail"
   );
   await detail.click();
   await expect(page).toHaveURL(new RegExp(`${install}/backends/-/Service/shop/httpbin`));
+});
+
+test("a poll keeps the view after the user pans a selected node away", async ({ page }) => {
+  const map = await openMap(page);
+  await node(map, "shop/httpbin").click();
+  await expect(page.getByRole("complementary", { name: mapCopy.panel })).toBeVisible();
+  // Drag the pane from its empty top-left corner far to the right: the backends column leaves the canvas.
+  const box = (await map.boundingBox()) as { x: number; y: number };
+  await page.mouse.move(box.x + 40, box.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 640, box.y + 40, { steps: 10 });
+  await page.mouse.up();
+  const viewport = map.locator(".react-flow__viewport");
+  const panned = await viewport.getAttribute("style");
+  // Two polls: the first redraws with fresh rows, the second proves the redraw has settled.
+  for (let i = 0; i < 2; i++) await page.waitForResponse((r) => r.url().includes("/paths?") && r.ok());
+  await expect(viewport).toHaveAttribute("style", panned as string);
 });
 
 test("the Problems chip reduces the map to the paths with problems, in the URL", async ({ page }) => {

@@ -192,7 +192,7 @@ export function SidePanel({ installId, gateway, node, rows, takeFocus, onClose, 
           {counts.healthy === total ? (
             <li>
               <HealthIcon state="healthy" size={14} />
-              {mapCopy.healthy(total)}
+              {total === 1 ? mapCopy.healthyOne : mapCopy.healthy(total)}
             </li>
           ) : (
             lines.map((s) => (

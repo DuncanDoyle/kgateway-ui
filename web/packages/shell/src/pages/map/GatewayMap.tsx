@@ -99,12 +99,15 @@ function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
 }
 
 /**
- * An edge in its state's stroke and pattern: solid healthy, dotted warning, dash-dot unknown, solid error.
- * A broken edge (every row fails) is dashed and carries an error icon at its middle. Unknown in a stale view.
+ * An edge in its state's stroke and pattern: solid healthy, dotted warning, dash-dot unknown. A broken edge
+ * (every row fails) is dashed with a filled error icon; a partly failing one is solid with a hollow error ring.
+ * Unknown in a stale view.
  */
 function MapEdgeLine({ id, sourceX, sourceY, targetX, targetY, data, style }: EdgeProps<MapFlowEdge>) {
   const state = useShownState(data?.state ?? "unknown");
   const broken = state === "error" && !!data?.broken;
+  // A partly failing edge keeps a solid stroke but carries a hollow error ring, so it never reads as healthy.
+  const partial = state === "error" && !broken;
   const [path, x, y] = getBezierPath({
     sourceX,
     sourceY,
@@ -116,13 +119,14 @@ function MapEdgeLine({ id, sourceX, sourceY, targetX, targetY, data, style }: Ed
   return (
     <>
       <BaseEdge id={id} path={path} style={style} className={`state-${state}${broken ? " broken" : ""}`} />
-      {broken ? (
+      {broken || partial ? (
         <EdgeLabelRenderer>
           <div
-            className={`map-edge-icon${data?.dim ? " dim" : ""}`}
+            className={`map-edge-mark ${broken ? "broken" : "partial"}${data?.dim ? " dim" : ""}`}
+            data-edge={id}
             style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
           >
-            <HealthIcon state="error" size={14} />
+            {broken ? <HealthIcon state="error" size={14} /> : null}
           </div>
         </EdgeLabelRenderer>
       ) : null}
@@ -200,6 +204,8 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
   // narrows, is panned back into view at the same zoom. Both measure the canvas itself, not React Flow's last size.
   const box = useRef<HTMLDivElement>(null);
   const centred = useRef(0);
+  // The containment pan runs once per selection, so a poll's redraw never moves a node the user panned away.
+  const checked = useRef<string>(undefined);
   useEffect(() => {
     const f = flow.current;
     const rect = box.current?.getBoundingClientRect();
@@ -217,6 +223,8 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
       centre(focus.id, Math.max(v.zoom, 0.8));
       return;
     }
+    if (selected === checked.current) return;
+    checked.current = selected;
     const p = selected ? at.get(selected) : undefined;
     if (!selected || !p) return;
     const left = p.x * v.zoom + v.x;
@@ -247,7 +255,8 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
         onlyRenderVisibleElements
         minZoom={0.1}
       >
-        <MiniMap pannable zoomable />
+        {/* The panel narrows the canvas, so the minimap steps aside while it is open. */}
+        {selected ? null : <MiniMap pannable zoomable />}
         <Controls showInteractive={false} />
       </ReactFlow>
     </MapCanvas>

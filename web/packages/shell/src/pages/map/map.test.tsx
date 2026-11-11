@@ -548,6 +548,17 @@ it("a result that kept changing shows a quiet notice", async () => {
   expect(await screen.findByTestId("map-inconsistent")).toHaveTextContent(
     "The paths changed while loading. The map may be out of date.",
   );
+  // The kept walk ended on a page with more after it, but no walk runs now: no "Loading the rest".
+  await waitFor(() => expect(screen.getByTestId("map-partial")).toHaveTextContent(/^Showing 200 of [\d,]+ paths\.$/));
+});
+
+it("a node with one healthy path says so in the singular", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  expect(edgePaths().rows.filter((r) => r.routes[0]?.name === "via-ls")).toHaveLength(1);
+  fireEvent.click(within(flowNode(map, "shop/via-ls")).getByTestId("map-node"));
+  expect(await screen.findByTestId("map-panel-counts")).toHaveTextContent(/^Its one path is healthy$/);
 });
 
 it("Escape closes the panel from the map and from the panel", async () => {

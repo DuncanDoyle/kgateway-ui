@@ -52,7 +52,7 @@ export const MapCanvas = styled(MapBox)`
   .react-flow__handle {
     opacity: 0;
   }
-  /* Edge states differ by pattern as well as colour; error edges also carry an icon (design §6.1). */
+  /* Edge states differ by pattern as well as colour; error edges also carry a mark (design §6.1). */
   .react-flow__edge-path.state-healthy {
     stroke: ${(p) => p.theme.color.status.healthy.fg};
   }
@@ -71,19 +71,27 @@ export const MapCanvas = styled(MapBox)`
   .react-flow__edge-path.state-error.broken {
     stroke-dasharray: 8 6;
   }
-  .map-edge-icon {
+  .map-edge-mark {
     position: absolute;
     pointer-events: none;
     display: flex;
   }
+  .map-edge-mark.partial {
+    box-sizing: border-box;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2.5px solid ${(p) => p.theme.color.status.error.fg};
+    background: ${(p) => p.theme.color.bg};
+  }
   /* Hover: the paths through a node stay, the rest dims. */
   .react-flow__node,
   .react-flow__edge,
-  .map-edge-icon {
+  .map-edge-mark {
     transition: opacity 120ms ease-out;
   }
   .react-flow__node.dim,
-  .map-edge-icon.dim {
+  .map-edge-mark.dim {
     opacity: 0.3;
   }
   .react-flow__edge.dim {
@@ -92,7 +100,7 @@ export const MapCanvas = styled(MapBox)`
   @media (prefers-reduced-motion: reduce) {
     .react-flow__node,
     .react-flow__edge,
-    .map-edge-icon {
+    .map-edge-mark {
       transition: none;
     }
   }
