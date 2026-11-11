@@ -271,7 +271,7 @@ export function SidePanel({
           )}
           {/* A collapsed route's hidden delegated routes keep their own problems, under their names. */}
           {node.hiddenProblems?.map((h) => (
-            <section key={h.route} data-testid="map-panel-hidden">
+            <section key={h.id} data-testid="map-panel-hidden">
               <h4 className="route">{h.route}</h4>
               <ul>
                 {h.signals.map((s) => {

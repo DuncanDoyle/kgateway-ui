@@ -170,12 +170,16 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         q.delete(key);
         for (const x of all) if (x !== id) q.append(key, x);
         if (adding) q.append(key, id);
-        if (adding && key === "collapse")
+        if (adding && key === "collapse") {
           for (const k of ["expand", "collapse"]) {
             const keep = q.getAll(k).filter((x) => !x.startsWith(`${id}~`));
             q.delete(k);
             for (const x of keep) q.append(k, x);
           }
+          // A focus on a route, or a rule, the collapse hides moves to the collapsed route.
+          const f = q.get("focus");
+          if (f?.startsWith(`${id}~`) || f?.startsWith(`u:${id}~`)) q.set("focus", id);
+        }
       });
     },
     [full, setView],
@@ -187,8 +191,13 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
       for (const x of all) if (x !== id) q.append("expand", x);
       if (!all.includes(id)) q.append("expand", id);
     });
-  // Once every row of an unfiltered result has arrived, ids of routes no longer on it are dropped.
-  const unfiltered = !["state", "kind", "namespace", "q"].some((k) => params.has(k));
+  // Once every row of an unfiltered result has arrived, ids of routes no longer on it are dropped. Unfiltered is
+  // judged on the query the rows answer, which lags the URL while a new filter's rows load.
+  const unfiltered =
+    !!paths.query &&
+    [...new URLSearchParams(paths.query.split("?")[1] ?? "").keys()].every((k) =>
+      ["gateway", "limit", "cursor"].includes(k),
+    );
   const stale = useMemo(() => {
     if (!paths.done || !unfiltered) return [];
     const ids = new Set(open.nodes.map((n) => n.id));

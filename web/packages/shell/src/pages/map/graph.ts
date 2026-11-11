@@ -31,9 +31,12 @@ export interface MapNode {
   delegates?: boolean;
   expanded?: boolean;
   collapsed?: boolean;
-  /** How many delegated routes a collapsed route hides, and their problems by route name. */
+  /**
+   * How many delegated routes a collapsed route hides, and their problems per hidden route: its id, and its name
+   * with the hidden routes between it and this node (`mid › leaf`), so two routes of one name stay apart.
+   */
   hiddenRoutes?: number;
-  hiddenProblems?: { route: string; signals: PathSignal[] }[];
+  hiddenProblems?: { id: string; route: string; signals: PathSignal[] }[];
   rows: number[];
   /** The distinct row signals that name this node. */
   problems: PathSignal[];
@@ -143,7 +146,7 @@ export function buildGraph(
   const nodes = new Map<string, MapNode>();
   const edges = new Map<string, MapEdge & { shares: (number | undefined)[]; rules: Set<string> }>();
   const hidden = new Map<string, Set<string>>();
-  const hiddenProblems = new Map<string, Map<string, { route: string; signals: PathSignal[] }>>();
+  const hiddenProblems = new Map<string, Map<string, { id: string; route: string; signals: PathSignal[] }>>();
   const node = (id: string, i: number, init: Omit<MapNode, "id" | "rows" | "state" | "problems">) => {
     let n = nodes.get(id);
     if (!n) {
@@ -230,9 +233,13 @@ export function buildGraph(
         n.state = worse(n.state, s.state);
         const by = hiddenProblems.get(n.id) ?? new Map();
         hiddenProblems.set(n.id, by);
-        const route = refLabel(r.routes[k] as LinkedRef);
-        const list = by.get(chain[k]) ?? { route, signals: [] };
-        by.set(chain[k], list);
+        const id = chain[k] as string;
+        const route = r.routes
+          .slice(shown, k + 1)
+          .map((x) => refLabel(x))
+          .join(" › ");
+        const list = by.get(id) ?? { id, route, signals: [] };
+        by.set(id, list);
         const key = signalKey(s);
         if (!list.signals.some((p: PathSignal) => signalKey(p) === key)) list.signals.push(s);
       } else if (n) {
@@ -248,7 +255,10 @@ export function buildGraph(
     }
   });
 
+  const marks = rows.map((r) => ({ state: r.problem.state, fails: fails(r) }));
   for (const n of nodes.values()) {
+    // No signal names a rule, and its rows are exactly that rule's paths, so its state is their worst.
+    if (n.kind === "rule") n.state = n.rows.reduce<HealthState>((s, i) => worse(s, marks[i]?.state ?? s), "healthy");
     if (n.delegates && collapsed.has(n.id)) n.collapsed = true;
     const h = hidden.get(n.id);
     if (h) n.hiddenRoutes = h.size;
@@ -258,7 +268,7 @@ export function buildGraph(
   const stateFiltered = !!opts.stateFiltered;
   return {
     nodes: [...nodes.values()],
-    rows: rows.map((r) => ({ state: r.problem.state, fails: fails(r) })),
+    rows: marks,
     // Share is per rule: an edge over several rules shows it only when they agree.
     edges: [...edges.values()].map(({ shares, rules, ...e }) => {
       const shown = shares.length > 0 && shares.every((s) => s !== undefined);

@@ -113,7 +113,7 @@ it("a collapsed route hides its delegated routes, counts them, and keeps their p
   expect(ids(g, "route")).toEqual([R("root")]);
   const root = g.nodes.find((n) => n.id === R("root"));
   expect(root).toMatchObject({ collapsed: true, hiddenRoutes: 3, state: "error", problems: [] });
-  expect(root?.hiddenProblems).toEqual([{ route: "shop/side", signals: [sideSignal] }]);
+  expect(root?.hiddenProblems).toEqual([{ id: chain("root", "side"), route: "shop/side", signals: [sideSignal] }]);
   expect(g.edges.map((e) => e.id)).toContain(`${R("root")}>${B("svc-a")}`);
   // Collapsing mid only hides leaf; leaf's row ends at mid.
   const mid = buildGraph(nested(), new Set(), { collapsed: new Set([chain("root", "mid")]) });
@@ -198,4 +198,30 @@ it("under a state filter an edge is never broken, though every loaded row fails;
   expect([...throughNode(filtered, R("r1")).edges.values()].every((e) => !e.broken && e.state === "error")).toBe(true);
   expect(focusSubgraph(filtered, R("r1")).edges.every((e) => !e.broken)).toBe(true);
   expect(focusSubgraph(all, R("r1")).edges.every((e) => e.broken)).toBe(true);
+});
+
+it("a rule node's state is the worst of its rows, though no signal names it", () => {
+  const rows = [
+    row("http", ["api"], "svc-a", { matches: prefix("/a"), problem: ERR, shareState: "failing" }),
+    row("http", ["api"], "svc-b", { matches: prefix("/a") }),
+    row("http", ["api"], "svc-a", { rule: 1, matches: prefix("/b") }),
+  ];
+  const g = buildGraph(rows, new Set([R("api")]));
+  expect(g.nodes.find((n) => n.id === `u:${R("api")}#0`)?.state).toBe("error");
+  expect(g.nodes.find((n) => n.id === `u:${R("api")}#1`)?.state).toBe("healthy");
+});
+
+it("two hidden routes of one name are listed apart, by id and by the routes above them", () => {
+  const sig = (name: string) =>
+    ({ kind: "finding", code: "x", title: "breaks", ref: ref("HTTPRoute", name), state: "error" }) as const;
+  const rows = [
+    row("http", ["root", "a", "x"], "svc-a", { problem: { state: "error", signals: [sig("x")] } }),
+    row("http", ["root", "b", "x"], "svc-b", { problem: { state: "error", signals: [sig("x")] } }),
+  ];
+  const g = buildGraph(rows, new Set(), { collapsed: new Set([R("root")]) });
+  const hidden = g.nodes.find((n) => n.id === R("root"))?.hiddenProblems;
+  expect(hidden?.map((h) => [h.id, h.route])).toEqual([
+    [chain("root", "a", "x"), "shop/a › shop/x"],
+    [chain("root", "b", "x"), "shop/b › shop/x"],
+  ]);
 });

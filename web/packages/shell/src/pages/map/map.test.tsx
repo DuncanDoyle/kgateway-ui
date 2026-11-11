@@ -21,7 +21,7 @@ const edgePaths = (collectedAt = now()): PathsResponse => {
 };
 
 /** Stubs fetch by path; paths answers with paths(url). */
-function serve(paths: (u: URL) => PathsResponse) {
+function serve(paths: (u: URL) => PathsResponse | Promise<PathsResponse>) {
   const byPath: Record<string, (u: URL) => unknown> = {
     "/api/v1/meta": () => metaGolden.body,
     [`${API}/gateways/infra/edge`]: () => ({ ...(gatewayGolden.body as GatewayDetail), collectedAt: now() }),
@@ -34,7 +34,7 @@ function serve(paths: (u: URL) => PathsResponse) {
       const body = byPath[u.pathname];
       return body === undefined
         ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
-        : new Response(JSON.stringify(body(u)), { status: 200 });
+        : new Response(JSON.stringify(await body(u)), { status: 200 });
     }),
   );
 }
@@ -851,4 +851,48 @@ it("a focus on a node not on the map says so and offers Clear focus; stale expan
   await waitFor(() => expect(search().getAll("expand")).toEqual([]));
   await userEvent.setup().click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Clear focus" }));
   await waitFor(() => expect(search().get("focus")).toBeNull());
+});
+
+// region Task 48 fix round 2
+
+const VIA_LS = "r:gateway.networking.k8s.io/HTTPRoute/shop/via-ls";
+
+it("clearing Problems only keeps a healthy route's expand id while the unfiltered rows load", async () => {
+  // The unfiltered result is held back, so the map still shows the Problems-only rows after the chip clears.
+  let release = () => {};
+  const hold = new Promise<void>((r) => {
+    release = r;
+  });
+  serve(async (u) => {
+    const d = edgePaths();
+    const states = u.searchParams.getAll("state").flatMap((x) => x.split(","));
+    if (states.length) return { ...d, rows: d.rows.filter((r) => states.includes(r.problem.state)) };
+    await hold;
+    return d;
+  });
+  mount(`?tab=map&state=error,warning,unknown&expand=${encodeURIComponent(VIA_LS)}`);
+  const map = await screen.findByTestId("gateway-map");
+  expect(nodeNames(map)).not.toContain("shop/via-ls");
+  const chip = screen.getByRole("button", { name: "Problems only" });
+  await userEvent.setup().click(chip);
+  await waitFor(() => expect(chip).toHaveAttribute("aria-pressed", "false"));
+  // The rows still answer the Problems-only query, which lacks via-ls: its id stays.
+  expect(nodeNames(screen.getByTestId("gateway-map"))).not.toContain("shop/via-ls");
+  expect(search().getAll("expand")).toEqual([VIA_LS]);
+  release();
+  await waitFor(() => expect(nodeNames(screen.getByTestId("gateway-map"))).toContain("shop/via-ls"));
+  expect(nodeNames(screen.getByTestId("gateway-map"))).toContain("PathPrefix /");
+  expect(search().getAll("expand")).toEqual([VIA_LS]);
+});
+
+it("collapsing the parent of the focused route moves the focus to the parent", async () => {
+  serve(() => edgePaths());
+  const child = `${API_ROUTE}~gateway.networking.k8s.io/HTTPRoute/shop/child`;
+  mount(`?tab=map&focus=${encodeURIComponent(child)}`);
+  const map = await screen.findByTestId("gateway-map");
+  await waitFor(() => expect(nodeNames(map)).toContain("shop/child"));
+  fireEvent.click(within(flowNode(map, "shop/api")).getByRole("button", { name: "Collapse shop/api" }));
+  await waitFor(() => expect(search().get("focus")).toBe(API_ROUTE));
+  expect(search().getAll("collapse")).toEqual([API_ROUTE]);
+  expect(screen.getByTestId("map-focus")).toHaveTextContent("Showing only the paths through HTTPRoute shop/api.");
 });
