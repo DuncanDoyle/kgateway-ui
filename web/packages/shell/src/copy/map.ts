@@ -6,4 +6,7 @@ export const mapCopy = {
   tab: "Map", // S766
   canvas: "Map of this Gateway's paths", // S767
   loading: "Loading the map", // S768
+  truncated: (shown: number, total: number) =>
+    `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths. Narrow the filters to see the rest.`, // S769
+  action: "Action", // S770
 };

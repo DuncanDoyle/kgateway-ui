@@ -5,7 +5,7 @@ import { SWRConfig } from "swr";
 import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
-import type { GatewayDetail, PathsResponse } from "../../api/types";
+import type { GatewayDetail, LinkedRef, PathsResponse } from "../../api/types";
 import { renderWithTheme, testSWR } from "../../test/render";
 import { defaultThemes } from "../../theme/themes";
 import { GatewayPage } from "../explore/GatewayPage";
@@ -20,9 +20,9 @@ const edgePaths = (collectedAt = now()): PathsResponse => {
   return { ...b, rows: b.rows.filter((r) => r.gateway.name === "edge"), collectedAt };
 };
 
-/** Stubs fetch by path; paths answers with body(). */
-function serve(paths: () => PathsResponse) {
-  const byPath: Record<string, () => unknown> = {
+/** Stubs fetch by path; paths answers with paths(url). */
+function serve(paths: (u: URL) => PathsResponse) {
+  const byPath: Record<string, (u: URL) => unknown> = {
     "/api/v1/meta": () => metaGolden.body,
     [`${API}/gateways/infra/edge`]: () => ({ ...(gatewayGolden.body as GatewayDetail), collectedAt: now() }),
     [`${API}/paths`]: paths,
@@ -30,10 +30,11 @@ function serve(paths: () => PathsResponse) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      const body = byPath[new URL(url, "http://ui").pathname];
+      const u = new URL(url, "http://ui");
+      const body = byPath[u.pathname];
       return body === undefined
         ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
-        : new Response(JSON.stringify(body()), { status: 200 });
+        : new Response(JSON.stringify(body(u)), { status: 200 });
     }),
   );
 }
@@ -142,16 +143,71 @@ it.each(defaultThemes.map((t) => [t.id, t] as const))(
   },
 );
 
-it("the map's paths tell loading, more pages to come and done apart", async () => {
-  let next: string | undefined = "n2";
-  serve(() => ({ ...edgePaths(), next }));
+/** Page n (from 0) of a result of total paths, 200 rows each, collected at collectedAt(n). */
+function page(n: number, total: number, collectedAt = (_: number) => now()): PathsResponse {
+  const b = edgePaths();
+  const base = b.rows[0] as PathsResponse["rows"][number];
+  const count = Math.max(0, Math.min(200, total - n * 200));
+  const rows = Array.from({ length: count }, (_, k) => ({
+    ...base,
+    routes: [{ ...(base.routes[0] as LinkedRef), name: `r${n * 200 + k}` }],
+  }));
+  const next = (n + 1) * 200 < total ? `p${n + 1}` : undefined;
+  return { ...b, rows, next, summary: { ...b.summary, paths: total }, collectedAt: collectedAt(n) };
+}
+const pageOf = (u: URL) => Number(u.searchParams.get("cursor")?.slice(1) ?? 0);
+
+it("the map loads its pages in sequence by cursor and dates them by the oldest page", async () => {
+  const t0 = Date.now();
+  // Page 1 was collected earliest.
+  const at = (n: number) => new Date(t0 - (n === 1 ? 3000 : 1000)).toISOString();
+  serve((u) => page(pageOf(u), 450, at));
   const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={testSWR()}>{children}</SWRConfig>;
   const params = new URLSearchParams();
-  const first = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
-  expect(first.result.current).toMatchObject({ loading: true, partial: false, done: false });
-  await waitFor(() => expect(first.result.current).toMatchObject({ loading: false, partial: true, done: false }));
-  first.unmount();
-  next = undefined;
-  const last = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
-  await waitFor(() => expect(last.result.current).toMatchObject({ loading: false, partial: false, done: true }));
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
+  expect(result.current).toMatchObject({ loading: true, partial: false, done: false });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current).toMatchObject({ loading: false, partial: false, truncated: false, collectedAt: at(1) });
+  expect(result.current.rows.map((r) => r.routes[0]?.name)).toEqual(Array.from({ length: 450 }, (_, k) => `r${k}`));
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", "p2"]);
+  expect(pathCalls().every((u) => u.searchParams.get("limit") === "200")).toBe(true);
+});
+
+it("a first load shows its rows as pages arrive", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const n = pageOf(new URL(url, "http://ui"));
+      if (n > 0) await gate;
+      return new Response(JSON.stringify(page(n, 300)), { status: 200 });
+    }),
+  );
+  const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={testSWR()}>{children}</SWRConfig>;
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
+  await waitFor(() => expect(result.current).toMatchObject({ loading: false, partial: true, done: false }));
+  expect(result.current.rows).toHaveLength(200);
+  release();
+  await waitFor(() => expect(result.current).toMatchObject({ partial: false, done: true }));
+  expect(result.current.rows).toHaveLength(300);
+});
+
+it("2,500 matching paths load 2,000 in ten requests and say so", async () => {
+  serve((u) => page(pageOf(u), 2500));
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  expect(await screen.findByTestId("map-truncated")).toHaveTextContent(
+    "Showing 2,000 of 2,500 paths. Narrow the filters to see the rest.",
+  );
+  await waitFor(() => expect(pathCalls()).toHaveLength(10));
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([
+    null,
+    ...Array.from({ length: 9 }, (_, k) => `p${k + 1}`),
+  ]);
+  // One route node per loaded row, plus the Gateway, listener and backend.
+  await waitFor(() => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(2003));
 });

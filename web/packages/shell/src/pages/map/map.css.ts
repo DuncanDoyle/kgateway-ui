@@ -17,6 +17,13 @@ export const MapBox = styled.div<{ stylesOverride?: SerializedStyles }>`
   ${(p) => p.stylesOverride}
 `;
 
+/** A line above the map, e.g. how many paths it leaves out. */
+export const MapNote = styled.p`
+  margin: 0 0 ${(p) => p.theme.space(2)};
+  color: ${(p) => p.theme.color.textMuted};
+  font-size: ${(p) => p.theme.font.size.sm};
+`;
+
 /** React Flow's base styles take their colours from theme tokens through its --xy-* variables (design §6.2). */
 export const MapCanvas = styled(MapBox)`
   .react-flow {

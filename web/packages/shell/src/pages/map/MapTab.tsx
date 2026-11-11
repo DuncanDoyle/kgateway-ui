@@ -8,8 +8,8 @@ import { summaryCopy, trafficCopy } from "../../copy/traffic";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import { StaleGate } from "../traffic/StaleGate";
-import { MapBox } from "./map.css";
-import { useMapPaths } from "./mapData";
+import { MapBox, MapNote } from "./map.css";
+import { MAP_MAX_ROWS, useMapPaths } from "./mapData";
 
 // region Styles
 const fill = css`
@@ -60,6 +60,11 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   if (!paths.summary) return <Fallback />;
   return (
     <StaleGate collectedAt={paths.collectedAt} failed={!!paths.error}>
+      {paths.truncated && (
+        <MapNote role="status" data-testid="map-truncated">
+          {mapCopy.truncated(MAP_MAX_ROWS, paths.summary.paths)}
+        </MapNote>
+      )}
       <Suspense fallback={<Fallback />}>
         <GatewayMap gateway={gateway} rows={paths.rows} stylesOverride={stylesOverride} />
       </Suspense>
