@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -33,12 +34,19 @@ func (k *TopoKey) same(o *TopoKey) bool {
 // Memo holds, per install, one topology generation and one projection of it
 // (design §4.3). It is viewer-independent; callers authorise every row per
 // request, memo hits included.
+//
+// Invariant: the memo keeps no pointer to a Model, Snapshot, Index or object,
+// so an old publication is collectable as soon as the engine drops it. A
+// Topology shares only decoded rules and view C matches; a Projection holds
+// only data it made. A projection is keyed by its model's Seq, not the model.
 type Memo struct {
 	clock clock.PassiveClock
 	cap   int
 
 	mu       sync.Mutex
 	installs map[string]*memoEntry
+	// pruned is the Seq of the last publication whose installs pruned the memo.
+	pruned uint64
 }
 
 // NewMemo returns an empty memo whose projections expire by c; nil is the real clock.
@@ -52,12 +60,32 @@ func NewMemoCap(c clock.PassiveClock, capBytes int) *Memo {
 	return &Memo{clock: c, cap: capBytes, installs: map[string]*memoEntry{}}
 }
 
-// memoEntry is one install's generation. proj projects topo for model.
+// memoEntry is one install's generation. proj projects topo for the model
+// whose Seq is seq; proj is nil until one is stored.
 type memoEntry struct {
-	key   TopoKey
-	topo  *Topology
-	model *engine.Model
-	proj  *Projection
+	key  TopoKey
+	topo *Topology
+	seq  uint64
+	proj *Projection
+}
+
+// Prune drops the entries of installs that publication m does not have. It
+// runs once per newer Seq; older or repeated publications return at once.
+func (m *Memo) Prune(md *engine.Model) {
+	if md == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if md.Seq <= m.pruned {
+		return
+	}
+	m.pruned = md.Seq
+	for id := range m.installs {
+		if !slices.ContainsFunc(md.Installs, func(i engine.InstallModel) bool { return i.Resolved.ID() == id }) {
+			delete(m.installs, id)
+		}
+	}
 }
 
 // Topology returns key's topology, building it on a miss. false means it is
@@ -98,7 +126,8 @@ func (m *Memo) Projection(pub *engine.Published, install string, t *Topology, pr
 	}
 	now := m.clock.Now()
 	m.mu.Lock()
-	if e := m.installs[install]; e != nil && e.topo == t && e.model == pub.Model && e.proj != nil && !expired(e.proj, now) {
+	seq := pub.Model.Seq
+	if e := m.installs[install]; e != nil && e.topo == t && e.proj != nil && e.seq == seq && !expired(e.proj, now) {
 		p := e.proj
 		m.mu.Unlock()
 		return p
@@ -107,8 +136,8 @@ func (m *Memo) Projection(pub *engine.Published, install string, t *Topology, pr
 	p := project()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if e := m.installs[install]; e != nil && e.topo == t && (e.model == nil || e.model.Seq <= pub.Model.Seq) {
-		e.model, e.proj = pub.Model, p
+	if e := m.installs[install]; e != nil && e.topo == t && (e.proj == nil || e.seq <= seq) {
+		e.seq, e.proj = seq, p
 	}
 	return p
 }

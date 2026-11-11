@@ -286,3 +286,31 @@ func TestMemoConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// Prune drops the entries of installs a newer publication lacks, and
+// ignores an older one.
+func TestMemoPrune(t *testing.T) {
+	m := paths.NewMemo(nil)
+	n := 0
+	build := counted(&n, func() *paths.Topology { return &paths.Topology{} })
+	ka, kb := paths.TopoKey{Install: "a", Seq: 1}, paths.TopoKey{Install: "b", Seq: 1}
+	m.Topology(ka, build)
+	m.Topology(kb, build)
+	only := func(seq uint64, ids ...string) *engine.Model {
+		md := &engine.Model{Seq: seq}
+		for _, id := range ids {
+			md.Installs = append(md.Installs, engine.InstallModel{Resolved: install.Resolved{Install: install.Install{CustomID: id}}})
+		}
+		return md
+	}
+	m.Prune(only(3, "a"))
+	m.Prune(only(2)) // older: ignored
+	m.Topology(ka, build)
+	if n != 2 {
+		t.Fatalf("a rebuilt after pruning b: %d builds", n)
+	}
+	m.Topology(kb, build)
+	if n != 3 {
+		t.Fatalf("b kept after a publication without it: %d builds", n)
+	}
+}

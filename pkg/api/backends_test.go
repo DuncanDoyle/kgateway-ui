@@ -4,9 +4,11 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	goruntime "runtime"
 	"slices"
 	"sync/atomic"
 	"testing"
+	"weak"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -351,5 +353,24 @@ func TestBackendDetailPortChain(t *testing.T) {
 	}
 	if d.Service == nil || len(d.Service.Ports) != 1 || d.Explanations == nil || len(d.Explanations) != 0 {
 		t.Fatalf("facts %+v, explanations %+v", d.Service, d.Explanations)
+	}
+}
+
+// The handler's memos keep no old publication alive: once the engine
+// publishes a new model, the old one is collected even if no request comes.
+func TestMemosReleaseOldModel(t *testing.T) {
+	h := newHarness(t, backendsSetup(nil, namedReader()), backendsWorld()...)
+	get[PathsResponse](t, h.srv, pathsURL, 200)
+	get[BackendsResponse](t, h.srv, backendsURL, 200)
+	get[BackendDetail](t, h.srv, detailURL("-", "Service", "named-svc"), 200)
+	old := weak.Make(h.e.Current().Model)
+	h.clk.set(testutil.Now)
+	if h.e.Compute() == old.Value() {
+		t.Fatal("no new publication")
+	}
+	goruntime.GC()
+	goruntime.GC()
+	if old.Value() != nil {
+		t.Fatal("the previous model is still reachable after a new publication")
 	}
 }

@@ -70,6 +70,7 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 // for p; kept is false when the topology is over the memo cap.
 func (h *handler) pathModel(p *engine.Published, i *engine.InstallModel) (t *paths.Topology, proj *paths.Projection, kept bool) {
 	m, id := p.Model, i.Resolved.ID()
+	h.pathMemo.Prune(m)
 	key := paths.TopoKey{Install: id, Source: m.Snapshot.Source, Seq: m.Seq}
 	if i.Computed != nil {
 		key.Views = i.Computed.Generation
