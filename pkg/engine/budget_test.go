@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -499,7 +500,9 @@ const heapChildEnv = "SNELLIUS_HEAP_CHILD"
 // points, and the HeapAlloc freed by dropping each part in order.
 type heapRun struct {
 	Start, Snapshot, Retained uint64
-	Parts                     []heapPart
+	// SnapshotAlloc and RetainedAlloc are HeapAlloc at the snapshot and retained points.
+	SnapshotAlloc, RetainedAlloc uint64
+	Parts                        []heapPart
 	// Watches is the HeapAlloc freed by stopping a fresh measurement world's proxy Pod, Event and CRD watches;
 	// Watches34 by then dropping its Service, EndpointSlice and list-only kind informers.
 	Watches, Watches34 int64
@@ -607,6 +610,9 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	if tier.IsWorst {
 		// The measurement world's cache and fake clients go before the snapshot is measured,
 		// once every goroutine they started has returned.
+		// No GC runs while the world builds: when the informers' collections run decides which
+		// spans the snapshot shares with garbage, so HeapInuse would vary by up to 9 MB per child.
+		gc := debug.SetGCPercent(-1)
 		g := runtime.NumGoroutine()
 		w = measure.New(t, tier, fc)
 		snap = w.Live.Cache.Snapshot()
@@ -617,12 +623,14 @@ func heapChild(t *testing.T, tier scale.Tier) {
 				t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
 			}
 		}
+		debug.SetGCPercent(gc)
 	} else {
 		snap = scale.Snapshot(tier, 1)
 	}
 	st := stats()
 	r.Snapshot = st.HeapInuse
 	snapAlloc := st.HeapAlloc
+	r.SnapshotAlloc = snapAlloc
 	if w != nil {
 		e = measuredEngine(t, w, fc, snap)
 	} else {
@@ -631,7 +639,7 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	}
 	m = e.Compute()
 	before := stats()
-	r.Retained = before.HeapInuse
+	r.Retained, r.RetainedAlloc = before.HeapInuse, before.HeapAlloc
 	if len(m.Installs) != 1 {
 		t.Fatalf("installs %d", len(m.Installs))
 	}

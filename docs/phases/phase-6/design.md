@@ -349,8 +349,8 @@ The Authorizer is allow-all today (D-013). A path exposes more than its route an
 - **Measured after warming every API cache:** the bench gains an API-level pass. It requests paths, backends and backend detail for every install, many distinct Services, and overlapping generations, then measures retained heap. The engine-only bench cannot see these memos.
 - **Fixtures:** the scale generator already makes GRPCRoute, TCPRoute and TLSRoute at 5 % each, mostly with one rule and one ref (`internal/testutil/scale/scale.go:257-262, 632-654`). The Large and worst fixtures gain multi-rule, multi-ref and delegated routes so rules × refs expansion is exercised.
 - **Per request:** at Large, the cold and warm paths endpoint, and concurrent cold backend details, are measured for time and bytes allocated. These are new request gates, separate from D-039's recompute gates. Starting targets, tuned in 6.2: paths under 200 ms and 32 MiB allocated cold, under 20 ms and 2 MiB warm; backend detail under 4 MiB allocated, the scoped read included.
-  - Tuned in 6.2 (`bench-6.2.txt`), paths cold: under 100 ms and 32 MiB allocated (measured 31 ms, 28.4 MiB).
-  - Tuned in 6.2, paths warm: under 5 ms and 2 MiB allocated (measured 1.2 ms, 1.7 MiB, restricted).
+  - Tuned in 6.2 (`bench-6.2.txt`), paths cold: under 100 ms and 32 MiB allocated (measured 31 ms at large-paths, 28.4 MiB at large-contradicting-worst, restricted).
+  - Tuned in 6.2, paths warm: under 5 ms and 2 MiB allocated (measured 1.2 ms, 1.7 MiB at large-contradicting-worst, restricted).
 - **Overshoot:** a sub-phase that overshoots shrinks first. For example, it drops the topology memo or derives GRPC, TCP and TLS rules on request. It asks the user before proposing a budget raise.
 - The SPA gains `@xyflow/react` (about 50 kB gzipped), loaded lazily with the map. The other pages add no dependency.
 

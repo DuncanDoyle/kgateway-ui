@@ -1105,15 +1105,37 @@ func TestBudgetMatcherMaterialization(t *testing.T) {
 // the measurement world, whose Services make the endpoints projection work.
 var pathsTiers = []scale.Tier{scale.Large.Paths(), scale.Large.Contradicting().Worst()}
 
-// pathsEngine is tier's engine and model; the measurement world matures as measuredHandler's.
-func pathsEngine(t *testing.T, tier scale.Tier) (*engine.Engine, *engine.Model) {
-	if tier.IsWorst {
-		fc := testutil.FakeClock()
-		w := measure.New(t, tier, fc)
-		return measuredEngine(t, w, fc, w.Live.Cache.Snapshot())
+// pathsEngine is tier's engine and model, and the measurement world it keeps
+// using (nil outside it); that world matures as measuredHandler's.
+func pathsEngine(t *testing.T, tier scale.Tier) (*engine.Engine, *engine.Model, *measure.World) {
+	if !tier.IsWorst {
+		e, m := snapshotEngine(scale.Snapshot(tier, 1), tier)
+		return e, m, nil
 	}
-	snap := scale.Snapshot(tier, 1)
-	return snapshotEngine(snap, tier)
+	fc := testutil.FakeClock()
+	w, snap := stoppedWorld(t, tier, fc)
+	e, m := measuredEngine(t, w, fc, snap)
+	return e, m, w
+}
+
+// stoppedWorld is tier's measurement world and its cache's snapshot, once the
+// cache and every goroutine it started have stopped. No GC runs while it builds:
+// when the informers' collections run decides which spans the snapshot shares
+// with garbage, so HeapInuse would vary by up to 9 MB per process.
+func stoppedWorld(t *testing.T, tier scale.Tier, fc *clocktesting.FakeClock) (*measure.World, *cache.Snapshot) {
+	gc := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(gc)
+	g := runtime.NumGoroutine()
+	w := measure.New(t, tier, fc)
+	snap := w.Live.Cache.Snapshot()
+	w.Live.Stop()
+	w.Live = nil
+	for deadline := time.Now().Add(time.Minute); runtime.NumGoroutine() > g; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
+		}
+	}
+	return w, snap
 }
 
 // pathsHandler is a handler over e under authz with an empty path memo whose
@@ -1168,7 +1190,8 @@ func TestBudgetPathsRequests(t *testing.T) {
 	)
 	for _, tier := range pathsTiers {
 		t.Run(tier.Name, func(t *testing.T) {
-			e, m := pathsEngine(t, tier)
+			e, m, w := pathsEngine(t, tier)
+			defer runtime.KeepAlive(w)
 			url := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/paths"
 			for _, a := range []struct {
 				name  string
@@ -1235,9 +1258,8 @@ type apiHeapRun struct {
 }
 
 // TestBudgetHeapAPIWarm: as TestBudgetHeap, one fresh process per run and five
-// runs, the median retained heap of the engine figure plus the median of what
-// warming paths for every install adds stays ≤ 48 MiB over the 2.1 baseline (D-057).
-// Extreme is reported: D-057 is a Large budget.
+// runs, the median heap retained once paths are warm for every install stays
+// ≤ 48 MiB over the 2.1 baseline (D-057). Extreme is reported: D-057 is a Large budget.
 func TestBudgetHeapAPIWarm(t *testing.T) {
 	cases := append(slices.Clone(pathsTiers), scale.Extreme)
 	if name := os.Getenv(apiHeapChildEnv); name != "" {
@@ -1275,22 +1297,23 @@ func apiHeapBudget(t *testing.T, tier scale.Tier, gated bool) {
 		runs = append(runs, r)
 	}
 	t.Logf("run  engine (B)  warm (B)  API memos (B)  HeapAlloc added (B)  freed by dropping them (B)")
-	eng, api, freed := make([]int64, len(runs)), make([]int64, len(runs)), make([]int64, len(runs))
+	eng, api, freed, warm := make([]int64, len(runs)), make([]int64, len(runs)), make([]int64, len(runs)), make([]int64, len(runs))
 	for i, r := range runs {
 		eng[i], api[i], freed[i] = int64(r.Engine)-heapBaseline, int64(r.Warm)-int64(r.Engine), r.Freed //nolint:gosec // heap sizes fit
+		warm[i] = int64(r.Warm) - heapBaseline                                                          //nolint:gosec // heap sizes fit
 		t.Logf("%d    %d    %d    %d    %d    %d", i+1, r.Engine, r.Warm, api[i], r.Alloc, r.Freed)
 	}
 	med := func(v []int64) int64 { v = slices.Clone(v); slices.Sort(v); return v[len(v)/2] }
-	em, am, fm := med(eng), med(api), med(freed)
-	total := em + am
+	// The gate is one child's whole figure; the engine and API medians are its breakdown.
+	em, am, fm, total := med(eng), med(api), med(freed), med(warm)
 	note := "budget ≤ 48 MiB"
 	if !gated {
 		note = "reported: D-057 is a Large budget"
 	}
-	t.Logf("%s: %d paths (unmemoised %v); engine figure median %+.1f MiB over the 2.1 baseline %d B; API memos median %+.2f MiB (freed by dropping them %.2f MiB); engine + API %+.1f MiB (%s)",
-		tier.Name, runs[0].Paths, runs[0].Unmemoised, float64(em)/mib, heapBaseline, float64(am)/mib, float64(fm)/mib, float64(total)/mib, note)
+	t.Logf("%s: %d paths (unmemoised %v); warm retained median %+.1f MiB over the 2.1 baseline %d B (%s); breakdown: engine figure median %+.1f MiB, API memos median %+.2f MiB (freed by dropping them %.2f MiB)",
+		tier.Name, runs[0].Paths, runs[0].Unmemoised, float64(total)/mib, heapBaseline, note, float64(em)/mib, float64(am)/mib, float64(fm)/mib)
 	if gated && total > 48*mib {
-		t.Errorf("%s: engine + API memos %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
+		t.Errorf("%s: warm retained heap %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
 	}
 }
 
@@ -1303,27 +1326,7 @@ func apiHeapChild(t *testing.T, tier scale.Tier) {
 		runtime.ReadMemStats(&m)
 		return m
 	}
-	var e *engine.Engine
-	var m *engine.Model
-	var w *measure.World
-	if tier.IsWorst {
-		// As TestBudgetHeap: the measurement world's cache goes before measuring,
-		// once every goroutine it started has returned.
-		fc := testutil.FakeClock()
-		g := runtime.NumGoroutine()
-		w = measure.New(t, tier, fc)
-		snap := w.Live.Cache.Snapshot()
-		w.Live.Stop()
-		w.Live = nil
-		for deadline := time.Now().Add(time.Minute); runtime.NumGoroutine() > g; time.Sleep(10 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
-			}
-		}
-		e, m = measuredEngine(t, w, fc, snap)
-	} else {
-		e, m = snapshotEngine(scale.Snapshot(tier, 1), tier)
-	}
+	e, m, w := pathsEngine(t, tier)
 	var r apiHeapRun
 	st := stats()
 	r.Engine = st.HeapInuse
@@ -1335,8 +1338,8 @@ func apiHeapChild(t *testing.T, tier scale.Tier) {
 	}
 	warm := stats()
 	r.Warm, r.Alloc = warm.HeapInuse, int64(warm.HeapAlloc)-int64(st.HeapAlloc) //nolint:gosec // heap sizes fit
-	runtime.KeepAlive(h) // the handler and its memo go here
-	r.Freed = int64(warm.HeapAlloc) - int64(stats().HeapAlloc) //nolint:gosec // heap sizes fit
+	runtime.KeepAlive(h)                                                        // the handler and its memo go here
+	r.Freed = int64(warm.HeapAlloc) - int64(stats().HeapAlloc)                  //nolint:gosec // heap sizes fit
 	runtime.KeepAlive(e)
 	runtime.KeepAlive(m)
 	runtime.KeepAlive(w)
