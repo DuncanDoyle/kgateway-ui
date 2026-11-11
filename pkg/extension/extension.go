@@ -67,6 +67,7 @@ type Registry struct {
 	reported         func(install.Install, collect.Snapshot) (string, bool)
 	experimentalOnly func(kinds.Served, install.Install) bool
 	conditions       health.ConditionTypes
+	backendConsumers func(install.Install, *install.Owned) []objects.Consumer
 	// checkPack names the pack each check belongs to, by check name; a core check has none.
 	checkPack map[string]string
 	// impls are the hooks of the other packs, and of the core once a default pack is set, by name.

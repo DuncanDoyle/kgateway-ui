@@ -50,6 +50,8 @@ type Impl struct {
 	Commands         diagnose.Commands
 	// Conditions are the implementation's condition types beyond Gateway API's.
 	Conditions health.ConditionTypes
+	// BackendConsumers lists the backends the install's non-route objects use.
+	BackendConsumers func(install.Install, *install.Owned) []objects.Consumer
 }
 
 // Pack is one implementation's contributions to the core. Its Name is stamped
@@ -211,14 +213,14 @@ func (r *Registry) FeaturesFor(i install.Install) []string { return slices.Clone
 func (r *Registry) currentImpl() Impl {
 	return Impl{Scope: r.Scope, Verifier: r.Verifier, Settings: r.settings, RulesFor: r.RulesFor, Version: r.version, Reported: r.reported,
 		ExperimentalOnly: r.experimentalOnly, ProxyMode: r.ProxyMode, Process: r.Process, ProxyStats: r.ProxyStats, Commands: r.Commands,
-		Conditions: r.conditions}
+		Conditions: r.conditions, BackendConsumers: r.backendConsumers}
 }
 
 // setImpl makes im the default pack's hooks.
 func (r *Registry) setImpl(im Impl) {
 	r.Scope, r.Verifier, r.settings, r.RulesFor, r.version, r.reported = im.Scope, im.Verifier, im.Settings, im.RulesFor, im.Version, im.Reported
 	r.experimentalOnly, r.ProxyMode, r.Process, r.ProxyStats, r.Commands = im.ExperimentalOnly, im.ProxyMode, im.Process, im.ProxyStats, im.Commands
-	r.conditions = im.Conditions
+	r.conditions, r.backendConsumers = im.Conditions, im.BackendConsumers
 }
 
 // kgatewayPack is pack #1, built from pkg/kgateway.
@@ -226,7 +228,7 @@ func kgatewayPack() Pack {
 	return Pack{Name: kgateway.Name, Kinds: kgateway.Kinds(), Detectors: []install.Detector{kgateway.Detector()}, Checks: kgateway.Checks(),
 		Impl: Impl{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version, Reported: kgateway.Reported,
 			ExperimentalOnly: kgateway.ExperimentalOnly, ProxyMode: kgateway.ProxyMode(), Process: process.Kube{}, Commands: diagnose.Kubectl{},
-			Conditions: kgateway.Conditions()},
+			Conditions: kgateway.Conditions(), BackendConsumers: kgateway.BackendConsumers},
 		Collectors: []func(CollectorEnv) Collector{metricsCollector, proxyStatsCollector, controllerLogsCollector}, Features: kgateway.Features()}
 }
 
