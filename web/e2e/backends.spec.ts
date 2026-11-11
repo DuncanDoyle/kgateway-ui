@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { BackendDetail, BackendsResponse } from "../packages/shell/src/api/types";
-import { backendsCopy, exposureCopy, portChainCopy, statusCopy } from "../packages/shell/src/copy/backends";
+import { backendsCopy, exposureCopy, portChainCopy, statusCopy, usedByCopy } from "../packages/shell/src/copy/backends";
 import { stateLabel } from "../packages/shell/src/health/state";
 
 // The Backends list and backend detail (Phase 6 sub-phase 6.3) over test/e2e/fixtures/traffic.yaml: the
@@ -116,7 +116,14 @@ test("a route's backend links to backend detail, and a GatewayExtension shows as
   await expect(page).toHaveURL(new RegExp(`${install}/backends/-/Service/shop/httpbin`));
   await expect(page.getByTestId("status-line")).toBeVisible();
 
-  await page.goto(`${install}/backends/-/Service/traffic/authz`);
+  // No route writes traffic/authz, so the list counts the extension as its one other user.
+  await page.goto(`${install}/backends?namespace=traffic`);
+  const authz = (await dataRows(page, backendsCopy.title)).filter({
+    has: page.locator('td[data-col="name"]', { hasText: /^traffic\/authz$/ }),
+  });
+  await expect(authz.locator('td[data-col="used"]')).toHaveText(usedByCopy.uses(0, 0, 1));
+  await authz.locator('td[data-col="kind"]').click();
+  await expect(page).toHaveURL(new RegExp(`${install}/backends/-/Service/traffic/authz`));
   await expect(page.getByTestId("consumer")).toContainText("Used by GatewayExtension traffic/authz (ext-auth)");
   await expect(page.getByTestId("status-line")).toContainText("1 other object uses it");
   // A complete read lists its endpoint with the Pod.

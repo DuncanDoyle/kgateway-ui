@@ -880,6 +880,28 @@ func TestBackendReadiness(t *testing.T) {
 	t.Logf("023 on %s %s after the scale-down", idleID, time.Since(scaled).Round(time.Second))
 }
 
+// TestBackendConsumer checks that the ext-auth GatewayExtension traffic/authz (fixtures/traffic.yaml) is
+// listed as a consumer of its Service, in the Backends list and the backend detail (design §8.3).
+func TestBackendConsumer(t *testing.T) {
+	authz := objects.Ref{Kind: "Service", Namespace: "traffic", Name: "authz"}
+	ext := objects.Ref{Group: kinds.KgatewayGroup, Kind: "GatewayExtension", Namespace: "traffic", Name: "authz"}
+	var list api.BackendsResponse
+	get(t, install+"/backends?namespace=traffic", &list)
+	i := slices.IndexFunc(list.Rows, func(r api.BackendRowDTO) bool { return r.Ref.Ref == authz })
+	if i < 0 || list.Rows[i].Consumers != 1 || list.Rows[i].Routes != 0 {
+		t.Fatalf("backends?namespace=traffic: no row for %s with 1 consumer and no route in %+v", authz, list.Rows)
+	}
+	var d api.BackendDetail
+	get(t, install+"/backends/-/Service/traffic/authz", &d)
+	if len(d.Consumers) != 1 {
+		t.Fatalf("detail of %s: consumers %+v, want one", authz, d.Consumers)
+	}
+	got := d.Consumers[0]
+	if got.Consumer.Ref != ext || got.Role != "ext-auth" || got.Field != "spec.extAuth.grpcService.backendRef" || got.Port != 9001 {
+		t.Errorf("detail of %s: consumer %+v, want %s ext-auth at spec.extAuth.grpcService.backendRef port 9001", authz, got, ext)
+	}
+}
+
 // region kgateway version (Task 86)
 
 // kgwTag is install A's controller image tag, such as "v2.5.0".
