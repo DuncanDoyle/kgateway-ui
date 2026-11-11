@@ -37,7 +37,7 @@ func Shares(rule *objects.Rule) []Share {
 		sum += int64(b.Weight)
 	}
 	for i, b := range refs {
-		if sum == 0 {
+		if b.Weight == 0 {
 			out[i] = Share{State: ShareNoTraffic}
 			continue
 		}

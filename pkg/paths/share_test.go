@@ -38,9 +38,15 @@ func TestSharesAllZeroIsNoTraffic(t *testing.T) {
 }
 
 func TestSharesZeroWeightAmongOthers(t *testing.T) {
-	got := paths.Shares(&objects.Rule{BackendRefs: []objects.BackendRef{wref(0, false), wref(2, false)}})
-	if got[0].Percent != 0 || got[1].Percent != 100 {
-		t.Fatalf("got %v", got)
+	got := paths.Shares(&objects.Rule{BackendRefs: []objects.BackendRef{wref(0, false), wref(1, false), wref(1, false)}})
+	want := []paths.Share{{0, paths.ShareNoTraffic}, {50, paths.ShareShown}, {50, paths.ShareShown}}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ref %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
+	if s := got[0].WithAttribution(true, true); s != want[0] {
+		t.Fatalf("zero weight must stay no-traffic: %v", s)
 	}
 }
 
@@ -83,6 +89,14 @@ func TestMirrorShare(t *testing.T) {
 	f := &objects.MirrorFilter{Fraction: &objects.Fraction{Numerator: 1, Denominator: 4}}
 	if got := paths.MirrorShare(f); got != (paths.Share{Percent: 25, State: paths.ShareMirror}) {
 		t.Fatalf("fraction: %v", got)
+	}
+	zero := int32(0)
+	if got := paths.MirrorShare(&objects.MirrorFilter{Percent: &zero}); got != (paths.Share{Percent: 0, State: paths.ShareMirror}) {
+		t.Fatalf("percent 0: %v", got)
+	}
+	z := &objects.MirrorFilter{Fraction: &objects.Fraction{Numerator: 0, Denominator: 100}}
+	if got := paths.MirrorShare(z); got != (paths.Share{Percent: 0, State: paths.ShareMirror}) {
+		t.Fatalf("fraction 0: %v", got)
 	}
 	if got := paths.MirrorShare(&objects.MirrorFilter{}); got.Percent != 100 {
 		t.Fatalf("unset: %v", got)
