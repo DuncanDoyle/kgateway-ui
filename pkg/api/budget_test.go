@@ -1242,6 +1242,115 @@ func TestBudgetPathsRequests(t *testing.T) {
 	}
 }
 
+// TestBudgetRouteDetail holds route detail, with its trace, to the paths
+// request gates (design §14, 6.4): the root with the widest delegation tree,
+// cold on a fresh path memo and warm on a kept one.
+func TestBudgetRouteDetail(t *testing.T) {
+	const (
+		mib      = 1 << 20
+		coldRuns = 11
+		warmRuns = 201
+	)
+	for _, tier := range pathsTiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e, m, w := routeEngine(t, tier)
+			defer runtime.KeepAlive(w)
+			ix := m.Installs[0].Index
+			var root objects.Ref
+			for _, r := range ix.Routes {
+				ref := r.Ref
+				if r.Owned && len(r.Computed) > 0 && restricting.Authorize(nil, ref) && ref.Kind == "HTTPRoute" &&
+					(root == (objects.Ref{}) || len(ix.Delegation[ref]) > len(ix.Delegation[root])) {
+					root = ref
+				}
+			}
+			url := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/routes/" + root.Group + "/" + root.Kind + "/" + root.Namespace + "/" + root.Name
+			for _, a := range []struct {
+				name  string
+				authz Authorizer
+			}{{"allow-all", nil}, {"restricted", restricting}} {
+				var coldT, warmT []time.Duration
+				var coldB, warmB []uint64
+				var out RouteDetail
+				for range coldRuns {
+					d, n := routeGet(t, pathsHandler(e, m, a.authz), url, &out)
+					coldT, coldB = append(coldT, d), append(coldB, n)
+				}
+				h := pathsHandler(e, m, a.authz)
+				routeGet(t, h, url, &out)
+				for range warmRuns {
+					d, n := routeGet(t, h, url, &out)
+					warmT, warmB = append(warmT, d), append(warmB, n)
+				}
+				slices.Sort(coldT)
+				slices.Sort(warmT)
+				slices.Sort(coldB)
+				slices.Sort(warmB)
+				ct, cb := coldT[len(coldT)/2], coldB[len(coldB)/2]
+				wt, wb := warmT[len(warmT)/2], warmB[len(warmB)/2]
+				var refs, traced int
+				for _, r := range out.Rules {
+					for _, b := range r.BackendRefs {
+						refs++
+						if b.Problem != nil {
+							traced++
+						}
+					}
+				}
+				t.Logf("%s %s: %s with %d view B rows, %d serves, %d of %d refs traced; cold median %v max %v, %.2f MiB allocated (budget < %v, < %d MiB); warm median %v p95 %v, %.3f MiB allocated (budget < %v, < %d MiB)",
+					tier.Name, a.name, root.Namespace+"/"+root.Name, len(ix.Delegation[root]), len(out.Serves), traced, refs, rd(ct), rd(coldT[len(coldT)-1]), float64(cb)/mib,
+					pathsColdTime, pathsColdAlloc/mib, rd(wt), rd(percentile(warmT, 95)), float64(wb)/mib, pathsWarmTime, pathsWarmAlloc/mib)
+				if ct >= pathsColdTime {
+					benchgate.Timing(t, "%s %s: cold median %v, budget < %v", tier.Name, a.name, ct, pathsColdTime)
+				}
+				if wt >= pathsWarmTime {
+					benchgate.Timing(t, "%s %s: warm median %v, budget < %v", tier.Name, a.name, wt, pathsWarmTime)
+				}
+				if cb >= pathsColdAlloc {
+					t.Errorf("%s %s: cold allocates %d B, budget < %d B", tier.Name, a.name, cb, pathsColdAlloc)
+				}
+				if wb >= pathsWarmAlloc {
+					t.Errorf("%s %s: warm allocates %d B, budget < %d B", tier.Name, a.name, wb, pathsWarmAlloc)
+				}
+			}
+		})
+	}
+}
+
+// routeEngine is pathsEngine with a snapshot sorted as the cache sorts it,
+// so a detail page finds its object.
+func routeEngine(t *testing.T, tier scale.Tier) (*engine.Engine, *engine.Model, *measure.World) {
+	if tier.IsWorst {
+		return pathsEngine(t, tier)
+	}
+	snap := scale.Snapshot(tier, 1)
+	for _, objs := range snap.Objects {
+		slices.SortFunc(objs, func(x, y *unstructured.Unstructured) int {
+			return strings.Compare(x.GetNamespace()+"/"+x.GetName(), y.GetNamespace()+"/"+y.GetName())
+		})
+	}
+	e, m := snapshotEngine(snap, tier)
+	return e, m, nil
+}
+
+// routeGet serves one GET of path through h into out and returns its
+// duration and bytes allocated. Any status but 200 fails tb.
+func routeGet(tb testing.TB, h http.Handler, path string, out *RouteDetail) (time.Duration, uint64) {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	a, start := allocated(), time.Now()
+	h.ServeHTTP(w, req)
+	d, n := time.Since(start), allocated()-a
+	if w.Code != http.StatusOK {
+		tb.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
+		tb.Fatal(err)
+	}
+	return d, n
+}
+
 // The backend detail budget of design §14 (6.3): one detail under 4 MiB
 // allocated, the scoped read included.
 const backendDetailAlloc = 4 << 20

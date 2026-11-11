@@ -917,3 +917,24 @@ func TestRouteDetailTraceKeysOnly(t *testing.T) {
 		}
 	}
 }
+
+// serves keeps the path model's attachment order, which signal attachment
+// indexes point into; shop/mid's seven root attachments on edge/http merge
+// into one entry per hostname list, the worst state winning.
+func TestServesOrderAndMerge(t *testing.T) {
+	_, srv, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	g := get[RouteDetail](t, srv, grpcDetail, 200)
+	for _, b := range g.Rules[0].BackendRefs {
+		for _, s := range b.Problem.Signals {
+			if s.Attachment != nil && s.Ref != nil && s.Ref.Kind == "Gateway" && g.Serves[*s.Attachment].Gateway.Ref != s.Ref.Ref {
+				t.Errorf("signal %+v names serves %d, %+v", s, *s.Attachment, g.Serves[*s.Attachment])
+			}
+		}
+	}
+	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
+	m := get[RouteDetail](t, deleg, routeDetail+"shop/mid", 200)
+	if len(m.Serves) != 2 || len(m.Serves[0].Hostnames) != 0 || m.Serves[0].State != health.StateError ||
+		!slices.Equal(m.Serves[1].Hostnames, []string{"top.example.com"}) || m.Serves[1].State != health.StateHealthy {
+		t.Errorf("merged serves %+v", m.Serves)
+	}
+}

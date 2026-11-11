@@ -374,7 +374,8 @@ type RouteAnnotations struct {
 // GRPCRoute, TCPRoute and TLSRoute. ChildCount and DeclaredCount count visible routes only.
 // Effective is view C per parent edge (2.4); EffectiveTruncated says the
 // route had more parent edges than were kept. Serves are the attachments the
-// route's visible paths run through (design §7.1).
+// route's visible paths run through (design §7.1), in the path model's
+// attachment order; look-alike ones merge, worst state first.
 type RouteDetail struct {
 	Install            string               `json:"install"`
 	Ref                LinkedRef            `json:"ref"`

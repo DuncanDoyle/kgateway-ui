@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/paths"
@@ -32,31 +31,17 @@ type routeTrace struct {
 	refs   map[refKey]*refTrace
 }
 
-// trace is route's trace: the rows of the paths route= query whose rule is
-// route's own, as the caller may see them.
+// trace is route's trace: one pass over the projection for the rows on
+// route's own rules, as the caller may see them.
 func (d *detail) trace(route objects.Ref) routeTrace {
 	t, proj, _ := d.h.pathModel(d.p, d.i)
-	var visible func(explore.DepSet) bool
-	if !d.v.all {
-		visible = func(ds explore.DepSet) bool { return d.v.allowTable(t, ds) }
-	}
 	var rows []int32
-	q := paths.Query{Route: &route, Limit: paths.MaxLimit}
-	for {
-		pg, err := paths.Run(t, proj, q, visible)
-		if err != nil {
-			return routeTrace{}
+	for _, k := range proj.Order {
+		if r := t.Rows[k]; t.Route(r) == route && d.v.allowTable(t, t.Deps(r)) {
+			rows = append(rows, k)
 		}
-		for _, k := range pg.Rows {
-			if c := t.Chain(t.Rows[k]); c[len(c)-1] == route && d.hopsVisible(c) {
-				rows = append(rows, k)
-			}
-		}
-		if pg.Next == "" {
-			break
-		}
-		q.Cursor = pg.Next
 	}
+	// serves follows the topology's attachment order, which SignalDTO.Attachment indexes.
 	slices.SortFunc(rows, func(a, b int32) int {
 		return cmp.Or(cmp.Compare(t.Attachment(t.Rows[a]), t.Attachment(t.Rows[b])), cmp.Compare(a, b))
 	})
@@ -119,23 +104,6 @@ func (d *detail) trace(route objects.Ref) routeTrace {
 		rt.merge(proj, k, entry[a], own[a].Signals)
 	}
 	return out
-}
-
-// hopsVisible reports whether the caller may view every view B row of each
-// delegation hop of chain, root eligibility included, as the delegation
-// pages require (design §7.4 rule 4).
-func (d *detail) hopsVisible(chain []objects.Ref) bool {
-	if d.v.all {
-		return true
-	}
-	for j := 1; j < len(chain); j++ {
-		for _, i := range d.ix.Delegation[chain[j-1]] {
-			if r := &d.ix.DelegRows[i]; r.Key.Child == chain[j] && !d.v.allowDeps(d.ix, r.Deps) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // merge adds row k, through serves entry a with its own signals, to rt: the
