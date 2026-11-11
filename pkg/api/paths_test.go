@@ -16,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/paths"
@@ -353,5 +355,23 @@ func TestPathsFacets(t *testing.T) {
 				t.Fatalf("finding signal without a title: %+v", s)
 			}
 		}
+	}
+}
+
+// A finding signal whose ref the viewer may not see carries no title, so a
+// finding message never reaches a viewer who may not see its resource (§13).
+func TestPathsFindingTitleHidden(t *testing.T) {
+	gw := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
+	r, _ := http.NewRequest(http.MethodGet, pathsURL, nil)
+	v := &view{a: AuthorizerFunc(hideEdge), r: r, seen: map[objects.Ref]bool{}}
+	l := linker{v: v, i: &engine.InstallModel{}}
+	titles := map[titleKey]string{{health.CodeProxyNotReady, gw}: "Proxy deployment not found"}
+	p := paths.Problem{State: health.StateWarning, Signals: []paths.Signal{{Kind: paths.SignalFinding, Code: health.CodeProxyNotReady, Ref: gw, State: health.StateWarning}}}
+	if got := problemDTO(l, titles, p).Signals[0]; got.Title != "" {
+		t.Fatalf("hidden finding title leaked: %+v", got)
+	}
+	v.all = true
+	if got := problemDTO(l, titles, p).Signals[0]; got.Title != "Proxy deployment not found" {
+		t.Fatalf("visible finding lost its title: %+v", got)
 	}
 }
