@@ -307,3 +307,112 @@ for (const theme of themes) {
     await shot(page, `${theme.mode}-table`);
   });
 }
+
+// region Task 48: expand, collapse and focus
+
+/** A node wrapper's canvas position, from React Flow's transform. */
+const position = (l: Locator) => l.evaluate((el) => (el as HTMLElement).style.transform);
+const WEIGHTED = "r:gateway.networking.k8s.io/HTTPRoute/traffic/weighted";
+
+test("expanding a route opens its rule between it and its backends, keeps the other columns, and survives a reload", async ({
+  page,
+}) => {
+  const map = await openMap(page);
+  const fixed = [node(map, "traffic/traffic"), node(map, "http"), node(map, "traffic/asleep").first()];
+  const before = await Promise.all(fixed.map(position));
+  await node(map, "traffic/weighted")
+    .getByRole("button", { name: mapCopy.expandNode("traffic/weighted") })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`expand=${encodeURIComponent(WEIGHTED)}`));
+  const rule = node(map, "PathPrefix /weighted");
+  await expect(rule).toHaveCount(1);
+  await expect(rule.locator(".kind")).toHaveText(mapCopy.rule(1));
+  // The Gateway, listener and route columns did not move.
+  expect(await Promise.all(fixed.map(position))).toEqual(before);
+  // Each rule edge carries its rule's share: 90 % is drawn thicker than 10 %.
+  const rid = await rule.getAttribute("data-id");
+  const width = (b: string) =>
+    map
+      .locator(`[data-id="${rid}>b:/Service/traffic/${b}"] path.react-flow__edge-path`)
+      .evaluate((el) => Number.parseFloat(getComputedStyle(el).strokeWidth));
+  expect(await width("web-a")).toBeGreaterThan(await width("web-b"));
+  await page.reload();
+  await expect(node(page.getByTestId("gateway-map"), "PathPrefix /weighted")).toHaveCount(1);
+  // Collapse restores the map.
+  await node(page.getByTestId("gateway-map"), "traffic/weighted")
+    .getByRole("button", { name: mapCopy.collapseNode("traffic/weighted") })
+    .click();
+  await expect(node(page.getByTestId("gateway-map"), "PathPrefix /weighted")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/expand=/);
+});
+
+test("focus on a backend by keyboard keeps only its paths, survives a reload, and Clear focus or Back leaves it", async ({
+  page,
+}) => {
+  const d = await paths(page, "");
+  const on = d.rows.filter((r) => r.backend?.name === "httpbin");
+  const want = nodeNames({ ...d, rows: on });
+  const all = nodeNames(d);
+  const map = await openMap(page);
+  await expect(map.getByTestId("map-node")).toHaveCount(all.size);
+  await node(map, "shop/httpbin").focus();
+  await page.keyboard.press("Enter");
+  const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  await expect(panel).toBeFocused();
+  // Tab past Close to the panel's Focus action and press it.
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(panel.getByRole("button", { name: mapCopy.focus })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/focus=b%3A%2FService%2Fshop%2Fhttpbin/);
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(want.size);
+  await expect(page.getByTestId("map-focus")).toContainText(mapCopy.focused("Service", "shop/httpbin"));
+  await page.reload();
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(want.size);
+  await page.getByTestId("map-focus").getByRole("button", { name: mapCopy.clearFocus }).click();
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(all.size);
+  await expect(page).not.toHaveURL(/focus=/);
+  await page.goBack();
+  await expect(page).toHaveURL(/focus=/);
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(want.size);
+});
+
+test("under Problems only an edge whose loaded rows all fail is not drawn broken; it keeps the error stroke and mark", async ({
+  page,
+}) => {
+  await page.goto(`${install}/gateways/${gw}?tab=map&state=error`);
+  const map = page.getByTestId("gateway-map");
+  const id = "g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http";
+  const trunk = map.locator(`[data-id="${id}"] path.react-flow__edge-path`);
+  await expect(trunk).toHaveClass(/state-error/);
+  await expect(trunk).not.toHaveClass(/broken/);
+  await expect(map.locator(`.map-edge-mark[data-edge="${id}"]`)).toHaveClass(/\bpartial\b/);
+  await expect(map.locator(".react-flow__edge-path.broken")).toHaveCount(0);
+});
+
+for (const theme of themes) {
+  test(`an expanded route and focus mode in the ${theme.mode} theme`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto(
+      `${install}/gateways/${gw}?tab=map&expand=${encodeURIComponent(WEIGHTED)}&expand=${encodeURIComponent("r:gateway.networking.k8s.io/HTTPRoute/traffic/split")}`,
+    );
+    const map = page.getByTestId("gateway-map");
+    await expect(node(map, "PathPrefix /weighted")).toHaveCount(1);
+    await pickTheme(page, theme);
+    const toggle = node(map, "traffic/weighted").getByTestId("map-toggle");
+    const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rest = await bg(toggle);
+    await toggle.hover();
+    expect(await bg(toggle), "hover changes the toggle").not.toBe(rest);
+    await page.mouse.move(5, 5);
+    await page.locator(".react-flow__controls-fitview").click();
+    await shot(page, `${theme.mode}-expanded`);
+
+    await node(map, "traffic/weighted").click();
+    await page.getByRole("complementary", { name: mapCopy.panel }).getByRole("button", { name: mapCopy.focus }).click();
+    await expect(page.getByTestId("map-focus")).toBeVisible();
+    await expect(node(page.getByTestId("gateway-map"), "traffic/cross")).toHaveCount(0);
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-focus`);
+  });
+}

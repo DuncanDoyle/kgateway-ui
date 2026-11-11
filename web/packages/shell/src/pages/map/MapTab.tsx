@@ -7,12 +7,14 @@ import { listCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { summaryCopy, trafficCopy } from "../../copy/traffic";
 import type { ParamChanges } from "../../shell/urlParams";
+import { QuietButton } from "../../states/controls";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import { PROBLEM_STATES } from "../backends/BackendsPage";
 import { PathTable } from "../traffic/PathTable";
 import { StaleGate } from "../traffic/StaleGate";
-import { gatewayGraph, type MapNode } from "./graph";
+import { focusSubgraph } from "./focus";
+import { gatewayGraph, kindLabel, type MapNode } from "./graph";
 import { MapToolbar, problemsOnly } from "./MapToolbar";
 import { MapBox, MapNote } from "./map.css";
 import { LARGE_GATEWAY, MAP_MAX_ROWS, useMapPaths } from "./mapData";
@@ -34,6 +36,10 @@ const Notes = styled(MapNote)`
   min-height: 1.5em;
   span + span::before {
     content: " ";
+  }
+  button {
+    height: auto;
+    padding: 0 4px;
   }
 `;
 
@@ -121,7 +127,40 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   }, [opening, summary, large, setFilter, params]);
   const prompt = typeof opening === "object" && problemsOnly(params) ? opening : undefined;
 
-  const graph = useMemo(() => gatewayGraph(gateway, paths.rows), [gateway, paths.rows]);
+  // ?expand= (repeatable) opens routes into rules and delegated routes; ?focus= keeps one node's paths (design §6.1).
+  const expandParam = params.getAll("expand").join("\n");
+  const expanded = useMemo(() => new Set(expandParam ? expandParam.split("\n") : []), [expandParam]);
+  const focusId = params.get("focus") ?? undefined;
+  // Under a state filter the healthy rows are not loaded, so no edge can be known to be broken. The rows answer
+  // paths.query, which lags the URL until a new filter's rows arrive.
+  const stateFiltered = new URLSearchParams(paths.query?.split("?")[1] ?? "").has("state");
+  const full = useMemo(
+    () => gatewayGraph(gateway, paths.rows, expanded, { stateFiltered }),
+    [gateway, paths.rows, expanded, stateFiltered],
+  );
+  const graph = useMemo(() => (focusId ? focusSubgraph(full, focusId) : full), [full, focusId]);
+  const focusNode = focusId ? graph.nodes.find((n) => n.id === focusId) : undefined;
+  // Expand and focus are views the user steps through, so each change is a history entry for back and forward.
+  const setView = useCallback(
+    (change: (q: URLSearchParams) => void) => {
+      const q = new URLSearchParams(search);
+      change(q);
+      const s = q.toString();
+      navigate({ search: s ? `?${s}` : "" });
+    },
+    [search, navigate],
+  );
+  const onToggle = useCallback(
+    (id: string) =>
+      setView((q) => {
+        const all = q.getAll("expand");
+        q.delete("expand");
+        for (const x of all) if (x !== id) q.append("expand", x);
+        if (!all.includes(id)) q.append("expand", id);
+      }),
+    [setView],
+  );
+  const setFocusNode = (id?: string) => setView((q) => (id ? q.set("focus", id) : q.delete("focus")));
   // ?view=table shows the map's rows as a path table, the map's accessible equivalent (design §6.1, item 8).
   const table = params.get("view") === "table";
   const page = useMemo<Page<PathRow> | undefined>(
@@ -141,6 +180,17 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
     setSelected(id);
     setPanelFocus(!!id);
   }, []);
+  // Clearing the focus from the notes line moves keyboard focus to the map's tab stop once it is drawn again.
+  const clearFocus = () => {
+    setFocusNode(undefined);
+    let tries = 10;
+    const next = () => {
+      const el = area.current?.querySelector<HTMLElement>('.react-flow__node[tabindex="0"]');
+      if (el) el.focus();
+      else if (tries-- > 0) requestAnimationFrame(next);
+    };
+    requestAnimationFrame(next);
+  };
   // Closing returns focus to the node when it was in the panel.
   const close = () => {
     const back = area.current?.querySelector("[data-testid=map-panel]")?.contains(document.activeElement);
@@ -154,14 +204,14 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   // Find: typing centres and selects the first match; Enter moves to the next.
   const [find, setFind] = useState("");
   const [at, setAt] = useState(0);
-  const [focus, setFocus] = useState<{ id: string; seq: number }>();
+  const [centre, setCentre] = useState<{ id: string; seq: number }>();
   const found = useMemo(() => matches(graph.nodes, find), [graph.nodes, find]);
   const goTo = (list: MapNode[], k: number) => {
     const n = list[k];
     if (!n) return;
     setSelected(n.id);
     setPanelFocus(false);
-    setFocus((f) => ({ id: n.id, seq: (f?.seq ?? 0) + 1 }));
+    setCentre((f) => ({ id: n.id, seq: (f?.seq ?? 0) + 1 }));
     setAt(k + 1);
   };
   const onFind = (text: string) => {
@@ -206,6 +256,14 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
           </span>
         ) : null}
         {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
+        {focusId ? (
+          <span data-testid="map-focus">
+            {focusNode ? `${mapCopy.focused(kindLabel(focusNode), focusNode.name)} ` : null}
+            <QuietButton type="button" onClick={clearFocus}>
+              {mapCopy.clearFocus}
+            </QuietButton>
+          </span>
+        ) : null}
       </Notes>
       {!summary || large ? (
         <Fallback />
@@ -226,7 +284,9 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
           ref={area}
           $panel={!!node}
           onKeyDown={(e) => {
+            // Escape closes the panel first, then leaves focus mode.
             if (e.key === "Escape" && node) close();
+            else if (e.key === "Escape" && focusId) clearFocus();
           }}
         >
           <Suspense fallback={<Fallback />}>
@@ -234,8 +294,9 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
               graph={graph}
               selected={node?.id}
               onSelect={onSelect}
-              focus={focus}
-              view={paths.query ?? ""}
+              centre={centre}
+              view={`${paths.query ?? ""}|${focusId ?? ""}`}
+              onToggle={onToggle}
               stylesOverride={stylesOverride}
             />
           </Suspense>
@@ -248,6 +309,9 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
               rows={paths.rows}
               takeFocus={panelFocus}
               onClose={close}
+              onToggle={node.kind === "route" ? () => onToggle(node.id) : undefined}
+              focused={node.id === focusId}
+              onFocus={(on) => setFocusNode(on ? node.id : undefined)}
             />
           ) : null}
         </Area>

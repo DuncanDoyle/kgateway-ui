@@ -1,6 +1,6 @@
 /**
- * User-facing copy of the Gateway map (Phase 6, sub-phase 6.5).
- * The ids in comments (S766…) match the wording record in docs/phases/phase-6/phase-6.5-wording.md.
+ * User-facing copy of the Gateway map (Phase 6, sub-phases 6.5 and 6.6).
+ * The ids in comments (S766…) match the wording records in docs/phases/phase-6/phase-6.5-wording.md and phase-6.6-wording.md.
  */
 export const mapCopy = {
   tab: "Map", // S766
@@ -40,4 +40,12 @@ export const mapCopy = {
   table: "Table", // S797
   tableTip: "Show these paths as a table", // S798
   tableLabel: "Paths through this Gateway", // S799
+  rule: (n: number) => `Rule ${n}`, // S800
+  expand: "Expand", // S801
+  collapse: "Collapse", // S802
+  expandNode: (name: string) => `Expand ${name}`, // S803
+  collapseNode: (name: string) => `Collapse ${name}`, // S804
+  focus: "Focus on this", // S805
+  clearFocus: "Clear focus", // S806
+  focused: (kind: string, name: string) => `Showing only the paths through ${kind} ${name}.`, // S807
 };

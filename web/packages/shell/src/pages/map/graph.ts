@@ -1,12 +1,15 @@
 import type { LinkedRef, PathRow, PathSignal } from "../../api/types";
+import { listenerCopy } from "../../copy/explorer";
+import { mapCopy } from "../../copy/map";
 import { actionCopy } from "../../copy/traffic";
 import type { HealthState } from "../../theme/tokens";
 import { refParam } from "../explore/detailParts";
+import { matchSummary } from "../traffic/pathText";
 
 // region Helpers
-/** The map's columns, left to right (design §6.1). */
-export type NodeKind = "gateway" | "listener" | "route" | "backend";
-export const COLUMNS: readonly NodeKind[] = ["gateway", "listener", "route", "backend"];
+/** The map's columns, left to right (design §6.1); the rule column shows only while a route is expanded. */
+export type NodeKind = "gateway" | "listener" | "route" | "rule" | "backend";
+export const COLUMNS: readonly NodeKind[] = ["gateway", "listener", "route", "rule", "backend"];
 
 /**
  * One node of the map. rows indexes the path rows through it. A backend-column node with action set is the
@@ -19,8 +22,12 @@ export interface MapNode {
   name: string;
   action?: Exclude<PathRow["action"], "backend" | "delegate">;
   state: HealthState;
-  /** A delegated route's root route node; the route sits under it in the routes column. */
+  /** A delegated route's parent route node; the route sits under it in the routes column. */
   delegatedUnder?: string;
+  /** A rule node's rule index in its route. */
+  rule?: number;
+  /** A route node is expanded: its rules, and its delegated routes, show. */
+  expanded?: boolean;
   rows: number[];
   /** The distinct row signals that name this node. */
   problems: PathSignal[];
@@ -53,6 +60,8 @@ export interface MapGraph {
   edges: MapEdge[];
   /** Per input row, indexed as nodes' and edges' rows are. */
   rows: RowMark[];
+  /** The rows are filtered by state, so the healthy rows on an edge may be missing: no edge is drawn broken. */
+  stateFiltered?: boolean;
 }
 
 const fails = (r: Pick<PathRow, "problem" | "shareState">) => r.problem.state === "error" || r.shareState === "failing";
@@ -64,6 +73,16 @@ export const refLabel = (r: { namespace?: string; name: string }) =>
 const same = (a?: LinkedRef, b?: LinkedRef) => !!a && !!b && refParam(a) === refParam(b);
 
 const signalKey = (s: PathSignal) => JSON.stringify([s.kind, s.code, s.title, s.ref && refParam(s.ref), s.state]);
+
+/** A node's kind line: the resource kind, the listener noun, "Rule n", or "Action" for a rule's written action. */
+export const kindLabel = (n: MapNode) =>
+  n.action
+    ? mapCopy.action
+    : n.kind === "listener"
+      ? listenerCopy.listener
+      : n.kind === "rule"
+        ? mapCopy.rule((n.rule ?? 0) + 1)
+        : (n.ref?.kind ?? n.kind);
 
 /** The node ids a row passes through. */
 interface RowIds {
@@ -88,11 +107,16 @@ function signalNode(s: PathSignal, r: PathRow, ids: RowIds): string {
 // region Component
 /**
  * One node per distinct Gateway, listener, route and backend of the rows, in order of first appearance.
- * Delegated routes join the routes column under their root, with no edge of their own from a listener.
- * A node's state is the worst of the row signals that name it, so one broken backend leaves its routes healthy.
- * expanded is the set of expanded node ids; expansion into rules and children is sub-phase 6.6, so it is unused yet.
+ * A delegated route shows only while its parent is expanded, under that parent and with no listener edge; its id is
+ * its chain from the root, so a route delegated from two parents shows under each. An expanded route that ends a
+ * row opens into one node per rule between it and the backends. A node's state is the worst of the row signals
+ * that name it (a hidden route's go to its nearest shown parent), so one broken backend leaves its routes healthy.
  */
-export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new Set()): MapGraph {
+export function buildGraph(
+  rows: PathRow[],
+  expanded: ReadonlySet<string> = new Set(),
+  opts: { stateFiltered?: boolean } = {},
+): MapGraph {
   const nodes = new Map<string, MapNode>();
   const edges = new Map<string, MapEdge & { shares: (number | undefined)[]; rules: Set<string> }>();
   const node = (id: string, i: number, init: Omit<MapNode, "id" | "rows" | "state" | "problems">) => {
@@ -120,7 +144,6 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     }
   };
 
-  const roots = new Set<string>();
   rows.forEach((r, i) => {
     const gateway = `g:${refParam(r.gateway)}`;
     node(gateway, i, { kind: "gateway", ref: r.gateway, name: refLabel(r.gateway) });
@@ -129,18 +152,27 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     node(listener, i, { kind: "listener", ref: r.listenerSet, name: r.listener.name });
     edge(gateway, listener, i, r, false);
 
-    const routes = r.routes.map((x) => `r:${refParam(x)}`);
-    const root = routes[0];
-    routes.forEach((id, k) => {
+    // A route shows while every route above it is expanded; a hidden one stands for its nearest shown parent.
+    const chain = r.routes.map(
+      (_, k) =>
+        `r:${r.routes
+          .slice(0, k + 1)
+          .map(refParam)
+          .join("~")}`,
+    );
+    let shown = Math.min(1, chain.length);
+    while (shown < chain.length && expanded.has(chain[shown - 1] as string)) shown++;
+    const routes = chain.map((_, k) => chain[Math.min(k, shown - 1)] as string);
+    for (let k = 0; k < shown; k++) {
+      const id = chain[k] as string;
       const n = node(id, i, { kind: "route", ref: r.routes[k], name: refLabel(r.routes[k] as LinkedRef) });
-      if (k > 0) n.delegatedUnder ??= root;
-    });
-    if (root) {
-      roots.add(root);
-      edge(listener, root, i, r, false);
+      if (k > 0) n.delegatedUnder = chain[k - 1];
+      if (expanded.has(id)) n.expanded = true;
     }
+    const root = chain[0];
+    if (root) edge(listener, root, i, r, false);
 
-    const tail = routes[routes.length - 1];
+    const tail = chain[shown - 1];
     let end: string | undefined;
     if (r.backend) {
       end = `b:${refParam(r.backend)}`;
@@ -149,7 +181,15 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
       end = `a:${r.action}:${tail}`;
       node(end, i, { kind: "backend", action: r.action, name: actionCopy[r.action] });
     }
-    if (tail && end) edge(tail, end, i, r, true);
+    // An expanded route that ends the row opens into its rules; r.rule indexes the last route's rules.
+    let from = tail;
+    if (tail && shown === chain.length && expanded.has(tail)) {
+      const rule = `u:${tail}#${r.rule}`;
+      node(rule, i, { kind: "rule", ref: r.routes[shown - 1], rule: r.rule, name: matchSummary(r).text });
+      edge(tail, rule, i, r, false);
+      from = rule;
+    }
+    if (from && end) edge(from, end, i, r, true);
 
     // Each signal raises the state of the node it names; a row state no signal explains goes to its last node.
     const ids: RowIds = { gateway, listener, routes, end };
@@ -169,11 +209,7 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     }
   });
 
-  // A route that is also attached directly is a root, not delegated.
-  for (const id of roots) {
-    const n = nodes.get(id);
-    if (n) n.delegatedUnder = undefined;
-  }
+  const stateFiltered = !!opts.stateFiltered;
   return {
     nodes: [...nodes.values()],
     rows: rows.map((r) => ({ state: r.problem.state, fails: fails(r) })),
@@ -181,14 +217,21 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     edges: [...edges.values()].map(({ shares, rules, ...e }) => {
       const shown = shares.length > 0 && shares.every((s) => s !== undefined);
       const one = rules.size === 1 || shares.every((s) => s === shares[0]);
-      return shown && one ? { ...e, share: Math.max(...(shares as number[])) } : e;
+      const out = { ...e, broken: e.broken && !stateFiltered };
+      return shown && one ? { ...out, share: Math.max(...(shares as number[])) } : out;
     }),
+    ...(stateFiltered ? { stateFiltered } : {}),
   };
 }
 
 /** The graph of a Gateway's rows; a Gateway with no paths still shows itself, its state not known from paths. */
-export function gatewayGraph(gateway: LinkedRef, rows: PathRow[]): MapGraph {
-  const g = buildGraph(rows, new Set());
+export function gatewayGraph(
+  gateway: LinkedRef,
+  rows: PathRow[],
+  expanded: ReadonlySet<string> = new Set(),
+  opts: { stateFiltered?: boolean } = {},
+): MapGraph {
+  const g = buildGraph(rows, expanded, opts);
   if (!g.nodes.some((n) => n.kind === "gateway"))
     g.nodes.unshift({
       id: `g:${refParam(gateway)}`,
@@ -211,6 +254,7 @@ export interface LitEdge {
 /**
  * The nodes and edges on paths through node id: those that share a row with it (design §6.1, hover).
  * Each edge carries its state over the shared rows only, so a healthy path's trunk does not read as failing.
+ * Under a state filter no lit edge is broken, as in buildGraph.
  */
 export function throughNode(g: MapGraph, id: string): { nodes: Set<string>; edges: Map<string, LitEdge> } {
   const rows = new Set(g.nodes.find((n) => n.id === id)?.rows);
@@ -221,7 +265,7 @@ export function throughNode(g: MapGraph, id: string): { nodes: Set<string>; edge
     if (on.length)
       edges.set(e.id, {
         state: on.reduce<HealthState>((s, r) => worse(s, r.state), "healthy"),
-        broken: on.every((r) => r.fails),
+        broken: !g.stateFiltered && on.every((r) => r.fails),
       });
   }
   return { nodes: new Set([id, ...g.nodes.filter((n) => shares(n.rows)).map((n) => n.id)]), edges };

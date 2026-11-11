@@ -17,8 +17,8 @@ import {
   ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
+import { Minus, Plus } from "lucide-react";
 import { type FocusEvent, type KeyboardEvent, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { listenerCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { cellCopy } from "../../copy/traffic";
 import { HealthBadge } from "../../health/HealthBadge";
@@ -26,9 +26,9 @@ import { HealthIcon } from "../../health/HealthIcon";
 import { StaleView, useShownState } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
 import type { HealthState } from "../../theme/tokens";
-import { type MapEdge, type MapGraph, type MapNode, throughNode } from "./graph";
+import { kindLabel, type MapEdge, type MapGraph, type MapNode, throughNode } from "./graph";
 import { ARROWS, type ArrowKey, nextNode } from "./keyboard";
-import { layoutColumns } from "./layout";
+import { changedColumns, layoutColumns, type Point } from "./layout";
 import { MapCanvas } from "./map.css";
 
 // region Styles
@@ -36,6 +36,7 @@ const NODE_W = 220;
 const NODE_H = 72;
 
 const Card = styled.div<{ $selected: boolean }>`
+  position: relative;
   box-sizing: border-box;
   width: ${NODE_W}px;
   height: ${NODE_H}px;
@@ -65,16 +66,41 @@ const Card = styled.div<{ $selected: boolean }>`
     white-space: nowrap;
   }
 `;
+/** A route card's expand toggle, in its top right corner; a pointer control, as the side panel has the same action. */
+const Toggle = styled.button`
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  padding: 2px;
+  cursor: pointer;
+  color: ${(p) => p.theme.color.text};
+  background: ${(p) => p.theme.color.surface};
+  border: 1px solid ${(p) => p.theme.color.borderStrong};
+  border-radius: ${(p) => p.theme.radius.sm};
+  &:hover {
+    border-color: ${(p) => p.theme.color.text};
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 10%, ${(p) => p.theme.color.surface});
+  }
+  &:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 20%, ${(p) => p.theme.color.surface});
+  }
+`;
 
 // region Helpers
-type MapNodeData = { kind: string; name: string; state: HealthState; delegated: boolean; selected: boolean };
+type MapNodeData = {
+  kind: string;
+  name: string;
+  state: HealthState;
+  delegated: boolean;
+  selected: boolean;
+  /** Set on a route card: expands or collapses it. */
+  toggle?: () => void;
+  expanded?: boolean;
+};
 type MapFlowNode = Node<MapNodeData, "map">;
 type MapEdgeData = Pick<MapEdge, "state" | "broken" | "share"> & { dim: boolean };
 type MapFlowEdge = Edge<MapEdgeData, "map">;
-
-/** The card's kind line: the resource kind, the listener noun, or "Action" for a rule's written action. */
-const kindLabel = (n: MapNode) =>
-  n.action ? mapCopy.action : n.kind === "listener" ? listenerCopy.listener : (n.ref?.kind ?? n.kind);
 
 /** Stroke width: 1.5 px, or 1.5–6 px by share where the share is shown (design §4.4). */
 const strokeWidth = (share?: number) => (share === undefined ? 1.5 : 1.5 + (Math.min(100, share) / 100) * 4.5);
@@ -106,6 +132,23 @@ function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
         {data.name}
       </div>
       <HealthBadge state={data.state} />
+      {data.toggle ? (
+        <Toggle
+          type="button"
+          className="nopan nodrag"
+          data-testid="map-toggle"
+          // Out of the tab order: the map is one tab stop, and the side panel offers the same action by keyboard.
+          tabIndex={-1}
+          aria-label={(data.expanded ? mapCopy.collapseNode : mapCopy.expandNode)(data.name)}
+          aria-expanded={data.expanded}
+          onClick={(e) => {
+            e.stopPropagation();
+            data.toggle?.();
+          }}
+        >
+          {data.expanded ? <Minus size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+        </Toggle>
+      ) : null}
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </Card>
   );
@@ -157,9 +200,11 @@ interface GatewayMapProps {
   selected?: string;
   onSelect: (id?: string) => void;
   /** A node to centre on; a new seq centres again. */
-  focus?: { id: string; seq: number };
-  /** The query the graph's rows answer; a new one redraws the canvas and fits it, a poll keeps the view. */
+  centre?: { id: string; seq: number };
+  /** The query the graph's rows answer, and the focus; a new one redraws the canvas and fits it, a poll keeps the view. */
   view: string;
+  /** Expands or collapses a route node. */
+  onToggle?: (id: string) => void;
   stylesOverride?: SerializedStyles;
 }
 
@@ -168,7 +213,7 @@ interface GatewayMapProps {
  * Hovering or focusing a node lights every path through it and dims the rest; a click, Enter or Space selects it.
  * Arrow keys move focus between connected nodes; one node at a time is in the tab order.
  */
-export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverride }: GatewayMapProps) {
+export function GatewayMap({ graph, selected, onSelect, centre, view, onToggle, stylesOverride }: GatewayMapProps) {
   const theme = useTheme();
   const stale = useContext(StaleView);
   const [hovered, setHovered] = useState<string>();
@@ -206,7 +251,15 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
     };
   }, []);
   const flow = useRef<ReactFlowInstance<MapFlowNode, MapFlowEdge>>(undefined);
-  const at = useMemo(() => layoutColumns(graph), [graph]);
+  // Within one view, a new graph (a poll, an expand or a collapse) re-lays only the columns whose nodes changed.
+  const laid = useRef<{ view: string; graph: MapGraph; at: Map<string, Point> }>(undefined);
+  const at = useMemo(() => {
+    const p = laid.current;
+    const next =
+      p && p.view === view ? layoutColumns(graph, changedColumns(p.graph, graph), p.at) : layoutColumns(graph);
+    laid.current = { view, graph, at: next };
+    return next;
+  }, [graph, view]);
   const active = hovered ?? focused ?? selected;
   const has = (id?: string) => !!id && graph.nodes.some((n) => n.id === id);
   const tabStop = has(last) ? last : has(selected) ? selected : graph.nodes.find((n) => n.kind === "gateway")?.id;
@@ -223,6 +276,8 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
             state: n.state,
             delegated: !!n.delegatedUnder,
             selected: n.id === selected,
+            toggle: n.kind === "route" && onToggle ? () => onToggle(n.id) : undefined,
+            expanded: !!n.expanded,
           },
           position: at.get(n.id) ?? { x: 0, y: 0 },
           // A fixed size: a new node object keeps its dimensions, so a hover never hides the map while it re-measures.
@@ -233,7 +288,7 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
           domAttributes: { tabIndex: n.id === tabStop ? 0 : -1 },
         }),
       ),
-    [graph, at, lit, selected, stale, tabStop],
+    [graph, at, lit, selected, stale, tabStop, onToggle],
   );
   const edges = useMemo(
     () =>
@@ -261,7 +316,7 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
     const f = flow.current;
     const rect = box.current?.getBoundingClientRect();
     if (!f || !rect?.width) return;
-    const centre = (id: string, zoom: number) => {
+    const centreOn = (id: string, zoom: number) => {
       const p = at.get(id);
       if (!p) return;
       const x = rect.width / 2 - (p.x + NODE_W / 2) * zoom;
@@ -269,9 +324,9 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
       void f.setViewport({ x, y, zoom }, { duration: reducedMotion() ? 0 : 300 });
     };
     const v = f.getViewport();
-    if (focus && focus.seq !== centred.current) {
-      centred.current = focus.seq;
-      centre(focus.id, Math.max(v.zoom, 0.8));
+    if (centre && centre.seq !== centred.current) {
+      centred.current = centre.seq;
+      centreOn(centre.id, Math.max(v.zoom, 0.8));
       return;
     }
     if (selected === checked.current) return;
@@ -281,8 +336,8 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
     const left = p.x * v.zoom + v.x;
     const top = p.y * v.zoom + v.y;
     if (left < 0 || top < 0 || left + NODE_W * v.zoom > rect.width || top + NODE_H * v.zoom > rect.height)
-      centre(selected, v.zoom);
-  }, [focus, selected, at]);
+      centreOn(selected, v.zoom);
+  }, [centre, selected, at]);
   // Moves focus to a node; one that onlyRenderVisibleElements left out is centred first, then focused once drawn.
   // The node's own focus handler records it as the tab stop, so last changes only once focus has moved.
   const moveTo = (id: string) => {

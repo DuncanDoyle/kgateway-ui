@@ -1,0 +1,179 @@
+import type { LinkedRef, PathRow } from "../../api/types";
+import { focusSubgraph } from "./focus";
+import { buildGraph, type MapGraph, throughNode } from "./graph";
+import { nextNode } from "./keyboard";
+import { COL_W, changedColumns, INDENT, layoutColumns } from "./layout";
+
+const ref = (kind: string, name: string, namespace = "shop"): LinkedRef => ({
+  group: kind === "Service" ? "" : "gateway.networking.k8s.io",
+  kind,
+  namespace,
+  name,
+  link: "detail",
+});
+const GW = ref("Gateway", "edge", "infra");
+
+/** A healthy HTTP path row through listener l, routes (root first) and backend b; over overrides any field. */
+function row(l: string, routes: string[], b: string | undefined, over: Partial<PathRow> = {}): PathRow {
+  return {
+    gateway: GW,
+    listener: { name: l, protocol: "HTTP", port: 80 },
+    hostnames: [],
+    routes: routes.map((r) => ref("HTTPRoute", r)),
+    delegated: routes.length > 1,
+    rule: 0,
+    matches: [],
+    action: b ? "backend" : "none",
+    backend: b ? ref("Service", b) : undefined,
+    weight: 1,
+    share: 100,
+    shareState: "shown",
+    mirror: false,
+    problem: { state: "healthy", signals: [] },
+    ...over,
+  };
+}
+const prefix = (value: string) => [{ path: { type: "PathPrefix", value } }] as PathRow["matches"];
+const R = (name: string) => `r:gateway.networking.k8s.io/HTTPRoute/shop/${name}`;
+const chain = (...names: string[]) => `r:${names.map((n) => R(n).slice(2)).join("~")}`;
+const B = (name: string) => `b:/Service/shop/${name}`;
+const ids = (g: MapGraph, kind: string) => g.nodes.filter((n) => n.kind === kind).map((n) => n.id);
+const ERR = { state: "error", signals: [] } as PathRow["problem"];
+
+/** api has two rules: /a splits 30/70 over svc-a and svc-b, /b goes to svc-a; web goes to svc-c on https. */
+const twoRules = () => [
+  row("http", ["api"], "svc-a", { matches: prefix("/a"), share: 30 }),
+  row("http", ["api"], "svc-b", { matches: prefix("/a"), share: 70 }),
+  row("http", ["api"], "svc-a", { rule: 1, matches: prefix("/b"), share: 100 }),
+  row("https", ["web"], "svc-c"),
+];
+
+it("expanding a two-rule route adds two rule nodes and keeps every other node's position", () => {
+  const g1 = buildGraph(twoRules());
+  const before = layoutColumns(g1);
+  const g2 = buildGraph(twoRules(), new Set([R("api")]));
+  expect(ids(g2, "rule")).toEqual([`u:${R("api")}#0`, `u:${R("api")}#1`]);
+  expect(g2.nodes.filter((n) => n.kind === "rule").map((n) => n.name)).toEqual(["PathPrefix /a", "PathPrefix /b"]);
+  // Rule nodes sit between the route and its backends; each rule's edge carries that rule's share.
+  const edge = (s: string, t: string) => g2.edges.find((e) => e.source === s && e.target === t);
+  expect(edge(R("api"), B("svc-a"))).toBeUndefined();
+  expect(edge(R("api"), `u:${R("api")}#0`)?.share).toBeUndefined();
+  expect(edge(`u:${R("api")}#0`, B("svc-a"))?.share).toBe(30);
+  expect(edge(`u:${R("api")}#0`, B("svc-b"))?.share).toBe(70);
+  expect(edge(`u:${R("api")}#1`, B("svc-a"))?.share).toBe(100);
+  expect(g2.nodes.find((n) => n.id === R("api"))?.expanded).toBe(true);
+
+  const changed = changedColumns(g1, g2);
+  expect([...changed]).toEqual(["rule"]);
+  const after = layoutColumns(g2, changed, before);
+  for (const n of g1.nodes) {
+    const p = after.get(n.id);
+    // The rule column opens between routes and backends; backends move right as a block, in the same order.
+    const shift = n.kind === "backend" ? COL_W : 0;
+    expect(p).toEqual({ x: (before.get(n.id)?.x ?? 0) + shift, y: before.get(n.id)?.y });
+  }
+  for (const id of ids(g2, "rule")) expect(after.get(id)?.x).toBe(3 * COL_W);
+
+  // Collapse restores the graph; the rule column closes and the backends move back.
+  const g3 = buildGraph(twoRules());
+  const back = layoutColumns(g3, changedColumns(g2, g3), after);
+  expect(g3.nodes.map((n) => n.id)).toEqual(g1.nodes.map((n) => n.id));
+  expect(g3.edges.map((e) => e.id)).toEqual(g1.edges.map((e) => e.id));
+  for (const n of g1.nodes) expect(back.get(n.id)).toEqual(before.get(n.id));
+});
+
+it("a collapsed delegating route hides its children; expanding shows them under it, nested under their own parent", () => {
+  const rows = [
+    row("http", ["root", "mid", "leaf"], "svc-a"),
+    row("http", ["root", "mid"], "svc-b"),
+    row("http", ["root", "side"], "svc-c", {
+      problem: { state: "error", signals: [{ kind: "finding", ref: ref("HTTPRoute", "side"), state: "error" }] },
+    }),
+  ];
+  const closed = buildGraph(rows);
+  expect(ids(closed, "route")).toEqual([R("root")]);
+  // The hidden child's problem lands on the visible ancestor, so it never reads healthy.
+  expect(closed.nodes.find((n) => n.id === R("root"))?.state).toBe("error");
+  expect(closed.edges.map((e) => e.id)).toContain(`${R("root")}>${B("svc-a")}`);
+
+  const one = buildGraph(rows, new Set([R("root")]));
+  expect(ids(one, "route")).toEqual([R("root"), chain("root", "mid"), chain("root", "side")]);
+  expect(one.nodes.find((n) => n.id === chain("root", "mid"))?.delegatedUnder).toBe(R("root"));
+  // mid is collapsed, so leaf's row ends at mid.
+  expect(one.edges.map((e) => e.id)).toContain(`${chain("root", "mid")}>${B("svc-a")}`);
+
+  const two = buildGraph(rows, new Set([R("root"), chain("root", "mid")]));
+  const leaf = chain("root", "mid", "leaf");
+  expect(two.nodes.find((n) => n.id === leaf)?.delegatedUnder).toBe(chain("root", "mid"));
+  const at = layoutColumns(two);
+  const order = ids(two, "route").sort((a, b) => (at.get(a)?.y ?? 0) - (at.get(b)?.y ?? 0));
+  // leaf sits right under mid, one indent deeper; side stays under root.
+  expect(order.indexOf(leaf)).toBe(order.indexOf(chain("root", "mid")) + 1);
+  expect(at.get(leaf)?.x).toBe((at.get(R("root"))?.x ?? 0) + 2 * INDENT);
+  expect(at.get(chain("root", "side"))?.x).toBe((at.get(R("root"))?.x ?? 0) + INDENT);
+  // Keyboard navigation reaches the nested child.
+  expect(nextNode(two, B("svc-a"), "ArrowLeft", at)).toBe(leaf);
+});
+
+it("a child delegated from two roots appears under each root it is reached from", () => {
+  const rows = [row("http", ["p1", "child"], "svc-a"), row("https", ["p2", "child"], "svc-a")];
+  const g = buildGraph(rows, new Set([R("p1"), R("p2")]));
+  expect(ids(g, "route")).toEqual([R("p1"), chain("p1", "child"), R("p2"), chain("p2", "child")]);
+  expect(g.nodes.find((n) => n.id === chain("p2", "child"))?.delegatedUnder).toBe(R("p2"));
+  expect(g.nodes.find((n) => n.id === chain("p1", "child"))?.rows).toEqual([0]);
+  // A route attached directly as well is its own root, apart from its delegated copies.
+  const direct = buildGraph([...rows, row("http", ["child"], "svc-a")], new Set([R("p1")]));
+  expect(direct.nodes.find((n) => n.id === R("child"))?.delegatedUnder).toBeUndefined();
+});
+
+it("expanding a delegated leaf opens its rules between it and its backends", () => {
+  const g = buildGraph(
+    [row("http", ["root", "leaf"], "svc-a", { matches: prefix("/x") })],
+    new Set([R("root"), chain("root", "leaf")]),
+  );
+  const rule = `u:${chain("root", "leaf")}#0`;
+  expect(g.nodes.find((n) => n.id === rule)).toMatchObject({ kind: "rule", name: "PathPrefix /x", rule: 0 });
+  expect(g.edges.map((e) => e.id)).toEqual(
+    expect.arrayContaining([`${chain("root", "leaf")}>${rule}`, `${rule}>${B("svc-a")}`]),
+  );
+});
+
+it("focus on a backend keeps exactly the Gateways, listeners and routes on its rows", () => {
+  const rows = [
+    row("http", ["r1"], "svc-a"),
+    row("https", ["r2"], "svc-a"),
+    row("http", ["r3"], "svc-b"),
+    row("grpc", ["r4"], "svc-c"),
+  ];
+  const g = buildGraph(rows);
+  const f = focusSubgraph(g, B("svc-a"));
+  expect(ids(f, "gateway")).toEqual(["g:gateway.networking.k8s.io/Gateway/infra/edge"]);
+  expect(ids(f, "listener")).toEqual(["l:http", "l:https"]);
+  expect(ids(f, "route")).toEqual([R("r1"), R("r2")]);
+  expect(ids(f, "backend")).toEqual([B("svc-a")]);
+  // Edges and node rows keep only the focused paths.
+  expect(f.edges.every((e) => e.rows.every((i) => i === 0 || i === 1))).toBe(true);
+  expect(f.nodes.find((n) => n.id === "l:http")?.rows).toEqual([0]);
+  // Focus on a route keeps its upstream and downstream.
+  const r = focusSubgraph(g, R("r3"));
+  expect(r.nodes.map((n) => n.id)).toEqual([
+    "g:gateway.networking.k8s.io/Gateway/infra/edge",
+    "l:http",
+    R("r3"),
+    B("svc-b"),
+  ]);
+  // An id not on the map leaves the map whole.
+  expect(focusSubgraph(g, "r:gone")).toBe(g);
+});
+
+it("under a state filter an edge is never broken, though every loaded row fails; it keeps its error state", () => {
+  const rows = [row("http", ["r1"], "svc-a", { problem: ERR }), row("http", ["r2"], "svc-b", { problem: ERR })];
+  const all = buildGraph(rows);
+  expect(all.edges.every((e) => e.broken)).toBe(true);
+  const filtered = buildGraph(rows, new Set(), { stateFiltered: true });
+  expect(filtered.edges.every((e) => !e.broken && e.state === "error")).toBe(true);
+  // Lit edges and focus follow the same rule.
+  expect([...throughNode(filtered, R("r1")).edges.values()].every((e) => !e.broken && e.state === "error")).toBe(true);
+  expect(focusSubgraph(filtered, R("r1")).edges.every((e) => !e.broken)).toBe(true);
+  expect(focusSubgraph(all, R("r1")).edges.every((e) => e.broken)).toBe(true);
+});

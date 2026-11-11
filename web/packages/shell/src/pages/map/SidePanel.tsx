@@ -3,7 +3,6 @@ import styled from "@emotion/styled";
 import { X } from "lucide-react";
 import { useContext, useEffect, useRef } from "react";
 import type { Endpoints, LinkedRef, PathRow } from "../../api/types";
-import { listenerCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { cellCopy, signalText } from "../../copy/traffic";
 import { backendPath, linkTarget, objectPath } from "../../explore/objectPath";
@@ -11,12 +10,12 @@ import { HealthBadge } from "../../health/HealthBadge";
 import { HealthIcon } from "../../health/HealthIcon";
 import { StaleView } from "../../health/staleView";
 import { installPath } from "../../shell/paths";
-import { InlineLink } from "../../states/controls";
+import { InlineLink, TextButton } from "../../states/controls";
 import type { HealthState } from "../../theme/tokens";
 import { refParam } from "../explore/detailParts";
 import { backendParam } from "../explore/route/refs";
 import { endpointsText } from "../traffic/pathText";
-import type { MapNode } from "./graph";
+import { kindLabel, type MapNode } from "./graph";
 import { MAP_H } from "./map.css";
 
 // region Styles
@@ -70,8 +69,14 @@ const Panel = styled.aside<{ stylesOverride?: SerializedStyles }>`
     overflow-wrap: anywhere;
   }
   .counts,
-  .links {
+  .links,
+  .actions {
     margin-top: ${(p) => p.theme.space(3)};
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: ${(p) => p.theme.space(2)};
   }
   .muted {
     color: ${(p) => p.theme.color.textMuted};
@@ -121,7 +126,7 @@ function trafficLink(installId: string, gateway: LinkedRef, n: MapNode, rows: Pa
   const q = new URLSearchParams({ gateway: `${gateway.namespace ?? ""}/${gateway.name}` });
   const first = rows[n.rows[0] ?? -1];
   if (n.kind === "listener") q.set("listener", n.name);
-  else if (n.kind === "route" && n.ref) q.set("route", refParam(n.ref));
+  else if ((n.kind === "route" || n.kind === "rule") && n.ref) q.set("route", refParam(n.ref));
   else if (n.kind === "backend" && n.ref) q.set("backend", backendParam(n.ref));
   else if (n.action && first?.routes.length)
     q.set("route", refParam(first.routes[first.routes.length - 1] as LinkedRef));
@@ -148,6 +153,12 @@ interface SidePanelProps {
   /** Move focus into the panel when it mounts; the map keys it by node, so another node mounts it again. */
   takeFocus?: boolean;
   onClose: () => void;
+  /** Expands or collapses a route node. */
+  onToggle?: () => void;
+  /** The map is focused on this node. */
+  focused: boolean;
+  /** Focuses the map on this node, or clears the focus. */
+  onFocus: (on: boolean) => void;
   stylesOverride?: SerializedStyles;
 }
 
@@ -155,7 +166,18 @@ interface SidePanelProps {
  * A map node's state, the paths through it by state, its own problems, a backend's endpoints, and links to its
  * detail and to Traffic (design §6.1). A node's state names only its own signals, so the path counts say what fails through it.
  */
-export function SidePanel({ installId, gateway, node, rows, takeFocus, onClose, stylesOverride }: SidePanelProps) {
+export function SidePanel({
+  installId,
+  gateway,
+  node,
+  rows,
+  takeFocus,
+  onClose,
+  onToggle,
+  focused,
+  onFocus,
+  stylesOverride,
+}: SidePanelProps) {
   const self = useRef<HTMLElement>(null);
   useEffect(() => {
     if (takeFocus) self.current?.focus();
@@ -171,13 +193,12 @@ export function SidePanel({ installId, gateway, node, rows, takeFocus, onClose, 
   const lines = ORDER.filter((s) => counts[s] > 0 || (s === "error" && !stale));
   const detail = detailLink(installId, gateway, node);
   const ports = node.kind === "backend" ? endpointsByPort(node, rows) : [];
-  const kind = node.action ? mapCopy.action : node.kind === "listener" ? listenerCopy.listener : node.ref?.kind;
   return (
     <Panel ref={self} tabIndex={-1} aria-label={mapCopy.panel} data-testid="map-panel" stylesOverride={stylesOverride}>
       <header>
         <div>
           <div className="kind">
-            {kind}
+            {kindLabel(node)}
             {node.delegatedUnder && ` · ${cellCopy.delegated}`}
           </div>
           <h2>{node.name}</h2>
@@ -187,6 +208,16 @@ export function SidePanel({ installId, gateway, node, rows, takeFocus, onClose, 
           <X size={16} aria-hidden="true" />
         </Close>
       </header>
+      <div className="actions">
+        {node.kind === "route" && onToggle ? (
+          <TextButton type="button" onClick={onToggle}>
+            {node.expanded ? mapCopy.collapse : mapCopy.expand}
+          </TextButton>
+        ) : null}
+        <TextButton type="button" onClick={() => onFocus(!focused)}>
+          {focused ? mapCopy.clearFocus : mapCopy.focus}
+        </TextButton>
+      </div>
       {total > 0 ? (
         <ul className="counts" data-testid="map-panel-counts">
           {counts.healthy === total ? (

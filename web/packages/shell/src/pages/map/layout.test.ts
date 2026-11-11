@@ -73,17 +73,18 @@ it("one node per distinct Gateway, listener, route and backend, each with the ro
   expect(new Set(g.edges.map((e) => e.id)).size).toBe(g.edges.length);
 });
 
-it("delegated routes sit under their root with delegatedUnder, and only the root has a listener edge", () => {
+it("an expanded root's delegated routes sit under it with delegatedUnder, and only the root has a listener edge", () => {
   const rows = [
     row("http", ["parent"], undefined, { action: "delegate", shareState: "not-shown", share: undefined }),
     row("http", ["parent", "child"], "svc-a"),
     row("http", ["other"], "svc-b"),
     row("http", ["parent", "child2"], "svc-b"),
   ];
-  const g = buildGraph(rows, new Set());
   const root = "r:gateway.networking.k8s.io/HTTPRoute/shop/parent";
-  const child = "r:gateway.networking.k8s.io/HTTPRoute/shop/child";
-  const child2 = "r:gateway.networking.k8s.io/HTTPRoute/shop/child2";
+  const g = buildGraph(rows, new Set([root]));
+  // A delegated route's id is its chain from the root.
+  const child = `${root}~gateway.networking.k8s.io/HTTPRoute/shop/child`;
+  const child2 = `${root}~gateway.networking.k8s.io/HTTPRoute/shop/child2`;
   expect(g.nodes.find((n) => n.id === child)?.delegatedUnder).toBe(root);
   expect(g.nodes.find((n) => n.id === root)?.delegatedUnder).toBeUndefined();
   // The root covers its delegated rows too, so hover through it reaches the children's backends.
@@ -103,7 +104,10 @@ it("delegated routes sit under their root with delegatedUnder, and only the root
 });
 
 it("a route attached directly and also delegated is a root", () => {
-  const g = buildGraph([row("http", ["parent", "child"], "svc-a"), row("http", ["child"], "svc-a")], new Set());
+  const g = buildGraph(
+    [row("http", ["parent", "child"], "svc-a"), row("http", ["child"], "svc-a")],
+    new Set(["r:gateway.networking.k8s.io/HTTPRoute/shop/parent"]),
+  );
   expect(
     g.nodes.find((n) => n.id === "r:gateway.networking.k8s.io/HTTPRoute/shop/child")?.delegatedUnder,
   ).toBeUndefined();
