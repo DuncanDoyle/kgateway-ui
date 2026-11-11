@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"time"
 	"weak"
 
 	corev1 "k8s.io/api/core/v1"
@@ -372,5 +373,46 @@ func TestMemosReleaseOldModel(t *testing.T) {
 	goruntime.GC()
 	if old.Value() != nil {
 		t.Fatal("the previous model is still reachable after a new publication")
+	}
+}
+
+// §9: a read the Service's cached fact cannot split shows that port as
+// unavailable, never as an empty complete read; a partial read shows its
+// items with the cached counts at the cache's read time.
+func TestBackendDetailUnsplitAndPartial(t *testing.T) {
+	r := namedReader()
+	r.items["other-svc"] = []endpoints.Endpoint{{Address: "10.0.2.1", Port: 80, PortName: "http", Ready: true}}
+	_, srv, _ := startWith(t, backendsSetup(nil, r), backendsWorld()...)
+	for _, s := range get[BackendDetail](t, srv, detailURL("-", "Service", "other-svc"), 200).Sources {
+		if s.Complete != endpoints.Unavailable || len(s.Items) != 0 || s.Ready != nil {
+			t.Fatalf("unsplit read %+v", s)
+		}
+	}
+	partial := readerFunc(func(_ context.Context, _ string, svc objects.Ref) (endpoints.Result, error) {
+		return endpoints.Result{Complete: endpoints.Partial, Items: r.items[svc.Name], ReadAt: testutil.Now.Add(time.Hour)}, nil
+	})
+	_, srv2, _ := startWith(t, backendsSetup(nil, partial), backendsWorld()...)
+	s := get[BackendDetail](t, srv2, detailURL("-", "Service", "cart-svc"), 200).Sources[0]
+	if s.Complete != endpoints.Partial || len(s.Items) != 1 || s.Ready == nil || *s.Ready != 1 || !s.ReadAt.Equal(testutil.Now) {
+		t.Fatalf("partial read %+v (readAt %v)", s, s.ReadAt)
+	}
+}
+
+// §13: a backend only hidden routes write is not listed, and an in-scope
+// Backend a hidden route uses is never shown as unused.
+func TestBackendsHiddenRoutesOnly(t *testing.T) {
+	_, srv, _ := startWith(t, backendsSetup(hideKinds("HTTPRoute", "unattached", "to-back"), nil), backendsWorld()...)
+	all := get[BackendsResponse](t, srv, backendsURL+"?limit=200", 200)
+	rows := rowsByName(all)
+	if _, ok := rows["lonely-svc"]; ok || !all.Hidden {
+		t.Fatalf("lonely-svc listed through a hidden route, or hidden unset: %v", all.Hidden)
+	}
+	if _, ok := rows["be-used"]; !ok {
+		t.Fatal("the in-scope Backend be-used is not listed")
+	}
+	for _, r := range get[BackendsResponse](t, srv, backendsURL+"?used=no", 200).Rows {
+		if r.Ref.Name == "be-used" {
+			t.Fatal("be-used, used by a hidden route, is shown as unused")
+		}
 	}
 }

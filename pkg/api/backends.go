@@ -181,12 +181,15 @@ func (h *handler) serviceDetail(ctx context.Context, out *BackendDetail, m *engi
 		switch {
 		case external:
 			src.Complete, src.ReadAt = paths.EndpointsNotApplicable, wireTime(m.Snapshot.TakenAt)
-		case read && sp != nil:
+		case read && sp == nil:
+			// Without the Service port's name the read cannot be split, so this port has no endpoints to show.
+			src.Complete = endpoints.Unavailable
+		case read:
 			src.Items = portItems(res.Items, sp.Name)
 			if res.Complete == endpoints.Complete {
 				src.Ready, src.Total = familyCounts(src.Items)
 			} else if c != nil && c.Complete == paths.EndpointsComplete {
-				src.Ready, src.Total = c.Ready, c.Total
+				src.Ready, src.Total, src.ReadAt = c.Ready, c.Total, wireTime(c.ReadAt)
 			}
 		case c != nil && c.Complete == paths.EndpointsComplete:
 			// The scoped read established nothing: the cached counts show, with their own read time.

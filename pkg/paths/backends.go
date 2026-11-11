@@ -55,6 +55,8 @@ type Backend struct {
 	// Problem is the worst of its path problems, its own signals and the
 	// attachment signals of routes that write it with no path to it.
 	Problem Problem
+	// hiddenUse is set when a route or consumer the viewer may not see uses it.
+	hiddenUse bool
 }
 
 // Used is the number of visible routes and consumers that use b.
@@ -78,6 +80,8 @@ type backends struct {
 	rowRoutes [][]objects.Ref
 	// sets are, per item, the distinct signal sets of its visible rows.
 	sets [][][]Signal
+	// listed is set, per item, by a reason to list it the viewer may see.
+	listed []bool
 	// accepted memoises per attachment whether its status accepts it: 1 yes, -1 no.
 	accepted []int8
 	found    map[objects.Ref][]*health.Finding
@@ -112,7 +116,7 @@ func (b *backends) add(ref objects.Ref) *Backend {
 	}
 	b.index[ref] = len(b.set.Items)
 	b.set.Items = append(b.set.Items, Backend{Ref: ref})
-	b.rowRoutes, b.sets = append(b.rowRoutes, nil), append(b.sets, nil)
+	b.rowRoutes, b.sets, b.listed = append(b.rowRoutes, nil), append(b.sets, nil), append(b.listed, false)
 	return &b.set.Items[len(b.set.Items)-1]
 }
 
@@ -144,9 +148,10 @@ func (b *backends) rows() {
 		route := t.Refs[t.routes[chain[len(chain)-1]].ref]
 		b.rowRoutes[i] = insert(b.rowRoutes[i], route, compareRefs)
 		if b.in.Visible != nil && !b.in.Visible(t.Deps(r)) {
-			b.set.Hidden = true
+			b.set.Hidden, it.hiddenUse = true, true
 			continue
 		}
+		b.listed[i] = true
 		it.Paths++
 		if b.confirmed(r) {
 			it.Confirmed++
@@ -222,11 +227,12 @@ func (b *backends) written() {
 				}
 			}
 			if !b.can(row.Ref) {
-				b.set.Hidden = true
+				b.set.Hidden, it.hiddenUse = true, true
 				continue
 			}
 			it.Routes = insert(it.Routes, row.Ref, compareRefs)
 			i := b.index[ref]
+			b.listed[i] = true
 			if _, ok := slices.BinarySearchFunc(b.rowRoutes[i], row.Ref, compareRefs); ok {
 				continue
 			}
@@ -302,8 +308,8 @@ func (b *backends) inScope() {
 	for _, k := range kinds.ByCategory(b.in.Served, kinds.CategoryBackend) {
 		for _, u := range snap.Objects[k.GVR()] {
 			ref := objects.RefOf(u)
-			if b.wanted(ref) && scope.Contains(u.GetNamespace(), named(snap.Namespaces, u.GetNamespace())) {
-				b.add(ref)
+			if b.wanted(ref) && scope.Contains(u.GetNamespace(), named(snap.Namespaces, u.GetNamespace())) && b.add(ref) != nil {
+				b.listed[b.index[ref]] = true
 			}
 		}
 	}
@@ -315,14 +321,17 @@ func (b *backends) consumers() {
 		if !b.wanted(c.BackendRef) {
 			continue
 		}
-		if !b.can(c.Consumer) {
-			b.set.Hidden = true
+		it := b.add(c.BackendRef)
+		if it == nil {
 			continue
 		}
-		if it := b.add(c.BackendRef); it != nil {
-			it.Consumers = append(it.Consumers, c)
-			it.addPort(int32(c.Port)) // #nosec G115 -- a port fits in int32
+		if !b.can(c.Consumer) {
+			b.set.Hidden, it.hiddenUse = true, true
+			continue
 		}
+		b.listed[b.index[c.BackendRef]] = true
+		it.Consumers = append(it.Consumers, c)
+		it.addPort(int32(c.Port)) // #nosec G115 -- a port fits in int32
 	}
 }
 
@@ -374,6 +383,16 @@ func (b *backends) finish() {
 		it.Own = merge("", nil, it.Own).Signals
 		it.Problem = merge(it.Problem.State, b.sets[i], it.Own)
 	}
+	// A backend only hidden rows, routes or consumers use is not listed.
+	kept := b.set.Items[:0]
+	for i := range b.set.Items {
+		if b.listed[i] {
+			kept = append(kept, b.set.Items[i])
+		} else {
+			b.set.Hidden = true
+		}
+	}
+	b.set.Items = kept
 }
 
 // merge is the problem of a backend: the worst of state and its signals,
@@ -536,7 +555,8 @@ func (q *BackendQuery) matches(b *Backend, qs string) bool {
 	case q.Kind != "" && b.Ref.Kind != q.Kind,
 		q.Namespace != "" && b.Ref.Namespace != q.Namespace,
 		len(q.States) > 0 && !slices.Contains(q.States, b.Problem.State),
-		q.Used == UsedYes && b.Used() == 0, q.Used == UsedNo && b.Used() > 0,
+		// A backend a hidden route or consumer uses is never shown as unused.
+		q.Used == UsedYes && b.Used() == 0, q.Used == UsedNo && (b.Used() > 0 || b.hiddenUse),
 		qs != "" && !strings.Contains(strings.ToLower(b.Ref.Namespace+"/"+b.Ref.Name), qs):
 		return false
 	}
