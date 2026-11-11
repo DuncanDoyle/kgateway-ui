@@ -426,7 +426,11 @@ it("restricted objects show no names or data", async () => {
   expect(be1).toHaveTextContent("Restricted");
   expect(within(be1).queryByTestId("condition-Accepted")).toBeNull();
   expect(within(be1).queryByRole("link", { name: /shop\/be1/ })).toBeNull();
-  expect(within(be1).queryByRole("link")).toBeNull();
+  // With no backend detail to open, a hidden Backend keeps the lookup of other routes using it.
+  const look = within(be1).getByRole("link", { name: "Other routes using this backend" });
+  expect(new URL(look.getAttribute("href") ?? "", "http://ui").searchParams.get("backend")).toBe(
+    "gateway.kgateway.dev/Backend/shop/be1",
+  );
   // A hidden child of a name ref: written name as text, state Restricted.
   expect(within(backend("child")).queryByRole("link", { name: /shop\/child/ })).toBeNull();
   expect(backend("child")).toHaveTextContent("Restricted");

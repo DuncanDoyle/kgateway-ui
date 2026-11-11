@@ -236,6 +236,7 @@ export const routeCopy = {
   mirrorTo: "Mirror to", // S80
   weight: (n: number, defaulted?: boolean) => `Weight ${n}${defaulted ? " (default)" : ""}`, // S81
   restricted: "Restricted", // S82
+  otherRoutes: "Other routes using this backend", // S83 (fixed)
   backendAccepted: "Configuration accepted", // S84 (fixed)
   backendStale: "Describes an older generation of the Backend.", // S85
   backendNoEvidence: "The controller does not say which version it checked.", // S86, after "Accepted: True."
@@ -652,10 +653,9 @@ export const dataPlaneCopy = {
 // region Route trace (Phase 6.4, ids in docs/phases/phase-6/phase-6.4-wording.md)
 /** The route trace on route detail (Phase 6 design §7); failure wording follows the protocol (§4.4). */
 export const traceCopy = {
-  serves: "Serves through", // S753
-  servesNone: "No path you can view reaches this route.", // S754
-  listener: (name: string, port?: number) => `Listener ${name}${port ? ` :${port}` : ""}`, // S755
-  grpcMethod: "gRPC method", // S756
+  serves: "Reached through", // S753
+  servesNone: "No visible path reaches this route.", // S754
+  listener: (name: string, port?: number) => `Listener ${name}${port ? ` on :${port}` : ""}`, // S755
   noFilters: "No filters.", // S757
   failShare: (pct: string, tcp: boolean) => `${pct} of ${tcp ? "connections" : "requests"} fail`, // S758
   mayFailShare: (pct: string) => `${pct} may fail`, // S759

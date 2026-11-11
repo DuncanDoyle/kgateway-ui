@@ -1,9 +1,8 @@
 import type { Endpoints, GRPCMatch, PathRow } from "../../api/types";
-import { routeCopy } from "../../copy/explorer";
 import { cellCopy, endpointCopy, shareCopy, signalDetail, signalText } from "../../copy/traffic";
 import type { HealthState } from "../../theme/tokens";
 import { refText } from "../explore/listParts";
-import { matchText } from "../explore/route/MatchLine";
+import { grpcParts, matchText } from "../explore/route/MatchLine";
 
 // Text of a path row's cells, shared by the table and its tests (Phase 6 design §4).
 
@@ -40,10 +39,7 @@ export function keyRows(rows: PathRow[]): Map<PathRow, string> {
   return out;
 }
 
-const grpcText = (m: GRPCMatch) =>
-  [m.method?.service || m.method?.method ? `${m.method.service ?? "*"}/${m.method.method ?? "*"}` : cellCopy.anyMethod]
-    .concat((m.headers ?? []).map((h) => `${routeCopy.header} ${h.name} ${h.type} ${h.value}`))
-    .join(" ");
+const grpcText = (m: GRPCMatch) => grpcParts(m.method, m.headers).join(" ");
 
 /** The rule's match on this path: the root route's kind decides which match fields apply (design §4.1). */
 export function matchSummary(r: PathRow): { text: string; full: string; unknown?: boolean } {

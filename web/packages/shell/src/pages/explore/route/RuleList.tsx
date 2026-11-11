@@ -13,10 +13,13 @@ import { HealthIcon } from "../../../health/HealthIcon";
 import { StaleView } from "../../../health/staleView";
 import { stateLabel } from "../../../health/state";
 import { YamlBlock } from "../../../resource/ResourceYaml";
+import { installPath } from "../../../shell/paths";
+import { InlineLink } from "../../../states/controls";
 import type { HealthState } from "../../../theme/tokens";
 import { tcpKind } from "../../traffic/pathText";
 import { MatchLine } from "./MatchLine";
 import { RefFacts, RefWhy } from "./RefTrace";
+import { backendParam } from "./refs";
 import { ShareBar } from "./ShareBar";
 
 // region Styles
@@ -285,6 +288,14 @@ function BackendItem({ b, installId, serves, tcp }: BackendItemProps) {
             ) : b.backend?.state && !b.problem ? (
               <HealthBadge state={b.backend.state} />
             ) : null}
+            {/* With no backend detail to open, a restricted viewer can still find the other routes using it. */}
+            {b.backend?.restricted ? (
+              <InlineLink
+                to={`${installPath(installId, "routes")}?${new URLSearchParams({ backend: backendParam(b.ref) })}`}
+              >
+                {routeCopy.otherRoutes}
+              </InlineLink>
+            ) : null}
           </span>
           <RefWhy b={b} serves={serves} />
           {b.backend?.accepted ? (
@@ -335,9 +346,10 @@ export function RuleList({ installId, kind, rules, serves = [], stylesOverride }
               <div>
                 <h4>{routeCopy.matches}</h4>
                 {/* Omitted matches arrive with the CRD default; only an explicit [] is empty (computed-rules §3.2). */}
-                {r.matches.length ? (
+                {/* A GRPCRoute's omitted or empty matches match every method. */}
+                {r.matches.length || kind === "GRPCRoute" ? (
                   <ul>
-                    {r.matches.map((m, i) => (
+                    {(r.matches.length ? r.matches : [{}]).map((m, i) => (
                       // biome-ignore lint/suspicious/noArrayIndexKey: positional
                       <li key={i} className="line" data-testid="match">
                         <MatchLine m={m} grpc={kind === "GRPCRoute"} />

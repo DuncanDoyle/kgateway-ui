@@ -63,8 +63,24 @@ const Segment = styled.div<{ $share: number; $state: "shown" | HealthState }>`
   font-size: ${(p) => p.theme.font.size.xs};
   font-weight: ${(p) => p.theme.font.weight.semibold};
   white-space: nowrap;
+  /* A pattern tells failing from may-fail at any width, not colour alone; iconFg on iconBg is at least 3:1. */
+  &[data-pattern="stripes"] {
+    background-image: repeating-linear-gradient(
+      135deg,
+      ${(p) => p.theme.color.status.error.iconFg} 0 1.5px,
+      transparent 1.5px 6px
+    );
+  }
+  &[data-pattern="dots"] {
+    background-image: radial-gradient(${(p) => p.theme.color.status.warning.iconFg} 1.2px, transparent 1.6px);
+    background-size: 5px 5px;
+  }
   .fits {
     display: none;
+    padding: 0 3px;
+    border-radius: 2px;
+    background: inherit;
+    background-image: none;
   }
   @container (min-width: 48px) {
     .fits {
@@ -79,7 +95,12 @@ const Segment = styled.div<{ $share: number; $state: "shown" | HealthState }>`
 type Bar =
   | { kind: "not-shown" }
   | { kind: "no-traffic" }
-  | { kind: "split"; failing: number; mayFail: number; parts: { i: number; share: number; state: string }[] };
+  | {
+      kind: "split";
+      failing: number;
+      mayFail: number;
+      parts: { i: number; name: string; share: number; state: string }[];
+    };
 
 /** The rule's bar from its refs' shares (design §4.4); undefined when the server sent no share for the rule. */
 export function ruleBar(refs: BackendRef[]): Bar | undefined {
@@ -90,13 +111,15 @@ export function ruleBar(refs: BackendRef[]): Bar | undefined {
   if (refs.every((b) => b.shareState === "no-traffic")) return { kind: "no-traffic" };
   const sum = (s: string) => refs.reduce((n, b) => n + (b.shareState === s ? (b.share ?? 0) : 0), 0);
   const parts = refs
-    .map((b, i) => ({ i, share: b.share ?? 0, state: b.shareState ?? "shown" }))
+    .map((b, i) => ({ i, name: b.ref.name, share: b.share ?? 0, state: b.shareState ?? "shown" }))
     .filter((p) => p.share > 0);
   return { kind: "split", failing: sum("failing"), mayFail: sum("may-fail"), parts };
 }
 
 const segState = (s: string, stale: boolean): "shown" | HealthState =>
   stale ? "unknown" : s === "failing" ? "error" : s === "may-fail" ? "warning" : "shown";
+
+const pattern = { error: "stripes", warning: "dots" } as Partial<Record<string, string>>;
 
 // region Component
 interface ShareBarProps {
@@ -143,13 +166,24 @@ export function ShareBar({ refs, tcp, stylesOverride }: ShareBarProps) {
       {bar.kind === "not-shown" ? null : (
         <Track
           role="img"
-          aria-label={traceCopy.barLabel(refs.map((b) => `${b.ref.name} ${shareCopy.percent(b.share ?? 0)}`))}
+          aria-label={
+            bar.kind === "split"
+              ? traceCopy.barLabel(bar.parts.map((p) => `${p.name} ${shareCopy.percent(p.share)}`))
+              : traceCopy.noTraffic
+          }
         >
           {bar.kind === "split"
             ? bar.parts.map((p) => {
                 const s = segState(p.state, stale);
                 return (
-                  <Segment key={p.i} $share={p.share} $state={s} data-testid="share-segment" data-state={s}>
+                  <Segment
+                    key={p.i}
+                    $share={p.share}
+                    $state={s}
+                    data-testid="share-segment"
+                    data-state={s}
+                    data-pattern={pattern[s]}
+                  >
                     <span className="fits">
                       {s === "shown" ? null : <HealthIcon state={s} size={12} notice />}
                       {shareCopy.percent(p.share)}

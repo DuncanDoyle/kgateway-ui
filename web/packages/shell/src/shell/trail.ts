@@ -212,10 +212,12 @@ export function useLinkVia(installId: string): string | undefined {
   return useMemo(() => leavingVia(pathname, search, installId), [pathname, search, installId]);
 }
 
+const ROUTE_KINDS = new Set(["HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute"]);
+
 /** The list page of an object's kind, for the trail without `via`; undefined for a kind without one. */
 export function kindList(r: Ref): Crumb | undefined {
   if (r.group === GW && r.kind === "Gateway") return { kind: "list", path: "gateways", search: "" };
-  if (r.group === GW && r.kind === "HTTPRoute") return { kind: "list", path: "routes", search: "" };
+  if (r.group === GW && ROUTE_KINDS.has(r.kind)) return { kind: "list", path: "routes", search: "" };
   if (r.kind.endsWith("ListenerSet")) return { kind: "list", path: "listenersets", search: "" };
   return undefined;
 }

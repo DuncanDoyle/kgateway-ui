@@ -48,8 +48,8 @@ const refs = (d: RouteDetail, rule = 0) => d.rules[rule]?.backendRefs as Backend
 it("a GRPCRoute: the match line shows service/method, weights 1/3 show 25 % / 75 %, and the noun follows the kind", async () => {
   const rule = await open("GRPCRoute", "shop", "grpc", detail(grpcGolden));
   expect(screen.getByTestId("detail-header")).toHaveTextContent("GRPCRoute");
-  expect(within(rule).getByTestId("match")).toHaveTextContent("gRPC method Exact cart.Cart/Get");
-  expect(within(rule).getByTestId("match")).toHaveTextContent("Header x-env Exact prod");
+  // The same text as Traffic's match cell: service/method, then headers.
+  expect(within(rule).getByTestId("match")).toHaveTextContent(/^cart\.Cart\/GetHeader x-env Exact prod$/);
   const bar = within(rule).getByTestId("share-bar");
   expect(bar).toHaveTextContent("% of this rule's requests");
   expect(
@@ -67,8 +67,8 @@ it("serves lists each attachment with its state, and a backend's signals name th
   const rule = await open("GRPCRoute", "shop", "grpc", detail(grpcGolden));
   const serves = screen.getAllByTestId("serves");
   expect(serves.map((s) => s.textContent)).toEqual([
-    expect.stringMatching(/^Healthy.*infra\/edge.*Listener http :80.*Any hostname$/),
-    expect.stringMatching(/^Error.*infra\/other.*Listener web :8080.*Any hostname$/),
+    expect.stringMatching(/^Healthy.*infra\/edge.*Listener http on :80.*Any hostname$/),
+    expect.stringMatching(/^Error.*infra\/other.*Listener web on :8080.*Any hostname$/),
   ]);
   const why = within(line(rule, "cart-svc")).getByTestId("problem");
   expect(why).toHaveTextContent("On infra/other, listener web: Listener Programmed is False");
@@ -135,6 +135,10 @@ it("may-fail refs flag their share; a rule of delegation refs only has no bar", 
       .getAllByTestId("share-segment")
       .map((s) => s.getAttribute("data-state")),
   ).toEqual(["warning", "warning", "warning"]);
+  // The screen-reader label names only the bar's parts: no 0 % ref.
+  expect(within(second).getByRole("img")).toHaveAccessibleName(
+    "Share of this rule's requests: cart-svc 33.3 %, w1 33.3 %, be1 33.3 %",
+  );
   // Rule 1 only delegates.
   expect(within(screen.getByRole("region", { name: /^Rule 1\b/ })).queryByTestId("share-bar")).toBeNull();
 });
@@ -154,4 +158,29 @@ it("stale route data shows every trace state unknown and no flags", async () => 
       .getAllByTestId("share-segment")
       .map((s) => s.getAttribute("data-state")),
   ).toEqual(["unknown", "unknown"]);
+});
+
+it("a GRPCRoute rule with no matches matches any method", async () => {
+  const d = detail(grpcGolden);
+  (d.rules[0] as { matches: unknown[] }).matches = [];
+  const rule = await open("GRPCRoute", "shop", "grpc", d);
+  expect(within(rule).getByTestId("match")).toHaveTextContent(/^Any method$/);
+  expect(within(rule).queryByTestId("match-empty")).toBeNull();
+});
+
+it("failing and may-fail parts carry a pattern, so a narrow part is not told apart by colour alone", async () => {
+  const d = detail(grpcGolden);
+  const [a, b] = refs(d) as [BackendRef, BackendRef];
+  a.shareState = "failing";
+  b.shareState = "may-fail";
+  const rule = await open("GRPCRoute", "shop", "grpc", d);
+  const parts = within(rule).getAllByTestId("share-segment");
+  expect(parts.map((p) => [p.dataset.state, p.dataset.pattern])).toEqual([
+    ["error", "stripes"],
+    ["warning", "dots"],
+  ]);
+  // Each pattern has a rule of its own in the stylesheet.
+  const css = [...document.querySelectorAll("style")].map((x) => x.textContent ?? "").join("");
+  expect(css).toMatch(/\[data-pattern="stripes"\]\{[^}]*repeating-linear-gradient/);
+  expect(css).toMatch(/\[data-pattern="dots"\]\{[^}]*radial-gradient/);
 });
