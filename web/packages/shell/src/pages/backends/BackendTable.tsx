@@ -2,7 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useMemo } from "react";
 import type { BackendRow, Page } from "../../api/types";
-import { backendColumnCopy, backendsCopy, portEndpoints, usedByCopy } from "../../copy/backends";
+import { backendColumnCopy, backendsCopy, noPortCopy, portEndpoints, usedByCopy } from "../../copy/backends";
 import { columnCopy } from "../../copy/explorer";
 import { endpointCopy, pathColumnCopy } from "../../copy/traffic";
 import type { SortState } from "../../explore/listQuery";
@@ -27,7 +27,11 @@ const Problem = styled.span`
 // region Helpers
 /** The endpoints cell: each referenced port's count, or why there is none (design §8.1). */
 export function endpointsCellText(r: BackendRow): { text: string; muted: boolean } {
-  if (!r.endpoints.length) return { text: endpointCopy.unknown, muted: true };
+  if (!r.endpoints.length) {
+    // A Service missing from the cache has ports but no summary; otherwise no route wrote a port.
+    const missing = r.problem.signals.some((s) => s.kind === "waiting" && s.code === "missing");
+    return { text: missing ? endpointCopy.unknown : noPortCopy, muted: true };
+  }
   const parts = r.endpoints.map((e) => (e.port ? portEndpoints(e.port.port, endpointsText(e)) : endpointsText(e)));
   return { text: parts.join(" · "), muted: r.endpoints.every((e) => e.complete === "not-applicable") };
 }

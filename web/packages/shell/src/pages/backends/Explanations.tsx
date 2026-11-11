@@ -61,7 +61,11 @@ export function Explanations({ installId, explanations, stylesOverride }: Explan
       <h2 id="backend-explanations">{explanationCopy.title}</h2>
       <List stylesOverride={stylesOverride}>
         {explanations.map((e, i) => (
-          <Item key={`${e.route.namespace}/${e.route.name}/${e.path}`} data-testid="explanation" data-kind={e.kind}>
+          <Item
+            key={`${e.route.kind}/${e.route.namespace}/${e.route.name}/${e.path}`}
+            data-testid="explanation"
+            data-kind={e.kind}
+          >
             <div className="head">
               <span>
                 <span className="muted">{e.route.kind}</span> <LinkedName refValue={e.route} installId={installId} />

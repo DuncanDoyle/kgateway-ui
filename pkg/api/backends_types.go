@@ -21,12 +21,33 @@ type BackendRowDTO struct {
 // BackendsResponse is GET …/backends. Hidden says a backend, path, route or
 // consumer was left out for the caller (design §13).
 type BackendsResponse struct {
-	Install     string          `json:"install"`
-	Rows        []BackendRowDTO `json:"rows"`
-	Next        string          `json:"next,omitempty"`
-	Prev        string          `json:"prev,omitempty"`
-	Hidden      bool            `json:"hidden,omitempty"`
-	CollectedAt time.Time       `json:"collectedAt"`
+	Install string          `json:"install"`
+	Rows    []BackendRowDTO `json:"rows"`
+	Next    string          `json:"next,omitempty"`
+	Prev    string          `json:"prev,omitempty"`
+	Hidden  bool            `json:"hidden,omitempty"`
+	// Facets are the Gateways and namespaces of the visible backends, each
+	// counted with every filter but its own.
+	Facets      *BackendFacetsDTO `json:"facets,omitempty"`
+	CollectedAt time.Time         `json:"collectedAt"`
+}
+
+// BackendFacetsDTO lists the gateway and namespace filter values, sorted by name.
+type BackendFacetsDTO struct {
+	Gateways   []BackendGatewayFacetDTO   `json:"gateways"`
+	Namespaces []BackendNamespaceFacetDTO `json:"namespaces"`
+}
+
+// BackendGatewayFacetDTO is a Gateway and the backends it has a visible path to.
+type BackendGatewayFacetDTO struct {
+	Ref      LinkedRef `json:"ref"`
+	Backends int       `json:"backends"`
+}
+
+// BackendNamespaceFacetDTO is a namespace and the backends in it.
+type BackendNamespaceFacetDTO struct {
+	Name     string `json:"name"`
+	Backends int    `json:"backends"`
 }
 
 // BackendDetail is GET …/backends/{group}/{kind}/{ns}/{name} (design §8.2).

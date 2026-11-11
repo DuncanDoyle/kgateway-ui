@@ -73,7 +73,21 @@ func (h *handler) backendList(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, row)
 	}
-	writeJSON(w, BackendsResponse{Install: i.Resolved.ID(), Rows: rows, Next: pg.Next, Prev: pg.Prev, Hidden: set.Hidden, CollectedAt: wireTime(p.ConfirmedAt)})
+	writeJSON(w, BackendsResponse{Install: i.Resolved.ID(), Rows: rows, Next: pg.Next, Prev: pg.Prev, Hidden: set.Hidden,
+		Facets: backendFacetsDTO(l, pg.Facets), CollectedAt: wireTime(p.ConfirmedAt)})
+}
+
+// backendFacetsDTO is f on the wire; every facet's Gateway carries a visible path.
+func backendFacetsDTO(l linker, f paths.BackendFacets) *BackendFacetsDTO {
+	out := &BackendFacetsDTO{Gateways: make([]BackendGatewayFacetDTO, 0, len(f.Gateways)),
+		Namespaces: make([]BackendNamespaceFacetDTO, 0, len(f.Namespaces))}
+	for _, g := range f.Gateways {
+		out.Gateways = append(out.Gateways, BackendGatewayFacetDTO{Ref: l.linked(g.Ref), Backends: g.Backends})
+	}
+	for _, n := range f.Namespaces {
+		out.Namespaces = append(out.Namespaces, BackendNamespaceFacetDTO(n))
+	}
+	return out
 }
 
 // backendKind is the list's kind column: "Backend · <spec.type>" for a Backend with a type, else the ref's kind.

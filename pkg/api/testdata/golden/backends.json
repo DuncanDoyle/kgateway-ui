@@ -1,6 +1,46 @@
 {
   "body": {
     "collectedAt": "2026-10-17T12:00:00Z",
+    "facets": {
+      "gateways": [
+        {
+          "backends": 3,
+          "ref": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "back",
+            "namespace": "infra"
+          }
+        },
+        {
+          "backends": 4,
+          "ref": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "edge",
+            "namespace": "infra"
+          }
+        },
+        {
+          "backends": 2,
+          "ref": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "other",
+            "namespace": "infra"
+          }
+        }
+      ],
+      "namespaces": [
+        {
+          "backends": 10,
+          "name": "shop"
+        }
+      ]
+    },
     "install": "kgw.kgateway",
     "rows": [
       {

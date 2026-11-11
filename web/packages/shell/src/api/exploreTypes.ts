@@ -560,7 +560,24 @@ export interface BackendsResponse {
   next?: string;
   prev?: string;
   hidden?: boolean;
+  /** The Gateways and namespaces of the visible backends, each counted with every filter but its own. */
+  facets?: BackendFacets;
   collectedAt: string;
+}
+/** A Gateway and the backends it has a visible path to. */
+export interface BackendGatewayFacet {
+  ref: LinkedRef;
+  backends: number;
+}
+/** A namespace and the backends in it. */
+export interface BackendNamespaceFacet {
+  name: string;
+  backends: number;
+}
+/** The gateway and namespace filter values of the Backends list, sorted by name. */
+export interface BackendFacets {
+  gateways: BackendGatewayFacet[];
+  namespaces: BackendNamespaceFacet[];
 }
 /** A non-route object that uses a backend, such as a GatewayExtension. */
 export interface BackendConsumer {

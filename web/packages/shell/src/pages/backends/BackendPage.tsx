@@ -1,5 +1,4 @@
 import type { SerializedStyles } from "@emotion/react";
-import styled from "@emotion/styled";
 import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useBackendDetail } from "../../api/exploreHooks";
@@ -14,11 +13,6 @@ import { Explanations } from "./Explanations";
 import { ExposureSection } from "./ExposureSection";
 import { PortChain } from "./PortChain";
 import { StatusLine } from "./StatusLine";
-
-// region Styles
-const Conditions = styled.div`
-  margin-top: ${(p) => p.theme.space(3)};
-`;
 
 // region Helpers
 const isService = (r: { group: string; kind: string }) => r.group === "" && r.kind === "Service";
@@ -71,11 +65,15 @@ export function BackendPage({ stylesOverride }: BackendPageProps = {}) {
         <>
           <StatusLine detail={data} />
           <ExposureSection installId={id} backend={ref} exposure={data.exposure} consumers={data.consumers} />
-          <EndpointsSection sources={data.sources} onRetry={() => mutate()} />
+          <EndpointsSection
+            sources={data.sources}
+            noSuchPorts={data.portChain.filter((c) => c.noSuchPort).map((c) => c.refPort)}
+            onRetry={() => mutate()}
+          />
           {data.portChain.length ? <PortChain chains={data.portChain} /> : null}
           {data.explanations.length ? <Explanations installId={id} explanations={data.explanations} /> : null}
           <Section aria-labelledby="backend-facts">
-            <h2 id="backend-facts">{service ? factCopy.service : detailCopy.conditions}</h2>
+            <h2 id="backend-facts">{service ? factCopy.service : factCopy.facts(kind)}</h2>
             <Facts>
               <dt>{factCopy.kind}</dt>
               <dd>{data.ref.kind}</dd>
@@ -94,12 +92,13 @@ export function BackendPage({ stylesOverride }: BackendPageProps = {}) {
                 </>
               ) : null}
             </Facts>
-            {service ? null : (
-              <Conditions>
-                <ConditionList conditions={data.conditions ?? []} generation={generation} />
-              </Conditions>
-            )}
           </Section>
+          {service ? null : (
+            <Section aria-labelledby="backend-conditions">
+              <h2 id="backend-conditions">{detailCopy.conditions}</h2>
+              <ConditionList conditions={data.conditions ?? []} generation={generation} />
+            </Section>
+          )}
         </>
       ) : null}
     </DetailFrame>

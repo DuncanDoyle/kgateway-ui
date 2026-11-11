@@ -84,8 +84,8 @@ export const endpointCopy = {
   stale: "Out of date", // S645
   notApplicable: "Not applicable", // S646
   unknown: "Unknown", // S647
-  timedOut: "Timed out", // S672
-  busy: "Busy, retry", // S673
+  timedOut: "Read timed out", // S672
+  busy: "Busy, try again", // S673
 };
 
 /** View C notes on delegated rows (design §4.2). */

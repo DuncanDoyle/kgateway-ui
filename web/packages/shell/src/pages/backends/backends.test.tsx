@@ -6,7 +6,6 @@ import backendGolden from "../../../../../../pkg/api/testdata/golden/backend-det
 import explainedGolden from "../../../../../../pkg/api/testdata/golden/backend-detail-explained.json";
 import serviceGolden from "../../../../../../pkg/api/testdata/golden/backend-detail-service.json";
 import backendsGolden from "../../../../../../pkg/api/testdata/golden/backends.json";
-import gatewaysGolden from "../../../../../../pkg/api/testdata/golden/gateways.json";
 import type { BackendDetail, BackendsResponse, Endpoints, PathSignal } from "../../api/types";
 import { kgatewayWebPack } from "../../kgateway/webPack";
 import { ShellExtensionContext, useShellExtension } from "../../shell/extension";
@@ -79,10 +78,7 @@ afterEach(() => {
 
 // region List
 it("the Problems, Services, Backend resources, Unused, Namespace and Gateway chips map to the list params", async () => {
-  serve({
-    [`${API}/backends`]: () => list(),
-    [`${API}/gateways`]: () => ({ ...gatewaysGolden.body, collectedAt: now() }),
-  });
+  serve({ [`${API}/backends`]: () => list() });
   mount(`/i/${ID}/backends`);
   const table = await screen.findByRole("table", { name: "Backends" });
   await within(table).findAllByLabelText("shop/cart-svc");
@@ -98,7 +94,7 @@ it("the Problems, Services, Backend resources, Unused, Namespace and Gateway chi
   expect(chip("Services")).toHaveAttribute("aria-pressed", "false");
   await userEvent.click(chip("Unused"));
   await waitFor(() => expect(last()?.get("used")).toBe("no"));
-  // The namespace chips come from the rows, the Gateway chips from the install's Gateways.
+  // The namespace and Gateway chips come from the list's facets.
   await userEvent.click(chip("shop"));
   await waitFor(() => expect(last()?.get("namespace")).toBe("shop"));
   await userEvent.click(await screen.findByRole("button", { name: "infra/edge" }));
@@ -115,10 +111,11 @@ it("the Problems, Services, Backend resources, Unused, Namespace and Gateway chi
 });
 
 it("rows show kind, endpoints per port, users and the problem; a row opens backend detail", async () => {
-  serve({
-    [`${API}/backends`]: () => list(),
-    [`${API}/gateways`]: () => ({ ...gatewaysGolden.body, collectedAt: now() }),
-  });
+  const body = list();
+  // mirror-svc as if the cache held it: no summary because no route wrote a port.
+  const mirror = body.rows.find((r) => r.ref.name === "mirror-svc") as BackendsResponse["rows"][number];
+  mirror.problem = { state: "healthy", signals: [] };
+  serve({ [`${API}/backends`]: () => body });
   mount(`/i/${ID}/backends`);
   const table = await screen.findByRole("table", { name: "Backends" });
   const row = (name: string) =>
@@ -126,16 +123,44 @@ it("rows show kind, endpoints per port, users and the problem; a row opens backe
       .getAllByRole("row")
       .find((r) => within(r).queryByLabelText(name)) as HTMLElement;
   await within(table).findAllByLabelText("shop/cart-svc");
-  expect(row("shop/cart-svc")).toHaveTextContent("80: 1/1 ready");
+  expect(row("shop/cart-svc")).toHaveTextContent("Port 80: 1/1 ready");
+  // Routes count as references; a Gateway count of zero is left out.
+  expect(row("shop/cart-svc")).toHaveTextContent(/routes reference it · 2 Gateways/);
+  expect(row("shop/lonely-svc")).toHaveTextContent("1 route references it");
+  expect(row("shop/lonely-svc")).not.toHaveTextContent("0 Gateways");
+  // A Service missing from the cache is unknown; one in the cache with no written port says so.
+  expect(row("shop/lonely-svc")).toHaveTextContent("Unknown");
+  expect(row("shop/mirror-svc")).toHaveTextContent("No referenced port");
   expect(row("shop/be1")).toHaveTextContent("Backend · Static");
   expect(row("shop/be1")).toHaveTextContent("Not applicable");
-  expect(row("shop/be-unused")).toHaveTextContent("Not used");
+  expect(row("shop/be-unused")).toHaveTextContent("Unused");
   // Routes write it, but no accepted attachment reaches it.
-  expect(row("shop/lonely-svc")).toHaveTextContent("0 confirmed exposures");
+  expect(row("shop/lonely-svc")).toHaveTextContent("0 confirmed paths");
   expect(row("shop/authz")).toHaveTextContent("2 others");
   expect(within(row("shop/lonely-svc")).getByTestId("path-state")).toHaveTextContent("Error");
   const link = within(row("shop/cart-svc")).getByRole("link", { name: /cart-svc/ });
   expect(link.getAttribute("href")?.split("?")[0]).toBe(`/i/${ID}/backends/-/Service/shop/cart-svc`);
+});
+
+it("the chips come from the server's facets, and the Problems chip takes its states in any order", async () => {
+  const body = list();
+  body.facets = {
+    gateways: [
+      {
+        ref: { group: "gateway.networking.k8s.io", kind: "Gateway", namespace: "infra", name: "far", link: "detail" },
+        backends: 1,
+      },
+    ],
+    namespaces: [{ name: "elsewhere", backends: 1 }],
+  };
+  serve({ [`${API}/backends`]: () => body });
+  mount(`/i/${ID}/backends?state=unknown,error,warning`);
+  await within(await screen.findByRole("table", { name: "Backends" })).findAllByLabelText("shop/cart-svc");
+  expect(screen.getByRole("button", { name: "Problems" })).toHaveAttribute("aria-pressed", "true");
+  // Facet values, not the rows' namespaces or another list's Gateways.
+  expect(screen.getByRole("button", { name: "infra/far" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "elsewhere" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "shop" })).toBeNull();
 });
 
 // region Detail
@@ -214,6 +239,8 @@ it("a Backend's status line says it is not accepted, and its page keeps conditio
   );
   expect(screen.getByRole("tab", { name: "YAML" })).toBeInTheDocument();
   expect(screen.getByText("Backend type")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Backend facts" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Conditions" })).toBeInTheDocument();
   expect(screen.getByTestId("condition-Accepted")).toBeInTheDocument();
   // A Backend reads nothing: not applicable, with no read time.
   expect(screen.getByTestId("endpoints-summary")).toHaveTextContent("Not applicable");
@@ -233,9 +260,7 @@ it("a Service has no YAML tab; its facts, port chain and per-proxy slot show", a
   expect(chain).toHaveTextContent("Service port80 (web)");
   expect(chain).toHaveTextContent("Target porthttp-web (named, not resolved)");
   expect(chain).toHaveTextContent("Slice ports8080");
-  expect(screen.getByTestId("per-proxy-slot")).toHaveTextContent(
-    "Endpoints as each proxy sees them are not shown here.",
-  );
+  expect(screen.getByTestId("per-proxy-slot")).toHaveTextContent("Per-proxy endpoints are not shown.");
 });
 
 it("an unavailable source shows the cached counts only, never a table or a zero", async () => {
@@ -249,8 +274,8 @@ it("an unavailable source shows the cached counts only, never a table or a zero"
 
 it.each([
   ["partial", "Partly read"],
-  ["timed-out", "Timed out"],
-  ["busy", "Busy, retry"],
+  ["timed-out", "Read timed out"],
+  ["busy", "Busy, try again"],
   ["failed", "Read failed"],
 ] as const)("a %s read says %s and never 0 endpoints", async (complete, text) => {
   const d = detail(serviceGolden);
@@ -261,12 +286,26 @@ it.each([
   const summary = screen.getByTestId("endpoints-summary");
   expect(summary).toHaveTextContent(text);
   expect(summary.textContent).not.toMatch(/\b0\b/);
-  const retry = screen.queryByRole("button", { name: "Retry" });
+  const retry = screen.queryByRole("button", { name: "Try again" });
   if (complete === "busy" || complete === "timed-out") {
     const before = calls("/named-svc").length;
     await userEvent.click(retry as HTMLElement);
     await waitFor(() => expect(calls("/named-svc").length).toBeGreaterThan(before));
   } else expect(retry).toBeNull();
+});
+
+it("a port the Service lacks says so, with no read time", async () => {
+  const d = detail(serviceGolden);
+  d.portChain = [...d.portChain, { refPort: 9999, slicePorts: [], noSuchPort: true }];
+  d.sources = [...d.sources, { source: "kubernetes", port: { port: 9999 }, complete: "unavailable", readAt: now() }];
+  serveDetail(d);
+  mount(`/i/${ID}/backends/-/Service/shop/named-svc`);
+  await statusLine();
+  const src = screen.getAllByTestId("endpoints-source")[1] as HTMLElement;
+  expect(within(src).getByTestId("endpoints-summary")).toHaveTextContent("The Service has no port 9999.");
+  expect(src).not.toHaveTextContent(/Read /);
+  // The cached source keeps its read time.
+  expect(screen.getAllByTestId("endpoints-source")[0]).toHaveTextContent(/Read /);
 });
 
 it("a complete read lists each endpoint with ready, serving, terminating and its Pod", async () => {

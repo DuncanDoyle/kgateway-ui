@@ -64,7 +64,12 @@ test("Backends lists the zero-endpoint Service first in its namespace, and its d
   const first = rows.first();
   await expect(first.locator('td[data-col="name"]')).toHaveText("traffic/asleep");
   await expect(first.getByTestId("path-state")).toHaveText(stateLabel("warning"));
-  await expect(first.locator('td[data-col="endpoints"]')).toHaveText("8000: 0/0 ready");
+  await expect(first.locator('td[data-col="endpoints"]')).toHaveText("Port 8000: 0/0 ready");
+  // The namespace facet ignores its own filter, so the other namespaces stay selectable.
+  const shop = page
+    .getByRole("group", { name: backendsCopy.namespaces })
+    .getByRole("button", { name: "shop", exact: true });
+  await expect(shop).toBeVisible();
 
   await first.locator('td[data-col="kind"]').click();
   await expect(page).toHaveURL(new RegExp(`${install}/backends/-/Service/traffic/asleep`));
@@ -97,6 +102,10 @@ test("the cross-namespace ref shows the suggested ReferenceGrant", async ({ page
   await expect(e.getByRole("heading", { name: "Suggested fix" })).toBeVisible();
   await expect(e).toContainText("kind: ReferenceGrant");
   await expect(e).toContainText("namespace: traffic");
+  // Port 9999 is written by a route but not on the Service: said so, with no read time.
+  const lacks = page.getByTestId("endpoints-source").filter({ hasText: "Port 9999" });
+  await expect(lacks.getByTestId("endpoints-summary")).toHaveText(portChainCopy.noSuchPort(9999));
+  await expect(lacks).not.toContainText("Read ");
   // Its paths include the error the 014 finding attributes.
   await expect(page.getByTestId("status-line")).toHaveAttribute("data-state", "error");
 });

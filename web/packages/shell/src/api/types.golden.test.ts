@@ -69,6 +69,9 @@ import type {
   AncestorStep,
   BackendConsumer,
   BackendDetail,
+  BackendFacets,
+  BackendGatewayFacet,
+  BackendNamespaceFacet,
   BackendPort,
   BackendRef,
   BackendRow,
@@ -1254,8 +1257,15 @@ const pathsResponse = shape<PathsResponse>(
 );
 // Backends (sub-phase 6.3).
 const backendsResponse = shape<BackendsResponse>(
-  { install: "!", rows: "!", next: "?", prev: "?", hidden: "?", collectedAt: "!" },
+  { install: "!", rows: "!", next: "?", prev: "?", hidden: "?", facets: "?", collectedAt: "!" },
   {
+    facets: shape<BackendFacets>(
+      { gateways: "!", namespaces: "!" },
+      {
+        gateways: shape<BackendGatewayFacet>({ ref: "!", backends: "!" }, { ref: linkedRef }),
+        namespaces: shape<BackendNamespaceFacet>({ name: "!", backends: "!" }),
+      },
+    ),
     rows: shape<BackendRow>(
       {
         ref: "!",

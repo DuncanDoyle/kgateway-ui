@@ -29,19 +29,24 @@ export const backendColumnCopy = {
 
 /** The Used by cell: visible routes, Gateways and other consumers (design §8.1). */
 export const usedByCopy = {
+  /** Routes count references, not senders: a route counts although no accepted path reaches the backend. */
   uses: (routes: number, gateways: number, others: number) =>
     [
-      routes ? `${plural(routes, ["route", "routes"])} · ${plural(gateways, ["Gateway", "Gateways"])}` : "",
+      routes ? `${plural(routes, ["route", "routes"])} ${routes === 1 ? "references" : "reference"} it` : "",
+      gateways ? plural(gateways, ["Gateway", "Gateways"]) : "",
       others ? plural(others, ["other", "others"]) : "",
     ]
       .filter(Boolean)
-      .join(" · "), // S686
-  none: "Not used", // S687
-  noneConfirmed: "0 confirmed exposures", // S688
+      .join(" · "), // S752
+  none: "Unused", // S687
+  noneConfirmed: "0 confirmed paths", // S688
 };
 
 /** One port's endpoints in the list's cell: "80: 0/3 ready". */
-export const portEndpoints = (port: number, text: string) => `${port}: ${text}`; // S689
+export const portEndpoints = (port: number, text: string) => `Port ${port}: ${text}`; // S689
+
+/** The endpoints cell of a backend no route writes a port for. */
+export const noPortCopy = "No referenced port"; // S751
 
 // region Status line
 /**
@@ -102,8 +107,8 @@ export const endpointsCopy = {
   port: (port: number, name?: string) => (name ? `Port ${port} (${name})` : `Port ${port}`), // S709
   source: { kubernetes: "From Kubernetes" } as Record<string, string>, // S710
   read: (ago: string) => `Read ${ago}`, // S711
-  cachedNote: "Cached counts. The endpoints were not read for this page.", // S712
-  retry: "Retry", // S713
+  cachedNote: "Counts from the cache, not a fresh read.", // S712
+  retry: "Try again", // S713
   address: "Address", // S714
   ready: "Ready", // S715
   serving: "Serving", // S716
@@ -112,9 +117,9 @@ export const endpointsCopy = {
   yes: "Yes", // S719
   no: "No", // S720
   noItems: "No endpoints in this read.", // S721
-  partialNote: "Only part of the endpoints were read.", // S722
+  partialNote: "Some endpoints were not read.", // S722
   cached: (ready: number, total: number) => `${ready}/${total} ready, cached`, // S723
-  perProxy: "Endpoints as each proxy sees them are not shown here.", // S724
+  perProxy: "Per-proxy endpoints are not shown.", // S724
   noPorts: "No port of this backend is referenced.", // S725
   table: (port: string) => `Endpoints on ${port}`, // S742
 };
@@ -133,7 +138,7 @@ export const portChainCopy = {
 };
 
 export const explanationCopy = {
-  title: "Reference explanations", // S735
+  title: "Why refs fail", // S735
   candidate: (reason: string) => `This route reports ResolvedRefs=False (${reason}) for one of these refs.`, // S736
   waiting: "Waiting for the controller.", // S737
   reason: "Reason", // S738
@@ -142,6 +147,7 @@ export const explanationCopy = {
 
 export const factCopy = {
   service: "Service facts", // S746
+  facts: (kind: string) => `${kind} facts`, // S750
   type: "Type", // S747
   kind: "Kind",
   serviceType: "Service type", // S739

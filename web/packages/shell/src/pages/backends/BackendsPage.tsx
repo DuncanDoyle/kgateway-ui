@@ -1,7 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import { EyeOff } from "lucide-react";
 import { useMemo } from "react";
-import { useBackends, useGateways } from "../../api/exploreHooks";
+import { useBackends } from "../../api/exploreHooks";
 import type { BackendRow, BackendsResponse, Page } from "../../api/types";
 import { backendsCopy } from "../../copy/backends";
 import { listCopy } from "../../copy/explorer";
@@ -25,8 +25,6 @@ const SERVICE = "Service";
 const PROBLEMS = "problems";
 const UNUSED = "unused";
 const kindChip = (kind: string) => `kind:${kind}`;
-/** The Gateways the Gateway chips offer: the install's first page of Gateways. */
-const GATEWAY_QUERY = new URLSearchParams();
 
 /** The response as a list page for the table; the list sends no total, so the page's own count stands in. */
 const toPage = (d: BackendsResponse): Page<BackendRow> => ({
@@ -41,7 +39,10 @@ const toPage = (d: BackendsResponse): Page<BackendRow> => ({
 /** Which "Show" chips the URL presses. */
 function shown(params: URLSearchParams): string[] {
   const out: string[] = [];
-  if (listValues(params, "state").join(",") === PROBLEM_STATES) out.push(PROBLEMS);
+  // The same set in any order presses the chip.
+  const states = new Set(listValues(params, "state"));
+  const problems = PROBLEM_STATES.split(",");
+  if (states.size === problems.length && problems.every((s) => states.has(s))) out.push(PROBLEMS);
   const kind = listValues(params, "kind")[0];
   if (kind) out.push(kindChip(kind));
   if (params.get("used") === "no") out.push(UNUSED);
@@ -61,15 +62,16 @@ export function BackendsPage({ stylesOverride }: BackendsPageProps = {}) {
   const l = useListPage<BackendRow, BackendsResponse>("backends", useBackends);
   const vocab = useVocabulary();
   const page = useMemo(() => (l.data ? toPage(l.data) : undefined), [l.data]);
-  const gatewaysList = useGateways(l.id, GATEWAY_QUERY);
   const gateways = listValues(l.params, "gateway");
   const namespace = listValues(l.params, "namespace").slice(0, 1);
+  // The server's facets over the visible backends, each with every filter but its own (as Traffic's).
+  const facets = l.data?.facets;
   const gatewayOptions = narrowOptions(
-    (gatewaysList.data?.items ?? []).map((g) => refText(g.ref)),
+    (facets?.gateways ?? []).map((g) => refText(g.ref)),
     gateways,
   );
   const namespaceOptions = narrowOptions(
-    [...new Set((l.data?.rows ?? []).map((r) => r.ref.namespace ?? "").filter(Boolean))].sort(),
+    (facets?.namespaces ?? []).map((n) => n.name),
     namespace,
   );
   const showOptions: FilterOption[] = [

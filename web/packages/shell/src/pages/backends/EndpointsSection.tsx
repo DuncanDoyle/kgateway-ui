@@ -2,7 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useNow } from "../../api/clock";
 import type { Endpoints } from "../../api/types";
-import { endpointsCopy } from "../../copy/backends";
+import { endpointsCopy, portChainCopy } from "../../copy/backends";
 import { pathColumnCopy } from "../../copy/traffic";
 import { QuietButton } from "../../states/controls";
 import { Section } from "../explore/detailParts";
@@ -105,13 +105,15 @@ function ReadAge({ readAt }: { readAt: string }) {
 
 interface EndpointsSectionProps {
   sources: Endpoints[];
+  /** Referenced ports the Service lacks, from the port chain: there is nothing to read for them. */
+  noSuchPorts?: readonly number[];
   /** Reads again, e.g. after "busy, retry". */
   onRetry: () => void;
   stylesOverride?: SerializedStyles;
 }
 
 /** Endpoints per referenced port, by source (Phase 6 design §9); "0" only where a complete read established it. */
-export function EndpointsSection({ sources, onRetry, stylesOverride }: EndpointsSectionProps) {
+export function EndpointsSection({ sources, noSuchPorts = [], onRetry, stylesOverride }: EndpointsSectionProps) {
   return (
     <Section aria-labelledby="backend-endpoints">
       <h2 id="backend-endpoints">{pathColumnCopy.endpoints}</h2>
@@ -119,14 +121,18 @@ export function EndpointsSection({ sources, onRetry, stylesOverride }: Endpoints
         {sources.length ? null : <span>{endpointsCopy.noPorts}</span>}
         {sources.map((e, i) => {
           const port = e.port ? endpointsCopy.port(e.port.port, e.port.name) : "";
-          const s = sourceSummary(e);
+          const lacks = !!e.port && noSuchPorts.includes(e.port.port);
+          const s = lacks ? { text: portChainCopy.noSuchPort(e.port?.port ?? 0), cached: false } : sourceSummary(e);
+          // Not applicable reads nothing, and an unavailable source without counts was not read: no read time.
+          const timed =
+            e.complete !== "not-applicable" && !(e.complete === "unavailable" && e.ready === undefined) && !lacks;
           const items = e.complete === "complete" || e.complete === "partial" ? (e.items ?? []) : undefined;
           return (
             <Source key={`${e.source}/${e.port?.port ?? i}`} data-testid="endpoints-source" data-complete={e.complete}>
               <h3>
                 {port}
                 <span className="muted">{endpointsCopy.source[e.source] ?? e.source}</span>
-                {e.complete === "not-applicable" ? null : <ReadAge readAt={e.readAt} />}
+                {timed ? <ReadAge readAt={e.readAt} /> : null}
               </h3>
               <div className="summary">
                 <span data-testid="endpoints-summary">{s.text}</span>

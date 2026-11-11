@@ -481,10 +481,33 @@ type BackendQuery struct {
 	Limit int
 }
 
-// BackendPage is one page of a BackendSet's items, as indexes into Items.
+// BackendPage is one page of a BackendSet's items, as indexes into Items,
+// and the facets of the whole set.
 type BackendPage struct {
 	Items      []int
 	Next, Prev string
+	Facets     BackendFacets
+}
+
+// BackendFacets list the values of the gateway and namespace filters over the
+// set's backends, which are the visible ones. Each facet applies every filter
+// but its own, so a selected value leaves the others selectable. Both are
+// sorted by name.
+type BackendFacets struct {
+	Gateways   []BackendGatewayFacet
+	Namespaces []BackendNamespaceFacet
+}
+
+// BackendGatewayFacet is a Gateway and the backends it has a visible path to.
+type BackendGatewayFacet struct {
+	Ref      objects.Ref
+	Backends int
+}
+
+// BackendNamespaceFacet is a namespace and the backends in it.
+type BackendNamespaceFacet struct {
+	Name     string
+	Backends int
 }
 
 // RunBackends pages the items of set that match q. Bad input is
@@ -517,9 +540,19 @@ func RunBackends(set BackendSet, q BackendQuery) (BackendPage, error) {
 	}
 	qs := strings.ToLower(q.Q)
 	var es []int
+	gws, nss := map[objects.Ref]int{}, map[string]int{}
 	for i := range set.Items {
-		if q.matches(&set.Items[i], qs) {
+		b := &set.Items[i]
+		if q.matches(b, qs, facetNone) {
 			es = append(es, i)
+		}
+		if q.matches(b, qs, facetGateway) {
+			for _, g := range b.Gateways {
+				gws[g]++
+			}
+		}
+		if q.matches(b, qs, facetNamespace) {
+			nss[b.Ref.Namespace]++
 		}
 	}
 	slices.SortFunc(es, func(a, b int) int { return q.compare(anchorOfBackend(&set.Items[a]), anchorOfBackend(&set.Items[b])) })
@@ -532,7 +565,7 @@ func RunBackends(set BackendSet, q BackendQuery) (BackendPage, error) {
 		start = sort.Search(n, func(k int) bool { return q.compare(anchorOfBackend(&set.Items[es[k]]), *cur) > 0 })
 		end = min(n, start+q.Limit)
 	}
-	pg := BackendPage{Items: slices.Clone(es[start:end])}
+	pg := BackendPage{Items: slices.Clone(es[start:end]), Facets: backendFacets(gws, nss)}
 	switch {
 	case end > start:
 		if end < n {
@@ -549,18 +582,34 @@ func RunBackends(set BackendSet, q BackendQuery) (BackendPage, error) {
 	return pg, nil
 }
 
-// matches reports whether b passes q's filters; qs is the lower-cased Q.
-func (q *BackendQuery) matches(b *Backend, qs string) bool {
+// backendFacets are the counts sorted by name; never nil.
+func backendFacets(gws map[objects.Ref]int, nss map[string]int) BackendFacets {
+	f := BackendFacets{Gateways: make([]BackendGatewayFacet, 0, len(gws)), Namespaces: make([]BackendNamespaceFacet, 0, len(nss))}
+	for g, n := range gws {
+		f.Gateways = append(f.Gateways, BackendGatewayFacet{Ref: g, Backends: n})
+	}
+	slices.SortFunc(f.Gateways, func(a, b BackendGatewayFacet) int {
+		return cmp.Or(cmp.Compare(a.Ref.Namespace, b.Ref.Namespace), cmp.Compare(a.Ref.Name, b.Ref.Name))
+	})
+	for ns, n := range nss {
+		f.Namespaces = append(f.Namespaces, BackendNamespaceFacet{Name: ns, Backends: n})
+	}
+	slices.SortFunc(f.Namespaces, func(a, b BackendNamespaceFacet) int { return cmp.Compare(a.Name, b.Name) })
+	return f
+}
+
+// matches reports whether b passes q's filters, all but skip's; qs is the lower-cased Q.
+func (q *BackendQuery) matches(b *Backend, qs string, skip facet) bool {
 	switch {
 	case q.Kind != "" && b.Ref.Kind != q.Kind,
-		q.Namespace != "" && b.Ref.Namespace != q.Namespace,
+		q.Namespace != "" && skip != facetNamespace && b.Ref.Namespace != q.Namespace,
 		len(q.States) > 0 && !slices.Contains(q.States, b.Problem.State),
 		// A backend a hidden route or consumer uses is never shown as unused.
 		q.Used == UsedYes && b.Used() == 0, q.Used == UsedNo && (b.Used() > 0 || b.hiddenUse),
 		qs != "" && !strings.Contains(strings.ToLower(b.Ref.Namespace+"/"+b.Ref.Name), qs):
 		return false
 	}
-	if len(q.Gateways) > 0 {
+	if len(q.Gateways) > 0 && skip != facetGateway {
 		return slices.ContainsFunc(b.Gateways, func(g objects.Ref) bool {
 			return slices.ContainsFunc(q.Gateways, func(w objects.Ref) bool { return w.Namespace == g.Namespace && w.Name == g.Name })
 		})

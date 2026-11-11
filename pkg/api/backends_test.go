@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"net/http"
@@ -416,5 +417,50 @@ func TestBackendsHiddenRoutesOnly(t *testing.T) {
 		if r.Ref.Name == "be-used" {
 			t.Fatal("be-used, used by a hidden route, is shown as unused")
 		}
+	}
+}
+
+// §8.1, §13: the list's facets are the Gateways and namespaces of the visible
+// backends; each applies every filter but its own, so a selected value keeps
+// the others selectable.
+func TestBackendsFacets(t *testing.T) {
+	_, open, _ := startWith(t, backendsSetup(nil, nil), backendsWorld()...)
+	_, srv, _ := startWith(t, backendsSetup(AuthorizerFunc(hideEdge), nil), backendsWorld()...)
+	gateways := func(r BackendsResponse) map[string]int {
+		out := map[string]int{}
+		for _, g := range r.Facets.Gateways {
+			out[g.Ref.Namespace+"/"+g.Ref.Name] = g.Backends
+		}
+		return out
+	}
+	namespaces := func(r BackendsResponse) map[string]int {
+		out := map[string]int{}
+		for _, n := range r.Facets.Namespaces {
+			out[n.Name] = n.Backends
+		}
+		return out
+	}
+	all := get[BackendsResponse](t, open, backendsURL, 200)
+	if g := gateways(all); g["infra/back"] != 3 || g["infra/edge"] == 0 || g["infra/other"] == 0 {
+		t.Fatalf("gateway facets %v", g)
+	}
+	// A selected Gateway narrows the rows and the namespace counts, not its own facet.
+	back := get[BackendsResponse](t, open, backendsURL+"?gateway=infra/back", 200)
+	if len(back.Rows) != 3 || !maps.Equal(gateways(back), gateways(all)) || namespaces(back)["shop"] != 3 {
+		t.Fatalf("gateway=infra/back: %d rows, gateways %v, namespaces %v", len(back.Rows), gateways(back), namespaces(back))
+	}
+	// A namespace with no backend empties the rows and keeps every namespace selectable.
+	none := get[BackendsResponse](t, open, backendsURL+"?namespace=nope", 200)
+	if len(none.Rows) != 0 || !maps.Equal(namespaces(none), namespaces(all)) || len(none.Facets.Gateways) != 0 {
+		t.Fatalf("namespace=nope: %d rows, namespaces %v, gateways %v", len(none.Rows), namespaces(none), gateways(none))
+	}
+	// A Gateway the viewer may not see is not offered.
+	if g := gateways(get[BackendsResponse](t, srv, backendsURL, 200)); g["infra/edge"] != 0 || g["infra/back"] != 3 {
+		t.Fatalf("restricted gateway facets %v", g)
+	}
+	if !slices.IsSortedFunc(all.Facets.Gateways, func(a, b BackendGatewayFacetDTO) int {
+		return cmp.Or(cmp.Compare(a.Ref.Namespace, b.Ref.Namespace), cmp.Compare(a.Ref.Name, b.Ref.Name))
+	}) {
+		t.Fatalf("gateway facets not sorted: %v", gateways(all))
 	}
 }
