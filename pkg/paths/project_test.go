@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil/scale"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -34,22 +35,37 @@ func endpointsSnap(t *testing.T, svcs []cache.ServiceFact, eps []cache.SliceFact
 // install's report, and projects its topology with endpoints capability cap.
 func project(t *testing.T, snap *cache.Snapshot, cap string, extra ...health.Finding) (*paths.Topology, *paths.Projection, *engine.Model) {
 	t.Helper()
+	return projectAt(t, snap, cap, []time.Duration{0}, extra...)
+}
+
+// projectAt is project after one engine computation at each offset from
+// testutil.Now, projecting the last.
+func projectAt(t *testing.T, snap *cache.Snapshot, cap string, at []time.Duration, extra ...health.Finding) (*paths.Topology, *paths.Projection, *engine.Model) {
+	t.Helper()
+	now := testutil.Now
 	e := engine.New(engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Checks: health.Upstream(),
-		Now: func() time.Time { return testutil.Now }})
-	m := e.Compute()
+		Now: func() time.Time { return now }})
+	var m *engine.Model
+	for _, d := range at {
+		now = testutil.Now.Add(d)
+		m = e.Compute()
+	}
 	if len(m.Installs) != 1 {
 		t.Fatalf("installs: %d", len(m.Installs))
 	}
 	i := &m.Installs[0]
 	i.Health.Findings = append(i.Health.Findings, extra...)
 	top := paths.Build(paths.Input{Index: i.Index, Views: i.Computed, Decode: objects.Direct{}, Delegates: i.Rules.Delegator() != nil})
-	p := paths.Project(top, paths.ProjectInput{Model: i, Next: m.Next, Snapshot: m.Snapshot, Now: testutil.Now, EndpointsCap: cap})
+	p := paths.Project(top, paths.ProjectInput{Model: i, Next: m.Next, Snapshot: m.Snapshot, Now: now, EndpointsCap: cap})
 	if len(p.Problems) != len(top.Rows) || len(p.Shares) != len(top.Rows) || len(p.Endpoints) != len(top.Rows) || len(p.Order) != len(top.Rows) {
 		t.Fatalf("projection not aligned with %d rows", len(top.Rows))
 	}
 	return top, p, m
 }
+
+// matured are offsets past KGWUI-023's hold.
+var matured = []time.Duration{0, health.EndpointsHold + time.Second}
 
 // cart is Service shop/cart with ports, and its one slice with ready counts per port.
 func cart(ports []cache.ServicePort, ready []int, total int) ([]cache.ServiceFact, []cache.SliceFact) {
@@ -82,21 +98,31 @@ func hasSignal(p paths.Problem, kind string, state health.State) bool {
 	return slices.ContainsFunc(p.Signals, func(s paths.Signal) bool { return s.Kind == kind && s.State == state })
 }
 
-// A route that is healthy while its backend port has no ready endpoint is an error.
-func TestProjectZeroReadyIsError(t *testing.T) {
+// A zero-ready port is unknown while KGWUI-023 holds, never healthy, and
+// takes 023's warning once it matures; the counts alone never make an error.
+func TestProjectZeroReadyFollows023(t *testing.T) {
 	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{0}, 2)
-	_, p, m := project(t, endpointsSnap(t, svcs, eps, edge("http"), accepted("r", svc("cart"))), "on")
+	snap := endpointsSnap(t, svcs, eps, edge("http"), accepted("r", svc("cart")))
+	_, p, m := project(t, snap, "on")
 	pr := p.Problems[0]
-	if pr.State != health.StateError || !hasSignal(pr, "endpoints", health.StateError) {
-		t.Fatalf("problem %+v", pr)
+	if pr.State != health.StateUnknown || !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool {
+		return s.Kind == paths.SignalWaiting && s.Code == health.CodeBackendNoReadyEndpoints
+	}) {
+		t.Fatalf("held: problem %+v", pr)
 	}
 	ep := p.Endpoints[0]
 	if ep == nil || ep.Complete != "complete" || ep.Ready == nil || *ep.Ready != 0 || *ep.Total != 2 || ep.Port != 8080 || ep.PortName != "http" ||
 		!ep.ReadAt.Equal(m.Snapshot.TakenAt) {
 		t.Fatalf("endpoints %+v", ep)
 	}
-	if p.Next != m.Next {
+	if p.Next != m.Next || m.Next.IsZero() {
 		t.Fatalf("next %+v, want the publication's %+v", p.Next, m.Next)
+	}
+	_, p, _ = projectAt(t, snap, "on", matured)
+	if pr := p.Problems[0]; pr.State != health.StateWarning || !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool {
+		return s.Kind == paths.SignalFinding && s.Code == health.CodeBackendNoReadyEndpoints
+	}) {
+		t.Fatalf("matured: problem %+v", pr)
 	}
 }
 
@@ -111,22 +137,28 @@ func TestProjectListenerNotProgrammed(t *testing.T) {
 	}
 }
 
-// With one of two Service ports ready, only the other port's rows are errors,
-// and each row counts its port as KGWUI-023 does.
+// With one of two Service ports ready, only the other port's rows have a
+// problem, and each row counts its port as KGWUI-023 does.
 func TestProjectPerPort(t *testing.T) {
 	grpc := cache.ServicePort{Name: "grpc", Port: 9000, Target: 9000, Protocol: "TCP"}
 	svcs, eps := cart([]cache.ServicePort{httpPort, grpc}, []int{2, 0}, 2)
-	top, p, _ := project(t, endpointsSnap(t, svcs, eps, edge("http"), accepted("r", port("cart", 8080), port("cart", 9000))), "on")
+	snap := endpointsSnap(t, svcs, eps, edge("http"), accepted("r", port("cart", 8080), port("cart", 9000)))
 	ss := []*cache.SliceFact{&eps[0]}
-	for i, r := range top.Rows {
-		b, _ := top.Backend(r)
-		want, anyReady := health.PortEndpoints(&svcs[0], ss, b.Port)
-		ep := p.Endpoints[i]
-		if ep == nil || ep.Ready == nil || *ep.Ready != want.Ready || *ep.Total != want.Total || ep.PortName != want.PortName {
-			t.Fatalf("port %d: endpoints %+v, want %+v", b.Port, ep, want)
-		}
-		if st := p.Problems[i].State; anyReady && st != health.StateHealthy || !anyReady && st != health.StateError {
-			t.Fatalf("port %d: state %s", b.Port, st)
+	for _, c := range []struct {
+		at    []time.Duration
+		empty health.State
+	}{{[]time.Duration{0}, health.StateUnknown}, {matured, health.StateWarning}} {
+		top, p, _ := projectAt(t, snap, "on", c.at)
+		for i, r := range top.Rows {
+			b, _ := top.Backend(r)
+			want, anyReady := health.PortEndpoints(&svcs[0], ss, b.Port)
+			ep := p.Endpoints[i]
+			if ep == nil || ep.Ready == nil || *ep.Ready != want.Ready || *ep.Total != want.Total || ep.PortName != want.PortName {
+				t.Fatalf("port %d: endpoints %+v, want %+v", b.Port, ep, want)
+			}
+			if st := p.Problems[i].State; anyReady && st != health.StateHealthy || !anyReady && st != c.empty {
+				t.Fatalf("at %v port %d: state %s", c.at, b.Port, st)
+			}
 		}
 	}
 }
@@ -301,5 +333,97 @@ func TestProjectOrder(t *testing.T) {
 		health.StateUnknown, health.StateHealthy, health.StateHealthy}
 	if !slices.Equal(got, want) {
 		t.Fatalf("states in order %v, want %v", got, want)
+	}
+}
+
+// A Service the cache lacks while endpoints are on is waiting, never healthy.
+func TestProjectMissingServiceIsWaiting(t *testing.T) {
+	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{1}, 1)
+	_, p, _ := project(t, endpointsSnap(t, svcs, eps, edge("http"), accepted("r", svc("gone"), port("cart", 9999))), "on")
+	for i := range p.Problems {
+		if pr := p.Problems[i]; pr.State != health.StateUnknown || !hasSignal(pr, paths.SignalWaiting, health.StateUnknown) || p.Endpoints[i] != nil {
+			t.Fatalf("row %d: problem %+v endpoints %+v", i, pr, p.Endpoints[i])
+		}
+	}
+}
+
+// A 013 on the route counts only on a parent whose own status has
+// ResolvedRefs=False: the other parent's rows stay healthy (D-014).
+func TestProjectRefFindingGatedByParent(t *testing.T) {
+	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{1}, 1)
+	calm := testutil.GwRef("infra", "calm")
+	r := testutil.WithRules(testutil.HTTPRoute("shop", "r", []objects.ParentRef{gwEdge, calm}, unresolved(gwEdge), testutil.AcceptedBy(calm, testutil.Controller)),
+		rule([]any{svc("cart"), port("cart", 9999)}))
+	snap := endpointsSnap(t, svcs, eps, edge("http"), testutil.Gateway("infra", "calm", "kgateway", nil), r)
+	snap.Deployments = append(snap.Deployments, testutil.ProxyDeployment("infra", "calm", 1, 1))
+	top, p, _ := project(t, snap, "on")
+	for i, row := range top.Rows {
+		b, _ := top.Backend(row)
+		if b.Port != 9999 {
+			continue
+		}
+		has013 := slices.ContainsFunc(p.Problems[i].Signals, func(s paths.Signal) bool { return s.Code == health.CodeRefUnresolved })
+		switch top.Gateway(row).Name {
+		case "edge":
+			if p.Problems[i].State != health.StateError || !has013 || p.Shares[i].State != paths.ShareFailing {
+				t.Fatalf("edge: %+v share %+v", p.Problems[i], p.Shares[i])
+			}
+		case "calm":
+			if has013 || p.Problems[i].State == health.StateError || p.Shares[i].State != paths.ShareShown {
+				t.Fatalf("calm: %+v share %+v", p.Problems[i], p.Shares[i])
+			}
+		}
+	}
+}
+
+// Known over-report: on a delegated row the root's ResolvedRefs=False is an
+// error even when the root's 013 candidates rule out the delegation ref.
+func TestProjectDelegatedRootRefsOverReport(t *testing.T) {
+	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{1}, 1)
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gwEdge}, unresolved(gwEdge)),
+		prefixes([]string{"/api"}, testutil.DelegateTo("shop", "plain")), rule([]any{svc("gone")}))
+	plain := child("plain", false, prefixes([]string{"/api/a"}, svc("cart")))
+	snap := worldSnap(t, "v2.5.0", nil, edge("http"), api, plain)
+	snap.Access[cache.ServicesGVR], snap.Access[cache.EndpointSlicesGVR] = cache.Access{OK: true}, cache.Access{OK: true}
+	snap.Services, snap.EndpointSlices = svcs, eps
+	top, p, _ := project(t, snap, "on")
+	n := 0
+	for i, r := range top.Rows {
+		if len(top.Chain(r)) != 2 {
+			continue
+		}
+		n++
+		if pr := p.Problems[i]; pr.State != health.StateError || !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool {
+			return s.Kind == paths.SignalRouteStatus && s.Code == "ResolvedRefs"
+		}) {
+			t.Fatalf("delegated row: %+v", pr)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no delegated rows")
+	}
+}
+
+// Equal signal sets share storage, so the projection's size follows the
+// distinct sets; logged at the large-paths world with endpoints on and off.
+func TestProjectPathsWorldBytes(t *testing.T) {
+	tier := scale.Large.Paths()
+	for _, cap := range []string{"on", "off"} {
+		_, p, _ := project(t, scale.Snapshot(tier, 1), cap)
+		sets := map[*paths.Signal]bool{}
+		bad := 0
+		for _, pr := range p.Problems {
+			if len(pr.Signals) > 0 {
+				sets[&pr.Signals[0]] = true
+				bad++
+			}
+		}
+		if cap == "off" && bad == 0 {
+			t.Fatal("endpoints off: no row has a problem")
+		}
+		if len(sets) >= bad && bad > 1 {
+			t.Fatalf("%s: %d signal sets for %d rows: not shared", cap, len(sets), bad)
+		}
+		t.Logf("%s endpoints %s: %d rows, %d with signals, %d distinct sets, %d bytes", tier.Name, cap, len(p.Problems), bad, len(sets), p.Bytes())
 	}
 }

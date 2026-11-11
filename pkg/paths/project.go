@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	"unsafe"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,7 +27,6 @@ const (
 	SignalWaiting     = "waiting"
 	SignalFinding     = "finding"
 	SignalDelegation  = "delegation"
-	SignalEndpoints   = "endpoints"
 	SignalCoverage    = "coverage"
 )
 
@@ -137,7 +137,8 @@ type portKey struct {
 	port     int32
 }
 
-// portHealth is a Service port's shared summary and its endpoints signal state.
+// portHealth is a Service port's shared summary, its waiting or coverage
+// signal, and its active KGWUI-023 findings.
 type portHealth struct {
 	ep    *Endpoints
 	sig   *Signal
@@ -157,6 +158,11 @@ type projector struct {
 	slices   map[string][]*cache.SliceFact
 	backends map[objects.Ref]*unstructured.Unstructured
 	shares   map[*objects.Rule][]Share
+	// sets interns the rows' signal sets by content; key is its scratch key.
+	sets map[string][]Signal
+	key  []byte
+	// na are the shared not-applicable summaries of Backend refs, per port.
+	na map[int32]*Endpoints
 }
 
 // Project maps each row of t to its problem: the worst existing signal along
@@ -164,7 +170,7 @@ type projector struct {
 func Project(t *Topology, in ProjectInput) *Projection {
 	p := &projector{t: t, in: in, findings: map[objects.Ref][]*health.Finding{}, atts: make([]attSignals, len(t.atts)),
 		ctxs: map[int32][]Signal{}, edges: map[[2]objects.Ref]*Signal{}, refs: map[objects.Ref][]refFinding{}, ports: map[portKey]*portHealth{},
-		backends: map[objects.Ref]*unstructured.Unstructured{}, shares: map[*objects.Rule][]Share{}}
+		backends: map[objects.Ref]*unstructured.Unstructured{}, shares: map[*objects.Rule][]Share{}, sets: map[string][]Signal{}, na: map[int32]*Endpoints{}}
 	for i := range in.Model.Health.Findings {
 		f := &in.Model.Health.Findings[i]
 		if f.Resource != nil {
@@ -188,7 +194,7 @@ func Project(t *Topology, in ProjectInput) *Projection {
 			}
 		}
 		if len(sigs) > 0 {
-			pr.Signals = slices.Clone(sigs)
+			pr.Signals = p.intern(sigs)
 		}
 		out.Problems[i] = pr
 		out.Order[i] = int32(i) // #nosec G115 -- a row count fits in int32
@@ -200,6 +206,49 @@ func Project(t *Topology, in ProjectInput) *Projection {
 			p.compareChains(ra, rb), cmp.Compare(t.Rule(ra).Index, t.Rule(rb).Index))
 	})
 	return out
+}
+
+// intern returns the stored signal set equal to sigs, storing a copy on first sight.
+func (p *projector) intern(sigs []Signal) []Signal {
+	p.key = p.key[:0]
+	for _, s := range sigs {
+		p.key = append(append(append(p.key, s.Kind...), 0), s.Code...)
+		p.key = append(append(append(append(append(p.key, 0), s.Ref.Group...), 0), s.Ref.Kind...), 0)
+		p.key = append(append(append(append(append(p.key, s.Ref.Namespace...), 0), s.Ref.Name...), 0), s.State...)
+		p.key = append(p.key, 1)
+	}
+	if set, ok := p.sets[string(p.key)]; ok {
+		return set
+	}
+	set := slices.Clip(slices.Clone(sigs))
+	p.sets[string(p.key)] = set
+	return set
+}
+
+// Bytes estimates the projection's retained size: its row tables plus each
+// distinct signal set and endpoint summary once. Strings shared with the
+// topology and the model are not counted.
+func (p *Projection) Bytes() int {
+	n := int(unsafe.Sizeof(Projection{})) + cap(p.Problems)*int(unsafe.Sizeof(Problem{})) + cap(p.Shares)*int(unsafe.Sizeof(Share{}))
+	n += cap(p.Endpoints)*int(unsafe.Sizeof((*Endpoints)(nil))) + cap(p.Order)*4
+	sets := map[*Signal]bool{}
+	for _, pr := range p.Problems {
+		if len(pr.Signals) > 0 && !sets[&pr.Signals[0]] {
+			sets[&pr.Signals[0]] = true
+			n += cap(pr.Signals) * int(unsafe.Sizeof(Signal{}))
+		}
+	}
+	eps := map[*Endpoints]bool{}
+	for _, e := range p.Endpoints {
+		if e != nil && !eps[e] {
+			eps[e] = true
+			n += int(unsafe.Sizeof(Endpoints{})) + len(e.PortName)
+			if e.Ready != nil {
+				n += 2 * int(unsafe.Sizeof(0))
+			}
+		}
+	}
+	return n
 }
 
 // compareChains orders two rows' route chains, root first.
@@ -232,9 +281,14 @@ func (p *projector) row(sigs []Signal, r Row, out *Projection, i int) []Signal {
 		}
 	}
 	// ResolvedRefs=False on the attachment is this row's unless a 013 or 014
-	// rules it out; on a delegated row it cannot be ruled out.
+	// rules it out. A root route's 013 or 014 counts only on a parent whose own
+	// status says ResolvedRefs=False (D-014). Known over-report: on a delegated
+	// row the root's ResolvedRefs=False is always an error, candidates unread.
 	last := routes[len(routes)-1]
-	rfs := p.refFindings(last)
+	var rfs []refFinding
+	if len(routes) > 1 || att.refsFalse {
+		rfs = p.refFindings(last)
+	}
 	path := ""
 	if len(rfs) > 0 {
 		path = rowPath(t.Rule(r).Index, int(r.ref), int(r.mirror))
@@ -469,7 +523,10 @@ func (p *projector) backend(sigs []Signal, ref objects.Ref, port int32, traffic 
 			sigs = append(sigs, ph.found...)
 		}
 	case ref.Group == kinds.KgatewayGroup && ref.Kind == "Backend":
-		out.Endpoints[i] = &Endpoints{Complete: EndpointsNotApplicable, Port: port}
+		if p.na[port] == nil {
+			p.na[port] = &Endpoints{Complete: EndpointsNotApplicable, Port: port}
+		}
+		out.Endpoints[i] = p.na[port]
 		n := len(sigs)
 		for _, f := range p.findings[ref] {
 			if f.Code == health.CodeConditionFalse {
@@ -529,19 +586,21 @@ func (p *projector) port(k portKey) *portHealth {
 		ph.ep = &Endpoints{Complete: EndpointsNotApplicable, Port: k.port, ReadAt: snap.TakenAt}
 		return ph
 	}
-	// A missing Service or port is KGWUI-013's, from the route's status.
+	// A Service or port the cache lacks is waiting for 013 from the route's status, never healthy.
 	ev, ready := health.PortEndpoints(svc, p.slices[k.ns+"/"+k.name], k.port)
 	if ev == nil {
+		ph.sig = &Signal{Kind: SignalWaiting, Code: "missing", Ref: ref, State: health.StateUnknown}
 		return ph
 	}
 	ph.ep = &Endpoints{Complete: EndpointsComplete, Ready: &ev.Ready, Total: &ev.Total, ReadAt: snap.TakenAt, Port: k.port, PortName: ev.PortName}
-	if !ready {
-		ph.sig = &Signal{Kind: SignalEndpoints, Code: health.CodeBackendNoReadyEndpoints, Ref: ref, State: health.StateError}
-	}
+	// The severity of an empty port is KGWUI-023's; while 023 holds or skips the ref it is unknown.
 	for _, f := range p.findings[ref] {
 		if e, ok := f.Facts.(*health.EndpointsEvidence); ok && f.Code == health.CodeBackendNoReadyEndpoints && e.Port == k.port {
 			ph.found = append(ph.found, Signal{Kind: SignalFinding, Code: f.Code, Ref: ref, State: sevState(f.Severity)})
 		}
+	}
+	if !ready && len(ph.found) == 0 {
+		ph.sig = &Signal{Kind: SignalWaiting, Code: health.CodeBackendNoReadyEndpoints, Ref: ref, State: health.StateUnknown}
 	}
 	return ph
 }
