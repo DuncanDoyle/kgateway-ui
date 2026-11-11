@@ -46,7 +46,7 @@ export const usedByCopy = {
 export const portEndpoints = (port: number, text: string) => `Port ${port}: ${text}`; // S689
 
 /** The endpoints cell of a backend no route writes a port for. */
-export const noPortCopy = "No referenced port"; // S751
+export const noPortCopy = "No port referenced"; // S751
 
 // region Status line
 /**

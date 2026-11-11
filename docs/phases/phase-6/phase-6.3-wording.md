@@ -2,7 +2,7 @@
 
 80 strings, five options each; all new SPA copy of the Backends list and backend detail (`web/packages/shell/src/copy/backends.ts`), two endpoint states in `copy/traffic.ts`, and the kgateway web pack's Backend chip and type label (`kgateway/webPack.tsx`).
 
-Option 1 is the drafted text and is used provisionally. Picked by a separate Claude subagent (same model family as the author; not cross-model). Placeholders stay in order; condition types, reasons and kinds are unchanged. Ids run from S672 and are not contiguous by position: S741–S752 were added after S740, S699 is not used, and S750–S752 came with review fix round 1 (Choice pending).
+The chosen options are applied in the code. Picked by a separate Claude subagent (same model family as the author; not cross-model). Placeholders stay in order; condition types, reasons and kinds are unchanged. Ids run from S672 and are not contiguous by position: S741–S752 were added after S740, S699 is not used, and S750–S752 came with review fix round 1.
 
 | # | id | File:line | Where | Placeholders | Option 1 (draft) | Option 2 | Option 3 | Option 4 | Option 5 | Choice |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -83,6 +83,6 @@ Option 1 is the drafted text and is used provisionally. Picked by a separate Cla
 | 75 | S745 | `kgateway/webPack.tsx:31` | Backend spec.type label (pack copy) | none | Backend type | Type | spec.type | Backend kind | Kind of Backend | 1 (clear, matches Traffic vocabulary) |
 | 76 | S739 | `copy/backends.ts:153` | Fact label | none | Service type | Type | spec.type | Service kind | Kind | 1 (clear, matches Traffic vocabulary) |
 | 77 | S740 | `copy/backends.ts:154` | Fact label | none | Ports | Service ports | Port list | Exposed ports | Ports (name) | 1 (clear, matches Traffic vocabulary) |
-| 78 | S752 | `copy/backends.ts:40` | Used by cell, fix round 1: routes count references, not senders; a zero Gateway count is left out | `{routes}`, `{gateways}`, `{others}` with nouns | {routes} routes reference it · {gateways} Gateways · {others} others | Referenced by {routes} routes · {gateways} Gateways · {others} others | {routes} routes name it · {gateways} Gateways · {others} others | {routes} referencing routes · {gateways} Gateways · {others} others | In {routes} routes · {gateways} Gateways · {others} others | pending |
-| 79 | S751 | `copy/backends.ts:49` | Endpoints cell: a cached Service no route writes a port for | none | No referenced port | No port referenced | No port written | Port not set | No port | pending |
-| 80 | S750 | `copy/backends.ts:150` | Section title for a non-Service backend's facts, e.g. Backend facts | `{kind}` | {kind} facts | About this {kind} | {kind} details | {kind} | Facts | pending |
+| 78 | S752 | `copy/backends.ts:40` | Used by cell, fix round 1: routes count references, not senders; a zero Gateway count is left out | `{routes}`, `{gateways}`, `{others}` with nouns | {routes} routes reference it · {gateways} Gateways · {others} others | Referenced by {routes} routes · {gateways} Gateways · {others} others | {routes} routes name it · {gateways} Gateways · {others} others | {routes} referencing routes · {gateways} Gateways · {others} others | In {routes} routes · {gateways} Gateways · {others} others | 1 (active, matches Used by column and Traffic vocabulary) |
+| 79 | S751 | `copy/backends.ts:49` | Endpoints cell: a cached Service no route writes a port for | none | No referenced port | No port referenced | No port written | Port not set | No port | 2 (plain word order) |
+| 80 | S750 | `copy/backends.ts:150` | Section title for a non-Service backend's facts, e.g. Backend facts | `{kind}` | {kind} facts | About this {kind} | {kind} details | {kind} | Facts | 1 (matches "Service facts", S746) |

@@ -130,7 +130,7 @@ it("rows show kind, endpoints per port, users and the problem; a row opens backe
   expect(row("shop/lonely-svc")).not.toHaveTextContent("0 Gateways");
   // A Service missing from the cache is unknown; one in the cache with no written port says so.
   expect(row("shop/lonely-svc")).toHaveTextContent("Unknown");
-  expect(row("shop/mirror-svc")).toHaveTextContent("No referenced port");
+  expect(row("shop/mirror-svc")).toHaveTextContent("No port referenced");
   expect(row("shop/be1")).toHaveTextContent("Backend · Static");
   expect(row("shop/be1")).toHaveTextContent("Not applicable");
   expect(row("shop/be-unused")).toHaveTextContent("Unused");
