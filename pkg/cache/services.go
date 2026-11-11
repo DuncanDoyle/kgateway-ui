@@ -34,12 +34,13 @@ type ServiceFact struct {
 }
 
 // ServicePort is one Service port. Target is the numeric target port, the
-// port itself when unset, and 0 when the target port is a name. Protocol
-// is "TCP" when unset.
+// port itself when unset, and 0 when the target port is a name; TargetName
+// is that name. Protocol is "TCP" when unset.
 type ServicePort struct {
 	Name         string
 	Port, Target int32
 	Protocol     string
+	TargetName   string
 }
 
 // SlicePort is one EndpointSlice port; an unnamed port has the name "".
@@ -113,9 +114,10 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 		Type: known(string(svc.Spec.Type), "ClusterIP", "NodePort", "LoadBalancer", "ExternalName"), Ports: make([]ServicePort, 0, len(svc.Spec.Ports))}
 	for _, p := range svc.Spec.Ports {
 		var target int32
+		var targetName string
 		switch tp := p.TargetPort; {
 		case tp.Type == intstr.String:
-			// A named target port has no number here.
+			targetName = tp.StrVal
 		case tp.IntVal == 0:
 			target = p.Port
 		default:
@@ -125,7 +127,7 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 		if proto == "" {
 			proto = string(corev1.ProtocolTCP)
 		}
-		f.Ports = append(f.Ports, ServicePort{Name: p.Name, Port: p.Port, Target: target, Protocol: proto})
+		f.Ports = append(f.Ports, ServicePort{Name: p.Name, Port: p.Port, Target: target, Protocol: proto, TargetName: targetName})
 	}
 	return f
 }

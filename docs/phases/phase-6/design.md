@@ -243,6 +243,7 @@ The cached facts strip addresses, serving and terminating (D-057), and the mocku
 - **Interface in the core, implementation in the Kubernetes provider (D-016).** `ScopedReader.Endpoints(ctx, install, service) (EndpointsResult, error)`. A provider without it reports "unavailable", and the section shows the cached counts only.
 - **Read:** a namespaced LIST with `kubernetes.io/service-name=<name>`, paged with `limit=10` slices and at most 10 pages. A slice holds at most 100 endpoints by default, so a page decodes at most about 1,000 endpoints. A continuation beyond the last page, or more than 1,000 endpoints in all, marks the result **partial**.
 - **Process-wide bounds:** at most 4 reads in flight, and duplicate requests coalesce. Each read times out after 2 s. The memo keeps at most 32 Services for 5 s each, least recently used first, and at most 1,000 endpoints per Service. Over a bound the section says "partial", "timed out" or "busy, retry".
+- **Memo size (6.3):** the bounds stay as above; the memo packs each endpoint into about 20 bytes, so a full memo retains 0.64 MiB (IPv4) or 0.83 MiB (IPv6), under its 1 MiB cap (`TestMemoRetained`).
 - **Authorisation first:** the caller must be allowed to see the backend, on every request and on memo hits too, before any read (§13).
 - **Shown per endpoint:** address, port, ready, serving, terminating, and the target Pod name when the slice names it.
 - **RBAC:** list EndpointSlices, which the chart already grants for the endpoints capability. There is no watch and no retained state beyond the memo.
@@ -344,7 +345,7 @@ The Authorizer is allow-all today (D-013). A path exposes more than its route an
   - the targetPort name on Service facts;
   - the topology memo (≤ 48 bytes per row);
   - the health projection memo;
-  - the scoped reader's memo (≤ 32 Services × 1,000 endpoints).
+  - the scoped reader's memo (≤ 32 Services × 1,000 endpoints; packed, measured ≤ 0.83 MiB in 6.3 against a 1 MiB cap).
 - **Row gate:** at 48 bytes, 8 MiB is about 175,000 rows. The topology memo gets its own cap of 2 MiB per install generation. Above the cap, the paths endpoint pages straight from derivation without a memo and reports it in the response.
 - **Measured after warming every API cache:** the bench gains an API-level pass. It requests paths, backends and backend detail for every install, many distinct Services, and overlapping generations, then measures retained heap. The engine-only bench cannot see these memos.
 - **Fixtures:** the scale generator already makes GRPCRoute, TCPRoute and TLSRoute at 5 % each, mostly with one rule and one ref (`internal/testutil/scale/scale.go:257-262, 632-654`). The Large and worst fixtures gain multi-rule, multi-ref and delegated routes so rules × refs expansion is exercised.

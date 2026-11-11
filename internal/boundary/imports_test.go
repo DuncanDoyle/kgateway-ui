@@ -32,6 +32,7 @@ var allowed = map[string]string{
 	"pkg/cache/crds.go":             "Gateway API CRD metadata through the metadata client",
 	"pkg/cache/events.go":           "Warning Events on controller and proxy Pods",
 	"pkg/cache/listonce.go":         "the list-only Kubernetes provider",
+	"pkg/cache/scoped.go":           "the scoped EndpointSlice reader",
 	"pkg/cache/services.go":         "Services and EndpointSlices, cut down at the informer",
 	"pkg/ctrllogs/stream.go":        "follows controller Pod logs",
 	"pkg/ctrlmetrics/scrape.go":     "scrapes controller Pods",

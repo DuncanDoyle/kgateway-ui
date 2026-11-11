@@ -70,8 +70,8 @@ func visWorld() []runtime.Object {
 	return explorerWorld(append(probeRoutes(), testutil.Backend("shop", "be-x", nil))...)
 }
 
-// endpoints are one request of each kind over visWorld.
-var endpoints = []string{
+// visRequests are one request of each kind over visWorld.
+var visRequests = []string{
 	"/api/v1/installs", base + "/overview", base + "/health",
 	base + "/routes", base + "/routes?limit=200", base + "/routes?q=shop&sort=health.desc",
 	base + "/routes?parent=gateway.networking.k8s.io/Gateway/infra/edge&attachment=accepted",
@@ -88,7 +88,7 @@ func TestAllowAllMakesNoAuthorizerCalls(t *testing.T) {
 	a := &countingAuthz{all: true}
 	_, srv, _ := startWith(t, setup{authz: a}, visWorld()...)
 	_, ref, _ := startWith(t, setup{}, visWorld()...)
-	for _, p := range endpoints {
+	for _, p := range visRequests {
 		if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
 			t.Errorf("GET %s differs from AllowAll:\n%s\n%s", p, got, want)
 		}
@@ -122,7 +122,7 @@ func TestAllowAllEmbedderIsAsked(t *testing.T) {
 func TestViewAsksEachRefOnce(t *testing.T) {
 	a := &countingAuthz{deny: hiddenSome}
 	_, srv, _ := startWith(t, setup{authz: a}, visWorld()...)
-	for _, p := range endpoints {
+	for _, p := range visRequests {
 		wire(t, srv, p)
 		asked, calls := a.take(), 0
 		for ref, n := range asked {

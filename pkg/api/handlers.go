@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -46,9 +47,12 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 		cfg.commands = diagnose.Kubectl{}
 	}
 	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor,
-		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor, pathMemo: cfg.pathMemo}
+		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor, pathMemo: cfg.pathMemo, scoped: cfg.scoped}
 	if h.pathMemo == nil {
 		h.pathMemo = paths.NewMemo(nil)
+	}
+	if h.scoped == nil {
+		h.scoped = endpoints.NoReader
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -92,6 +96,14 @@ type handler struct {
 	kindFor     func(install.Install, objects.GroupKind) bool
 	// pathMemo holds the path topologies and projections; one per handler.
 	pathMemo *paths.Memo
+	// scoped reads one Service's endpoints for backend detail; never nil.
+	scoped endpoints.ScopedReader
+}
+
+// WithScopedReader reads one Service's endpoints for backend detail (design
+// §9.3). Without it, or with nil, those endpoints are unavailable.
+func WithScopedReader(r endpoints.ScopedReader) HandlerOption {
+	return func(c *handlerConfig) { c.scoped = r }
 }
 
 // commandsOf is i's next-step commands: its own, else the handler's.

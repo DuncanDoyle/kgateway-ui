@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/paths"
@@ -41,6 +42,8 @@ type handlerConfig struct {
 	kindFor func(install.Install, objects.GroupKind) bool
 	// pathMemo replaces the handler's path memo; nil is a fresh one.
 	pathMemo *paths.Memo
+	// scoped is the scoped endpoints reader; nil is endpoints.NoReader.
+	scoped endpoints.ScopedReader
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with
