@@ -118,6 +118,8 @@ type builder struct {
 	// states interns delegation rows' path contexts (delegation.go).
 	states map[stateKey]int32
 	base   []int32 // scratch attachment deps of a delegated row
+	// hopSets are hopDeps per (parent, child).
+	hopSets map[[2]objects.Ref][]int32
 }
 
 // rootAtt is an attachment with its dependency set.
@@ -141,7 +143,7 @@ func Build(in Input) *Topology {
 	}
 	b := &builder{in: in, t: t, refs: map[objects.Ref]int32{}, routes: map[objects.Ref]int32{},
 		listeners: map[listenerKey]int32{}, hosts: map[string]int32{}, sets: map[string]uint32{}, chains: map[string]uint32{},
-		roots: map[objects.Ref][]rootAtt{}, rootCtx: map[int32]int32{}, states: map[stateKey]int32{}}
+		roots: map[objects.Ref][]rootAtt{}, rootCtx: map[int32]int32{}, states: map[stateKey]int32{}, hopSets: map[[2]objects.Ref][]int32{}}
 	for i := range in.Views.Attachment.Members {
 		b.member(&in.Views.Attachment.Members[i])
 	}
@@ -392,6 +394,12 @@ func (t *Topology) Chain(r Row) []objects.Ref {
 		out[i] = t.Refs[t.routes[ri].ref]
 	}
 	return out
+}
+
+// Route is the last route of the row's chain, whose rule the row is on.
+func (t *Topology) Route(r Row) objects.Ref {
+	c := t.chain(r)
+	return t.Refs[t.routes[c[len(c)-1]].ref]
 }
 
 // Rule is the row's rule in the last route of its chain.

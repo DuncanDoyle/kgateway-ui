@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -290,7 +292,13 @@ func TestEmptyOutcomeIsUnknown(t *testing.T) {
 			row.Contexts[c].Outcome, row.Contexts[c].Rules = "", nil
 		}
 	}
-	top := paths.Build(paths.Input{Index: i.Index, Views: &views, Decode: objects.Direct{}, Delegates: true})
+	// The topology reads the index's copy of the rows.
+	ix := *i.Index
+	ix.DelegRows = slices.Clone(ix.DelegRows)
+	for k := range ix.DelegRows {
+		ix.DelegRows[k].Row = views.Delegation.Rows[k]
+	}
+	top := paths.Build(paths.Input{Index: &ix, Views: &views, Decode: objects.Direct{}, Delegates: true})
 	rows := delegated(top)
 	if len(rows) != 2 {
 		t.Fatalf("delegated rows: %d", len(rows))
@@ -298,6 +306,46 @@ func TestEmptyOutcomeIsUnknown(t *testing.T) {
 	for _, r := range rows {
 		if d := top.Delegation(r); d.Unknown == "" || d.Matches != nil {
 			t.Fatalf("state: %+v", d)
+		}
+	}
+}
+
+// Every row of a child reached under a root whose eligibility reads a
+// Namespace carries that Namespace, whether the root is eligible or not
+// (design §7.4 rule 4, §13).
+func TestDelegatedRowsCarryRootEligibility(t *testing.T) {
+	ns := objects.Ref{Kind: "Namespace", Name: "shop"}
+	for _, zone := range []string{"in", "out"} {
+		sel := objects.Listener{Name: "sel", Port: 8080, Protocol: "HTTP", AllowedRoutes: objects.AllowedRoutes{Namespaces: objects.RouteNamespaces{
+			From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}}}
+		edge2 := testutil.GatewayWithListeners("infra", "edge2", "kgateway", []objects.Listener{sel}, testutil.Listener{Name: "sel", Conds: ready})
+		r2 := testutil.WithRules(testutil.HTTPRoute("shop", "r2", []objects.ParentRef{testutil.GwRef("infra", "edge2")}),
+			prefixes([]string{"/x"}, testutil.DelegateTo("shop", "mid")))
+		snap := worldSnap(t, "v2.5.0", nil, edge("http"), edge2, root(prefixes([]string{"/x"}, testutil.DelegateTo("shop", "mid"))), r2,
+			child("mid", false, prefixes([]string{"/x/m"}, testutil.DelegateTo("shop", "kid"))), child("kid", false, prefixes([]string{"/x/m/k"}, svc("k"))))
+		for i, n := range snap.Namespaces {
+			if n.Name == "shop" {
+				snap.Namespaces[i] = testutil.Namespace("shop", map[string]string{"zone": zone})
+			}
+		}
+		snap.Access[cache.NamespacesGVR] = cache.Access{OK: true}
+		top, _ := buildWith(t, snap)
+		var kids int
+		for _, r := range top.Rows {
+			if c := top.Chain(r); c[len(c)-1] != route("shop", "kid") {
+				continue
+			}
+			kids++
+			if !slices.ContainsFunc(top.Deps(r), func(d int32) bool { return top.Refs[d] == ns }) {
+				var ds []objects.Ref
+				for _, d := range top.Deps(r) {
+					ds = append(ds, top.Refs[d])
+				}
+				t.Errorf("zone %s: kid row via %v lacks the shop Namespace: %v", zone, top.Chain(r), ds)
+			}
+		}
+		if kids == 0 {
+			t.Errorf("zone %s: no kid rows", zone)
 		}
 	}
 }

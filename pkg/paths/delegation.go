@@ -129,7 +129,6 @@ type reach struct {
 	c       *computed.Context
 	flags   uint8
 	unknown computed.UnknownReason
-	deps    [][]objects.Ref
 }
 
 type reachKey struct {
@@ -148,7 +147,8 @@ func (b *builder) delegated() {
 	}
 	var order []*reach
 	byKey := map[reachKey]*reach{}
-	rows := b.in.Views.Delegation.Rows
+	// The index's rows are view C's with root eligibility merged into their deps.
+	rows := b.in.Index.DelegRows
 	for i := range rows {
 		vr := &rows[i]
 		if vr.Key.Child == (objects.Ref{}) {
@@ -169,12 +169,8 @@ func (b *builder) delegated() {
 			} else if r.c.Outcome != computed.OutcomeAttached {
 				r.c = c
 			}
-			r.flags |= rowFlags(vr)
+			r.flags |= rowFlags(&vr.Row)
 			r.unknown = cmp.Or(r.unknown, vr.Unknown)
-			// View C interns its dependency sets, so equal ones share storage.
-			if !slices.ContainsFunc(r.deps, func(d []objects.Ref) bool { return len(d) == len(vr.Deps) && len(d) > 0 && &d[0] == &vr.Deps[0] }) {
-				r.deps = append(r.deps, vr.Deps)
-			}
 		}
 	}
 	for _, r := range order {
@@ -208,14 +204,13 @@ func (b *builder) context(r *reach) {
 		}
 		rs = append(rs, ri)
 	}
-	// The row reveals every route of its chain and its view C rows' state.
+	// The row reveals every route of its chain and the view B rows of every
+	// hop, so whatever decides that a root reaches the child (design §7.4 rule 4).
 	extra := make([]int32, 0, len(rs))
-	for _, ri := range rs {
+	for k, ri := range rs {
 		extra = append(extra, b.t.routes[ri].ref)
-	}
-	for _, ds := range r.deps {
-		for _, d := range ds {
-			extra = append(extra, b.ref(d))
+		if k > 0 {
+			extra = append(extra, b.hopDeps(b.t.Refs[b.t.routes[rs[k-1]].ref], b.t.Refs[b.t.routes[ri].ref])...)
 		}
 	}
 	rules := b.t.routes[rs[len(rs)-1]].rules
@@ -236,6 +231,28 @@ func (b *builder) context(r *reach) {
 		p.matches = er.Matches
 		b.childRule(atts, b.ctx(p), er.Index, &rules[er.Index], extra)
 	}
+}
+
+// hopDeps are the deps, as Refs indexes, of every view B row from parent to
+// child across its rules and refs, eligibility included.
+func (b *builder) hopDeps(parent, child objects.Ref) []int32 {
+	k := [2]objects.Ref{parent, child}
+	if d, ok := b.hopSets[k]; ok {
+		return d
+	}
+	var d []int32
+	ix := b.in.Index
+	for _, i := range ix.Delegation[parent] {
+		if r := &ix.DelegRows[i]; r.Key.Child == child {
+			for _, x := range r.Deps {
+				d = append(d, b.ref(ix.Refs[x]))
+			}
+		}
+	}
+	slices.Sort(d)
+	d = slices.Compact(d)
+	b.hopSets[k] = d
+	return d
 }
 
 // childRule adds the rows of a delegated rule under every root attachment atts.
