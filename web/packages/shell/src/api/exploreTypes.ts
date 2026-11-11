@@ -424,7 +424,6 @@ export interface PathSignal {
   code?: string;
   ref?: LinkedRef;
   state: HealthState;
-  reason?: string;
 }
 /** A path's worst state and its signals that are not healthy. */
 export interface PathProblem {
@@ -457,6 +456,7 @@ export interface Endpoints {
   source: string;
   port?: BackendPort;
   runtime?: EndpointsRuntime;
+  /** Meaningless when complete is "not-applicable": nothing was read. */
   readAt: string;
   complete: "complete" | "partial" | "failed" | "unavailable" | "stale" | "not-applicable";
   ready?: number;
@@ -465,6 +465,7 @@ export interface Endpoints {
 }
 /**
  * One path: Gateway → listener → hostnames → route chain → rule → backend.
+ * matches applies to HTTPRoute rows, grpcMatches to GRPCRoute rows; TCPRoute and TLSRoute rows have neither.
  * matches is null on a delegated row whose view C match is unknown ("match unknown").
  */
 export interface PathRow {
@@ -500,6 +501,8 @@ export interface PathCounts {
 /** The whole filtered result the caller may see; hidden says some paths were left out. */
 export interface PathSummary extends PathCounts {
   byState: Record<HealthState, PathCounts>;
+  /** Why no path was computed: "no-attachments" when the install has no computed views. */
+  notComputed?: "no-attachments";
   endpointsNotRead?: boolean;
   hidden?: boolean;
   unmemoised?: boolean;

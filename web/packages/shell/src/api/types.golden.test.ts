@@ -1171,7 +1171,7 @@ const pathRow = shape<PathRow>(
       { state: "!", signals: "!" },
       {
         signals: shape<PathSignal>(
-          { kind: "!", code: "?", ref: "?", state: "!", reason: "?" },
+          { kind: "!", code: "?", ref: "?", state: "!" },
           { ref: linkedRef },
           {
             kind: {
@@ -1208,6 +1208,7 @@ const pathsResponse = shape<PathsResponse>(
         gateways: "!",
         backends: "!",
         byState: "!",
+        notComputed: "?",
         endpointsNotRead: "?",
         hidden: "?",
         unmemoised: "?",
@@ -1218,6 +1219,7 @@ const pathsResponse = shape<PathsResponse>(
           { healthy: pathCounts, warning: pathCounts, error: pathCounts, unknown: pathCounts },
         ),
       },
+      { notComputed: { "no-attachments": 1 } },
     ),
   },
 );

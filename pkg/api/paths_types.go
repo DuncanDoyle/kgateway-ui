@@ -23,6 +23,9 @@ const (
 	NoteNotComputed   = "not-computed"
 )
 
+// NotComputedNoAttachments says the install has no computed views, so no path is derived.
+const NotComputedNoAttachments = "no-attachments"
+
 // EndpointsSourceKubernetes is the endpoints source read from the cluster's EndpointSlices.
 const EndpointsSourceKubernetes = "kubernetes"
 
@@ -47,8 +50,9 @@ type GRPCMatchDTO struct {
 	Headers []KeyMatchDTO  `json:"headers,omitempty"`
 }
 
-// PathRowDTO is one path (design §4.1). Matches is null on a delegated row
-// whose view C match is unknown; it never falls back to the child's rule.
+// PathRowDTO is one path (design §4.1). Matches applies to HTTPRoute rows and
+// GRPCMatches to GRPCRoute rows; TCPRoute and TLSRoute rows have neither.
+// Matches is null on a delegated row whose view C match is unknown.
 // Share is set for shown, failing, may-fail and no-traffic shares;
 // MirrorPercent only on a mirror row.
 type PathRowDTO struct {
@@ -86,11 +90,10 @@ type ProblemDTO struct {
 // SignalDTO is one existing signal on a row's chain: its kind, its code (a
 // finding code, condition type, capability state or view C reason) and object.
 type SignalDTO struct {
-	Kind   string       `json:"kind"`
-	Code   string       `json:"code,omitempty"`
-	Ref    *LinkedRef   `json:"ref,omitempty"`
-	State  health.State `json:"state"`
-	Reason string       `json:"reason,omitempty"`
+	Kind  string       `json:"kind"`
+	Code  string       `json:"code,omitempty"`
+	Ref   *LinkedRef   `json:"ref,omitempty"`
+	State health.State `json:"state"`
 }
 
 // PathCountsDTO counts filtered visible paths and the distinct routes,
@@ -105,9 +108,11 @@ type PathCountsDTO struct {
 // PathSummaryDTO summarises the whole filtered result the caller may see
 // (design §5, §13). Hidden says some paths were left out for the caller;
 // Unmemoised says the topology was over the memo cap and derived per request.
+// NotComputed says why there are no paths to compute, such as no computed views.
 type PathSummaryDTO struct {
 	PathCountsDTO
 	ByState          map[string]PathCountsDTO `json:"byState"`
+	NotComputed      string                   `json:"notComputed,omitempty"`
 	EndpointsNotRead bool                     `json:"endpointsNotRead,omitempty"`
 	Hidden           bool                     `json:"hidden,omitempty"`
 	Unmemoised       bool                     `json:"unmemoised,omitempty"`
@@ -128,7 +133,8 @@ type EndpointsDTO struct {
 	Source  string      `json:"source"`
 	Port    *PortDTO    `json:"port,omitempty"`
 	Runtime *RuntimeDTO `json:"runtime,omitempty"`
-	ReadAt  time.Time   `json:"readAt"`
+	// ReadAt is meaningless when Complete is not-applicable: nothing was read.
+	ReadAt time.Time `json:"readAt"`
 	// Complete is complete, partial, failed, unavailable, stale or not-applicable.
 	Complete string `json:"complete"`
 	// Ready and Total are absent unless the read establishes a count.

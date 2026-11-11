@@ -27,7 +27,9 @@ const pathsURL = listBase + "/paths"
 func withPathMemo(m *paths.Memo) HandlerOption { return func(c *handlerConfig) { c.pathMemo = m } }
 
 // hideEdge hides the Gateway infra/edge and nothing else.
-func hideEdge(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "Gateway" || ref.Name != "edge" }
+func hideEdge(_ *http.Request, ref objects.Ref) bool {
+	return ref.Kind != "Gateway" || ref.Name != "edge"
+}
 
 // pathsWorld is explorerWorld plus the Gateway infra/other with shop/on-other
 // on it: a 1:3 weighted rule and a redirect rule. Service shop/cart-svc has
@@ -35,7 +37,9 @@ func hideEdge(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "Gatew
 // shop/via-ls, on the ListenerSet infra/ls1, sends to cart-svc.
 func pathsWorld() []runtime.Object {
 	other := testutil.GatewayWithListeners("infra", "other", "kgateway", []objects.Listener{lst("web", 8080, "")}, up("web", 1))
-	weighted := func(name string, w int64) map[string]any { return map[string]any{"name": name, "port": int64(80), "weight": w} }
+	weighted := func(name string, w int64) map[string]any {
+		return map[string]any{"name": name, "port": int64(80), "weight": w}
+	}
 	redirect := testutil.Rule(matchPath("/old"))
 	redirect["filters"] = []any{map[string]any{"type": "RequestRedirect", "requestRedirect": map[string]any{"path": map[string]any{"type": "ReplaceFullPath", "replaceFullPath": "/new"}}}}
 	onOther := testutil.WithRules(testutil.HTTPRoute("shop", "on-other", []objects.ParentRef{otherRef}, testutil.AcceptedBy(otherRef, testutil.Controller)),
@@ -224,8 +228,8 @@ func TestPathsUnmemoised(t *testing.T) {
 }
 
 // A rule set without a Delegator has no delegated rows: a delegation ref is an
-// ordinary ref of kind HTTPRoute (design §4.2). A class-only install, which
-// has no rule set, has no rows to delegate.
+// ordinary ref of kind HTTPRoute (design §4.2). A class-only install has no
+// computed views: no rows, and the summary says the paths were not computed.
 func TestPathsWithoutDelegator(t *testing.T) {
 	_, srv, _ := startWith(t, setup{rulesFor: attachOnlyRules, disputes: true}, explorerWorld()...)
 	got := get[PathsResponse](t, srv, pathsURL+"?route=gateway.networking.k8s.io/HTTPRoute/shop/api", 200)
@@ -243,11 +247,15 @@ func TestPathsWithoutDelegator(t *testing.T) {
 
 	foreign := testutil.GwRef("infra", "foreign")
 	co := testutil.HTTPRoute("shop", "co", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other"))
-	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true}, world(co)...)
-	for _, r := range get[PathsResponse](t, h.srv, "/api/v1/installs/example.com~2Fother/paths?limit=200", 200).Rows {
-		if r.Delegated {
-			t.Fatalf("class-only delegated row %s", pathKey(r))
-		}
+	ruled := testutil.WithRules(testutil.HTTPRoute("shop", "ruled", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		backendRule([]any{svcRef("a")}))
+	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true}, world(co, ruled)...)
+	co2 := get[PathsResponse](t, h.srv, "/api/v1/installs/example.com~2Fother/paths?limit=200", 200)
+	if len(co2.Rows) != 0 || co2.Summary.Paths != 0 || co2.Summary.NotComputed != NotComputedNoAttachments {
+		t.Fatalf("class-only: %d rows, summary %+v", len(co2.Rows), co2.Summary)
+	}
+	if k := get[PathsResponse](t, h.srv, pathsURL, 200); len(k.Rows) == 0 || k.Summary.NotComputed != "" {
+		t.Fatalf("kgateway install: %d rows, notComputed %q", len(k.Rows), k.Summary.NotComputed)
 	}
 }
 

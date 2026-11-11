@@ -94,7 +94,11 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 	for _, k := range pg.Rows {
 		rows = append(rows, pathRow(l, t, proj, k))
 	}
-	writeJSON(w, PathsResponse{Install: id, Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: pathSummary(pg.Summary), CollectedAt: wireTime(p.ConfirmedAt)})
+	sum := pathSummary(pg.Summary)
+	if i.Computed == nil {
+		sum.NotComputed = NotComputedNoAttachments
+	}
+	writeJSON(w, PathsResponse{Install: id, Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: sum, CollectedAt: wireTime(p.ConfirmedAt)})
 }
 
 // pathSummary is s on the wire.
