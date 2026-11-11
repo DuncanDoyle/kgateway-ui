@@ -10,7 +10,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
-	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
@@ -46,14 +45,14 @@ type Row struct {
 	action Action
 }
 
-// Input is everything Build reads for one install.
+// Input is everything Build reads for one install. A nil Index, Views or
+// Decode builds an empty topology.
 type Input struct {
-	Install install.Resolved
-	Owned   *install.Owned
 	// Index locates the attached routes, Gateways and ListenerSets.
 	Index *explore.Index
 	// Views holds view A; Delegation is set only with a Delegator.
-	Views  *computed.Views
+	Views *computed.Views
+	// Decode decodes HTTPRoute rules.
 	Decode objects.Decoder
 	// Delegates is true when the selection has a Delegator.
 	Delegates bool
@@ -112,7 +111,7 @@ type listenerKey struct {
 // backendRef), one per rule with no backendRef, and one per RequestMirror.
 func Build(in Input) *Topology {
 	t := &Topology{delegates: in.Delegates}
-	if in.Owned == nil || in.Index == nil || in.Views == nil {
+	if in.Index == nil || in.Views == nil || in.Decode == nil {
 		return t
 	}
 	b := &builder{in: in, t: t, refs: map[objects.Ref]int32{}, routes: map[objects.Ref]int32{},
@@ -218,8 +217,13 @@ func (b *builder) rule(att, chain, ri int32, r *objects.Rule, base []int32) {
 		ref := int32(i) // #nosec G115 -- a backendRef index fits in int32
 		if br.Delegation != nil && b.in.Delegates {
 			// A delegation is one row whose backend is the delegation; view C's
-			// rows for the children it selects belong after it.
-			b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base)
+			// rows for the children it selects belong after it. Name mode
+			// names the child, so it is a dependency; the other modes reveal only the parent's spec.
+			if br.Delegation.Mode == objects.DelegationName {
+				b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base, b.ref(br.Ref))
+			} else {
+				b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base)
+			}
 			continue
 		}
 		b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base, b.ref(br.Ref))

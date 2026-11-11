@@ -46,7 +46,7 @@ func buildWith(t testing.TB, snap *cache.Snapshot) (*paths.Topology, *engine.Ins
 		t.Fatalf("installs: %d", len(m.Installs))
 	}
 	i := &m.Installs[0]
-	return paths.Build(paths.Input{Install: i.Resolved, Owned: i.Owned, Index: i.Index, Views: i.Computed, Decode: objects.Direct{},
+	return paths.Build(paths.Input{Index: i.Index, Views: i.Computed, Decode: objects.Direct{},
 		Delegates: i.Rules.Delegator() != nil}), i
 }
 
@@ -324,6 +324,9 @@ func TestDepsCoverChain(t *testing.T) {
 	b, ok := top.Backend(deleg)
 	if !ok || b.Delegation == nil || b.Delegation.Name != "child" {
 		t.Fatalf("delegation row: %+v", b)
+	}
+	if child := (objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "infra", Name: "child"}); !slices.Contains(depRefs(top, deleg), child) {
+		t.Fatalf("delegation deps lack the named child: %v", depRefs(top, deleg))
 	}
 }
 
