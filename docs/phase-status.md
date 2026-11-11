@@ -12,8 +12,8 @@ Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a tim
 - [x] 6.2 path model, paths API, path list (Tasks 22–32) — closed 2026-11-11, phases/phase-6/phase-6.2-complete.md
 - [x] 6.3 backends (Tasks 33–39) — closed 2026-11-11, phases/phase-6/phase-6.3-complete.md
 - [x] 6.4 route trace, all route kinds (Tasks 40–42) — closed 2026-11-11, phases/phase-6/phase-6.4-complete.md
-- [ ] 6.5 Gateway map, core (Tasks 43–47) ← CURRENT
-- [ ] 6.6 Gateway map, the rest; phase close (Tasks 48–50)
+- [x] 6.5 Gateway map, core (Tasks 43–47) — closed 2026-11-11, phases/phase-6/phase-6.5-complete.md
+- [ ] 6.6 Gateway map, the rest; phase close (Tasks 48–50) ← CURRENT
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -25,9 +25,9 @@ Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a tim
 - [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 6.5 — Gateway map, core (planned)
-Base: 120db13
-Brief: phases/phase-6/phase-6.5-brief.md
+Sub-phase: 6.6 — Gateway map, the rest; phase close (planned)
+Base: b246dcc
+Brief: phases/phase-6/phase-6.6-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
