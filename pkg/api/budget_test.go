@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/internal/testutil/benchgate"
@@ -45,6 +46,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
@@ -382,10 +384,16 @@ func TestBudgetDiagnosticsRequests(t *testing.T) {
 // measuredHandler is the handler over the matured 3.2 measurement world under
 // authz: rejects on every Gateway, process data and stub proxy stats, as the engine's gates use it.
 func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Model) {
-	tier := scale.Large.Contradicting().Worst()
 	fc := testutil.FakeClock()
-	w := measure.New(t, tier, fc)
-	e := engine.New(engine.Config{Snapshots: staticSnap{w.Live.Cache.Snapshot()}, Served: testutil.ServedUpstream(),
+	w := measure.New(t, scale.Large.Contradicting().Worst(), fc)
+	e, m := measuredEngine(t, w, fc, w.Live.Cache.Snapshot())
+	return NewHandler(e, fstest.MapFS{}, authz), m
+}
+
+// measuredEngine is the engine over snap of the measurement world w, matured
+// as measuredHandler's, and its model.
+func measuredEngine(t *testing.T, w *measure.World, fc *clocktesting.FakeClock, snap *cache.Snapshot) (*engine.Engine, *engine.Model) {
+	e := engine.New(engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(),
 		Detectors: []install.Detector{install.UpstreamDetector{}}, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Collected: w.Store.Snapshot,
 		Checks: health.Upstream(), Now: fc.Now})
@@ -405,7 +413,7 @@ func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Mode
 	if f, c := matured(m); f != c || c == 0 || !hasCodes(m, measuredCodes) || !hasCodes(m, analyzerCodes) {
 		t.Fatalf("measurement world did not mature: %d KGWUI-012 of %d checks", f, c)
 	}
-	return NewHandler(e, fstest.MapFS{}, authz), m
+	return e, m
 }
 
 // current is e's published model, nil before the first.
@@ -1089,4 +1097,249 @@ func TestBudgetMatcherMaterialization(t *testing.T) {
 			t.Errorf("a page of %+v allocates %.1f MiB, want at most 32", s, float64(alloc)/mib)
 		}
 	}
+}
+
+// The path list's request and heap budgets of design §14 (6.2).
+
+// pathsTiers are the worlds the paths budgets run on: the most path rows, and
+// the measurement world, whose Services make the endpoints projection work.
+var pathsTiers = []scale.Tier{scale.Large.Paths(), scale.Large.Contradicting().Worst()}
+
+// pathsEngine is tier's engine and model; the measurement world matures as measuredHandler's.
+func pathsEngine(t *testing.T, tier scale.Tier) (*engine.Engine, *engine.Model) {
+	if tier.IsWorst {
+		fc := testutil.FakeClock()
+		w := measure.New(t, tier, fc)
+		return measuredEngine(t, w, fc, w.Live.Cache.Snapshot())
+	}
+	snap := scale.Snapshot(tier, 1)
+	return snapshotEngine(snap, tier)
+}
+
+// pathsHandler is a handler over e under authz with an empty path memo whose
+// projections expire by m's clock, as the app's do by the real one.
+func pathsHandler(e *engine.Engine, m *engine.Model, authz Authorizer) http.Handler {
+	return NewHandler(e, fstest.MapFS{}, authz, withPathMemo(paths.NewMemo(clocktesting.NewFakeClock(m.ComputedAt))))
+}
+
+// allocated is the process's total heap allocation so far, in bytes.
+func allocated() uint64 {
+	s := []metrics.Sample{{Name: "/gc/heap/allocs:bytes"}}
+	metrics.Read(s)
+	return s[0].Value.Uint64()
+}
+
+// pathsGet serves one GET of path through h and returns its duration, bytes
+// allocated and decoded body. Any status but 200 fails tb.
+func pathsGet(tb testing.TB, h http.Handler, path string) (time.Duration, uint64, PathsResponse) {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	a, start := allocated(), time.Now()
+	h.ServeHTTP(w, req)
+	d, n := time.Since(start), allocated()-a
+	if w.Code != http.StatusOK {
+		tb.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	var out PathsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		tb.Fatal(err)
+	}
+	return d, n, out
+}
+
+// The paths request gates (design §14, tuned in 6.2 from 31 ms, 28.4 MiB cold
+// and 1.2 ms, 1.7 MiB warm). Times gate on the reference machine; allocation everywhere.
+const (
+	pathsColdTime  = 100 * time.Millisecond
+	pathsColdAlloc = 32 << 20
+	pathsWarmTime  = 5 * time.Millisecond
+	pathsWarmAlloc = 2 << 20
+)
+
+// TestBudgetPathsRequests: at Large, the first page of …/paths cold (a fresh
+// path memo) and warm (memo hit), under AllowAll and a restricting Authorizer:
+// median time and bytes allocated per request within the §14 gates.
+func TestBudgetPathsRequests(t *testing.T) {
+	const (
+		mib      = 1 << 20
+		coldRuns = 11
+		warmRuns = 201
+	)
+	for _, tier := range pathsTiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e, m := pathsEngine(t, tier)
+			url := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/paths"
+			for _, a := range []struct {
+				name  string
+				authz Authorizer
+			}{{"allow-all", nil}, {"restricted", restricting}} {
+				var coldT, warmT []time.Duration
+				var coldB, warmB []uint64
+				var sum PathSummaryDTO
+				for range coldRuns {
+					d, n, out := pathsGet(t, pathsHandler(e, m, a.authz), url)
+					coldT, coldB, sum = append(coldT, d), append(coldB, n), out.Summary
+				}
+				h := pathsHandler(e, m, a.authz)
+				pathsGet(t, h, url)
+				for range warmRuns {
+					d, n, _ := pathsGet(t, h, url)
+					warmT, warmB = append(warmT, d), append(warmB, n)
+				}
+				slices.Sort(coldT)
+				slices.Sort(warmT)
+				slices.Sort(coldB)
+				slices.Sort(warmB)
+				ct, cb := coldT[len(coldT)/2], coldB[len(coldB)/2]
+				wt, wb := warmT[len(warmT)/2], warmB[len(warmB)/2]
+				t.Logf("%s %s: %d paths (hidden %v, unmemoised %v); cold median %v max %v, %.2f MiB allocated (budget < %v, < %d MiB); warm median %v p95 %v, %.3f MiB allocated (budget < %v, < %d MiB)",
+					tier.Name, a.name, sum.Paths, sum.Hidden, sum.Unmemoised, rd(ct), rd(coldT[len(coldT)-1]), float64(cb)/mib, pathsColdTime, pathsColdAlloc/mib,
+					rd(wt), rd(percentile(warmT, 95)), float64(wb)/mib, pathsWarmTime, pathsWarmAlloc/mib)
+				if sum.Unmemoised {
+					t.Errorf("%s %s: the topology is over the memo cap, so warm requests derive it", tier.Name, a.name)
+				}
+				if ct >= pathsColdTime {
+					benchgate.Timing(t, "%s %s: cold median %v, budget < %v", tier.Name, a.name, ct, pathsColdTime)
+				}
+				if wt >= pathsWarmTime {
+					benchgate.Timing(t, "%s %s: warm median %v, budget < %v", tier.Name, a.name, wt, pathsWarmTime)
+				}
+				if cb >= pathsColdAlloc {
+					t.Errorf("%s %s: cold allocates %d B, budget < %d B", tier.Name, a.name, cb, pathsColdAlloc)
+				}
+				if wb >= pathsWarmAlloc {
+					t.Errorf("%s %s: warm allocates %d B, budget < %d B", tier.Name, a.name, wb, pathsWarmAlloc)
+				}
+			}
+		})
+	}
+}
+
+// heapBaseline is the median "retained" HeapInuse of the 2.1 engine at Large
+// (docs/phases/phase-2/bench/2.2-baseline-heap.txt), as pkg/engine's TestBudgetHeap holds it.
+const heapBaseline = 25411584
+
+// apiHeapChildEnv makes TestBudgetHeapAPIWarm measure in this process and print one line.
+const apiHeapChildEnv = "SNELLIUS_API_HEAP_CHILD"
+
+// apiHeapRun is one child's measurement: HeapInuse once the engine has computed
+// (the engine figure) and once paths are warm for every install, and HeapAlloc
+// freed by dropping the path memos.
+type apiHeapRun struct {
+	Engine, Warm uint64
+	// Alloc is the HeapAlloc warming added; Freed what dropping the handler and its memo freed.
+	Alloc, Freed int64
+	Paths        int
+	Unmemoised   bool
+}
+
+// TestBudgetHeapAPIWarm: as TestBudgetHeap, one fresh process per run and five
+// runs, the median retained heap of the engine figure plus the median of what
+// warming paths for every install adds stays ≤ 48 MiB over the 2.1 baseline (D-057).
+// Extreme is reported: D-057 is a Large budget.
+func TestBudgetHeapAPIWarm(t *testing.T) {
+	cases := append(slices.Clone(pathsTiers), scale.Extreme)
+	if name := os.Getenv(apiHeapChildEnv); name != "" {
+		i := slices.IndexFunc(cases, func(x scale.Tier) bool { return x.Name == name })
+		apiHeapChild(t, cases[i])
+		return
+	}
+	for _, tier := range cases {
+		t.Run(tier.Name, func(t *testing.T) { apiHeapBudget(t, tier, tier.Name != scale.Extreme.Name) })
+	}
+}
+
+// apiHeapBudget runs five heap children for tier and checks their medians if gated.
+func apiHeapBudget(t *testing.T, tier scale.Tier, gated bool) {
+	const mib = 1 << 20
+	var runs []apiHeapRun
+	for range 5 {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestBudgetHeapAPIWarm$", "-test.count=1", "-test.timeout=0")
+		cmd.Env = append(os.Environ(), apiHeapChildEnv+"="+tier.Name)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("heap child: %v\n%s", err, out)
+		}
+		var r apiHeapRun
+		for line := range strings.Lines(string(out)) {
+			if j, ok := strings.CutPrefix(line, "apiheap: "); ok {
+				if err := json.Unmarshal([]byte(j), &r); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if r.Engine == 0 {
+			t.Fatalf("heap child printed no result:\n%s", out)
+		}
+		runs = append(runs, r)
+	}
+	t.Logf("run  engine (B)  warm (B)  API memos (B)  HeapAlloc added (B)  freed by dropping them (B)")
+	eng, api, freed := make([]int64, len(runs)), make([]int64, len(runs)), make([]int64, len(runs))
+	for i, r := range runs {
+		eng[i], api[i], freed[i] = int64(r.Engine)-heapBaseline, int64(r.Warm)-int64(r.Engine), r.Freed //nolint:gosec // heap sizes fit
+		t.Logf("%d    %d    %d    %d    %d    %d", i+1, r.Engine, r.Warm, api[i], r.Alloc, r.Freed)
+	}
+	med := func(v []int64) int64 { v = slices.Clone(v); slices.Sort(v); return v[len(v)/2] }
+	em, am, fm := med(eng), med(api), med(freed)
+	total := em + am
+	note := "budget ≤ 48 MiB"
+	if !gated {
+		note = "reported: D-057 is a Large budget"
+	}
+	t.Logf("%s: %d paths (unmemoised %v); engine figure median %+.1f MiB over the 2.1 baseline %d B; API memos median %+.2f MiB (freed by dropping them %.2f MiB); engine + API %+.1f MiB (%s)",
+		tier.Name, runs[0].Paths, runs[0].Unmemoised, float64(em)/mib, heapBaseline, float64(am)/mib, float64(fm)/mib, float64(total)/mib, note)
+	if gated && total > 48*mib {
+		t.Errorf("%s: engine + API memos %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
+	}
+}
+
+// apiHeapChild measures one apiHeapRun of tier and prints it.
+func apiHeapChild(t *testing.T, tier scale.Tier) {
+	stats := func() runtime.MemStats {
+		runtime.GC()
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		return m
+	}
+	var e *engine.Engine
+	var m *engine.Model
+	var w *measure.World
+	if tier.IsWorst {
+		// As TestBudgetHeap: the measurement world's cache goes before measuring,
+		// once every goroutine it started has returned.
+		fc := testutil.FakeClock()
+		g := runtime.NumGoroutine()
+		w = measure.New(t, tier, fc)
+		snap := w.Live.Cache.Snapshot()
+		w.Live.Stop()
+		w.Live = nil
+		for deadline := time.Now().Add(time.Minute); runtime.NumGoroutine() > g; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
+			}
+		}
+		e, m = measuredEngine(t, w, fc, snap)
+	} else {
+		e, m = snapshotEngine(scale.Snapshot(tier, 1), tier)
+	}
+	var r apiHeapRun
+	st := stats()
+	r.Engine = st.HeapInuse
+	h := pathsHandler(e, m, nil)
+	for _, i := range m.Installs {
+		_, _, out := pathsGet(t, h, "/api/v1/installs/"+i.Resolved.ID()+"/paths")
+		r.Paths += out.Summary.Paths
+		r.Unmemoised = r.Unmemoised || out.Summary.Unmemoised
+	}
+	warm := stats()
+	r.Warm, r.Alloc = warm.HeapInuse, int64(warm.HeapAlloc)-int64(st.HeapAlloc) //nolint:gosec // heap sizes fit
+	runtime.KeepAlive(h) // the handler and its memo go here
+	r.Freed = int64(warm.HeapAlloc) - int64(stats().HeapAlloc) //nolint:gosec // heap sizes fit
+	runtime.KeepAlive(e)
+	runtime.KeepAlive(m)
+	runtime.KeepAlive(w)
+	j, _ := json.Marshal(r)
+	fmt.Println("apiheap: " + string(j))
 }
