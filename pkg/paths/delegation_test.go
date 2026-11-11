@@ -236,3 +236,68 @@ func TestDelegatedRefsMerge(t *testing.T) {
 		t.Fatalf("delegated rows: %d", len(rows))
 	}
 }
+
+// unknownWorld has a rule whose label ref is setting-unknown with the label
+// elsewhere, then a name ref to shop/plain: the rule's later refs inherit the
+// uncertainty, so view C reaches plain only under unknown contexts.
+func unknownWorld(t *testing.T) *paths.Topology {
+	t.Helper()
+	unread := corev1.EnvVar{Name: install.WildcardEnv, ValueFrom: &corev1.EnvVarSource{
+		ConfigMapKeyRef: &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "cm"}, Key: "k"}}}
+	labelled := func(u *unstructured.Unstructured) *unstructured.Unstructured {
+		u.SetLabels(map[string]string{objects.DelegationLabelKey: "team"})
+		return u
+	}
+	elsewhere := labelled(testutil.WithRules(testutil.HTTPRoute("other", "x", nil), prefixes([]string{"/api/x"}, svc("x"))))
+	plain := child("plain", false, prefixes([]string{"/api/a"}, svc("a")), prefixes([]string{"/api/b"}, svc("b")))
+	return world25(t, []corev1.EnvVar{unread}, edge("http"),
+		root(prefixes([]string{"/api"}, testutil.DelegateLabel("shop", "team"), testutil.DelegateTo("shop", "plain"))),
+		labelled(child("cart", false, prefixes([]string{"/api/cart"}, svc("c")))), elsewhere, plain)
+}
+
+// TestDelegatedUnknownContext: a child view C reaches only under unknown
+// contexts gets one row per written rule, unknown and with no effective match.
+func TestDelegatedUnknownContext(t *testing.T) {
+	top := unknownWorld(t)
+	var rows []paths.Row
+	for _, r := range delegated(top) {
+		if top.Chain(r)[1] == route("shop", "plain") {
+			rows = append(rows, r)
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("plain rows: %d", len(rows))
+	}
+	for i, r := range rows {
+		d := top.Delegation(r)
+		if top.Rule(r).Index != i || d.Unknown == "" || d.Matches != nil {
+			t.Fatalf("row %d: rule %d, state %+v", i, top.Rule(r).Index, d)
+		}
+	}
+}
+
+// TestEmptyOutcomeIsUnknown: a context with no outcome counts as unknown
+// (computed.Context), so its child's written rules are unknown rows.
+func TestEmptyOutcomeIsUnknown(t *testing.T) {
+	_, i := buildWith(t, worldSnap(t, "v2.5.0", nil, edge("http"), root(prefixes([]string{"/api"}, testutil.DelegateTo("shop", "cart"))),
+		child("cart", true, prefixes([]string{"/cart"}, svc("c")), prefixes([]string{"/more"}, svc("d")))))
+	views := *i.Computed
+	views.Delegation.Rows = slices.Clone(views.Delegation.Rows)
+	for k := range views.Delegation.Rows {
+		row := &views.Delegation.Rows[k]
+		row.Contexts = slices.Clone(row.Contexts)
+		for c := range row.Contexts {
+			row.Contexts[c].Outcome, row.Contexts[c].Rules = "", nil
+		}
+	}
+	top := paths.Build(paths.Input{Index: i.Index, Views: &views, Decode: objects.Direct{}, Delegates: true})
+	rows := delegated(top)
+	if len(rows) != 2 {
+		t.Fatalf("delegated rows: %d", len(rows))
+	}
+	for _, r := range rows {
+		if d := top.Delegation(r); d.Unknown == "" || d.Matches != nil {
+			t.Fatalf("state: %+v", d)
+		}
+	}
+}

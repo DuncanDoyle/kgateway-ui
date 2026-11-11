@@ -39,9 +39,9 @@ type Row struct {
 	att, ctx int32
 	rule     int16
 	// ref is the backendRef index in the rule; -1 for a rule-level mirror or a rule with no backendRef.
-	ref    int16
+	ref int16
+	// depOff is the dependency set's offset in deps, at its length.
 	depOff uint32
-	depN   uint16
 	// mirror is the RequestMirror filter index on the ref, or on the rule when ref is -1; -1 for none.
 	mirror int16
 }
@@ -91,7 +91,8 @@ type Topology struct {
 	// ctxs are the rows' path contexts; unknowns the reasons they index.
 	ctxs     []pathCtx
 	unknowns []computed.UnknownReason
-	deps     []int32
+	// deps are the dependency sets, each its length then its Refs indexes.
+	deps []int32
 	// delegates is Input.Delegates: whether a delegation backendRef delegates.
 	delegates bool
 }
@@ -321,7 +322,6 @@ func (b *builder) add(row Row, base []int32, extra ...int32) {
 	slices.Sort(b.set)
 	b.set = slices.Compact(b.set)
 	t := b.t
-	row.depN = uint16(len(b.set)) // #nosec G115 -- a dependency set is a handful of refs
 	b.key = b.key[:0]
 	for _, d := range b.set {
 		b.key = binary.LittleEndian.AppendUint32(b.key, uint32(d)) // #nosec G115 -- a ref index is never negative
@@ -329,7 +329,8 @@ func (b *builder) add(row Row, base []int32, extra ...int32) {
 	off, ok := b.sets[string(b.key)]
 	if !ok {
 		off = uint32(len(t.deps)) // #nosec G115 -- the table fits in uint32
-		t.deps = append(t.deps, b.set...)
+		// The length is stored whole, so a set is never cut short.
+		t.deps = append(append(t.deps, int32(len(b.set))), b.set...) // #nosec G115 -- a set is smaller than the table
 		b.sets[string(b.key)] = off
 	}
 	row.depOff = off
@@ -429,7 +430,9 @@ func (t *Topology) Action(r Row) Action {
 // of its chain, its backend or mirror target and, on a delegated route, its
 // view C row's, as indexes into Refs.
 func (t *Topology) Deps(r Row) explore.DepSet {
-	return explore.DepSet(t.deps[r.depOff : r.depOff+uint32(r.depN) : r.depOff+uint32(r.depN)])
+	lo := r.depOff + 1
+	hi := lo + uint32(t.deps[r.depOff]) // #nosec G115 -- a stored length is never negative
+	return explore.DepSet(t.deps[lo:hi:hi])
 }
 
 // Bytes estimates the topology's retained size, for the memo cap (design §14).

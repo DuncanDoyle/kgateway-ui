@@ -156,7 +156,7 @@ func (b *builder) delegated() {
 		}
 		for ci := range vr.Contexts {
 			c := &vr.Contexts[ci]
-			if c.Path.Len() == 0 || (c.Outcome != computed.OutcomeAttached && c.Outcome != computed.OutcomeUnknown) {
+			if c.Path.Len() == 0 || noTraffic(c.Outcome) {
 				continue
 			}
 			// A context's frame, so its path, is shared by its reporters and by the rule's refs.
@@ -172,7 +172,7 @@ func (b *builder) delegated() {
 			r.flags |= rowFlags(vr)
 			r.unknown = cmp.Or(r.unknown, vr.Unknown)
 			// View C interns its dependency sets, so equal ones share storage.
-			if !slices.ContainsFunc(r.deps, func(d []objects.Ref) bool { return len(d) > 0 && len(vr.Deps) > 0 && &d[0] == &vr.Deps[0] }) {
+			if !slices.ContainsFunc(r.deps, func(d []objects.Ref) bool { return len(d) == len(vr.Deps) && len(d) > 0 && &d[0] == &vr.Deps[0] }) {
 				r.deps = append(r.deps, vr.Deps)
 			}
 		}
@@ -180,6 +180,17 @@ func (b *builder) delegated() {
 	for _, r := range order {
 		b.context(r)
 	}
+}
+
+// noTraffic reports whether a context outcome sends no traffic to the child.
+// Any other value than these and attached, empty included, counts as unknown.
+func noTraffic(o computed.RowOutcome) bool {
+	switch o {
+	case computed.OutcomeDropped, computed.OutcomeForbidden, computed.OutcomeRejectedHostnames,
+		computed.OutcomeCycle, computed.OutcomeUnresolved:
+		return true
+	}
+	return false
 }
 
 // context adds the rows of r's child under its context.
@@ -209,7 +220,7 @@ func (b *builder) context(r *reach) {
 	}
 	rules := b.t.routes[rs[len(rs)-1]].rules
 	p := pathCtx{off: b.chain(rs), n: uint16(len(rs)), flags: r.flags, unknown: b.unknown(r.unknown)} // #nosec G115 -- checked above
-	if r.c.Outcome == computed.OutcomeUnknown {
+	if r.c.Outcome != computed.OutcomeAttached {
 		// The child's effective rules are unknown, so every written rule may be on the path.
 		p.unknown = b.unknown(cmp.Or(r.c.Unknown, r.unknown, computed.UnknownContext))
 		ctx := b.ctx(p)
