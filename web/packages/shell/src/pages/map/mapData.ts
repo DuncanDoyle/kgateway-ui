@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { ApiError, apiFetch } from "../../api/client";
+import { type ApiError, apiFetch } from "../../api/client";
 import { forInstall, withQuery } from "../../api/exploreHooks";
 import { installApi, live } from "../../api/hooks";
 import type { PathRow, PathSummary, PathsResponse } from "../../api/types";
 import { apiQuery } from "../../explore/listQuery";
+import type { HealthState } from "../../theme/tokens";
+import { refParam } from "../explore/detailParts";
 
 // region Helpers
 /** Rows per /paths request; the server's maximum limit. */
@@ -29,6 +31,8 @@ export interface MapPaths {
   done: boolean;
   /** The result has more than MAP_MAX_ROWS paths (summary.paths); the map loads only the first MAP_MAX_ROWS. */
   truncated: boolean;
+  /** The result kept changing during the walk, so these rows are the last result that held still (or the last walk). */
+  inconsistent: boolean;
 }
 
 /**
@@ -40,27 +44,79 @@ export function mapQuery(params: URLSearchParams, gateway: string): URLSearchPar
   return new URLSearchParams([["gateway", gateway], ...rest, ["limit", String(MAP_PAGE)]]);
 }
 
+/** Retries of a walk whose pages disagree on the result's counts. */
+const WALK_RETRIES = 2;
+
+/** One walk over the pages; inconsistent when its pages never agreed on the result's counts. */
+interface MapResult {
+  pages: PathsResponse[];
+  inconsistent: boolean;
+}
+
+/** True when two pages report the same counts for the whole result, so the result did not change between them. */
+const sameResult = (a: PathsResponse, b: PathsResponse) =>
+  a.summary.paths === b.summary.paths && JSON.stringify(a.summary.byState) === JSON.stringify(b.summary.byState);
+
 /**
  * Loads the pages of url one after another, up to MAP_MAX_ROWS rows, reporting each as it arrives.
- * A rejected cursor means the result changed under the walk, so the walk restarts from page one, once.
+ * The cursor is a keyset anchor, so a row whose state changes mid-walk can move before it and be skipped
+ * (D-006). Every page carries the whole result's summary; when one differs from page one's, the walk restarts.
+ * After WALK_RETRIES restarts the previous result is kept (or, on a first load, the last walk), marked inconsistent.
  */
-async function fetchPages(url: string, onPage: (pages: PathsResponse[]) => void): Promise<PathsResponse[]> {
-  for (let attempt = 0; ; attempt++) {
-    const pages: PathsResponse[] = [];
+async function fetchPages(
+  url: string,
+  prev: MapResult | undefined,
+  onPage: (pages: PathsResponse[]) => void,
+): Promise<MapResult> {
+  let pages: PathsResponse[] = [];
+  for (let attempt = 0; attempt <= WALK_RETRIES; attempt++) {
+    pages = [];
     let rows = 0;
-    try {
-      for (let next: string | undefined = ""; next !== undefined && rows < MAP_MAX_ROWS; ) {
-        const page: PathsResponse = await apiFetch(next ? `${url}&cursor=${encodeURIComponent(next)}` : url);
-        pages.push(page);
-        rows += page.rows.length;
-        next = page.next;
-        onPage([...pages]);
+    let consistent = true;
+    for (let next: string | undefined = ""; next !== undefined && rows < MAP_MAX_ROWS; ) {
+      const page: PathsResponse = await apiFetch(next ? `${url}&cursor=${encodeURIComponent(next)}` : url);
+      if (pages[0] && !sameResult(pages[0], page)) {
+        consistent = false;
+        break;
       }
-      return pages;
-    } catch (e) {
-      if (attempt > 0 || pages.length === 0 || !(e instanceof ApiError && e.status === 400)) throw e;
+      pages.push(page);
+      rows += page.rows.length;
+      next = page.next;
+      onPage([...pages]);
     }
+    if (consistent) return { pages, inconsistent: false };
   }
+  return { pages: prev?.pages ?? pages, inconsistent: true };
+}
+
+/** A path's identity: Gateway, ListenerSet, listener, route chain, rule, backend, port and mirror. */
+const rowKey = (r: PathRow) =>
+  JSON.stringify([
+    refParam(r.gateway),
+    r.listenerSet && refParam(r.listenerSet),
+    r.listener.name,
+    r.routes.map(refParam),
+    r.rule,
+    r.backend && refParam(r.backend),
+    r.port,
+    r.mirror,
+  ]);
+
+const RANK: Record<HealthState, number> = { healthy: 0, unknown: 1, warning: 2, error: 3 };
+
+/** The rows with each path once, in first-seen order, keeping the copy with the worst state. */
+export function dedupeRows(rows: PathRow[]): PathRow[] {
+  const at = new Map<string, number>();
+  const out: PathRow[] = [];
+  for (const r of rows) {
+    const k = rowKey(r);
+    const i = at.get(k);
+    if (i === undefined) {
+      at.set(k, out.length);
+      out.push(r);
+    } else if (RANK[r.problem.state] > RANK[(out[i] as PathRow).problem.state]) out[i] = r;
+  }
+  return out;
 }
 
 /** The earliest collectedAt of the pages. */
@@ -80,20 +136,22 @@ export function useMapPaths(installId: string, gateway: string, params: URLSearc
   const query = useMemo(() => mapQuery(params, gateway), [params, gateway]);
   const key = withQuery(`${installApi(installId)}/paths`, query);
   const [progress, setProgress] = useState<{ key: string; pages: PathsResponse[] }>();
-  const { data, error } = useSWR<PathsResponse[], ApiError>(
+  const { data, error } = useSWR<MapResult, ApiError>(
     key,
-    (k: string) => fetchPages(k, (pages) => setProgress({ key: k, pages })),
+    (k: string) =>
+      fetchPages(k, cache.get(k)?.data as MapResult | undefined, (pages) => setProgress({ key: k, pages })),
     // A filter change keeps the old map until the new rows arrive; once the new query fails they are dropped.
     { ...live, keepPreviousData: true },
   );
   // Relies on SWR keying its cache by key, as useList does.
   const own = cache.get(key)?.data !== undefined;
   const loaded = own || !error ? data : undefined;
-  const current = loaded ?? (progress?.key === key ? progress.pages : undefined);
+  const current = loaded?.pages ?? (progress?.key === key ? progress.pages : undefined);
+  const inconsistent = !!loaded?.inconsistent;
   return useMemo(() => {
     const pages = current?.filter((p) => forInstall(p, installId));
     const first = pages?.[0];
-    const rows = pages?.flatMap((p) => p.rows).slice(0, MAP_MAX_ROWS) ?? [];
+    const rows = dedupeRows(pages?.flatMap((p) => p.rows) ?? []).slice(0, MAP_MAX_ROWS);
     const more = !!pages?.[pages.length - 1]?.next;
     return {
       rows,
@@ -104,6 +162,7 @@ export function useMapPaths(installId: string, gateway: string, params: URLSearc
       partial: more && rows.length < MAP_MAX_ROWS,
       done: !!first && !more,
       truncated: !!first && first.summary.paths > MAP_MAX_ROWS,
+      inconsistent,
     };
-  }, [current, installId, error]);
+  }, [current, inconsistent, installId, error]);
 }

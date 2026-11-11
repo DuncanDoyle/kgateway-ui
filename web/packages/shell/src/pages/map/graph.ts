@@ -24,12 +24,17 @@ export interface MapNode {
   rows: number[];
 }
 
-/** An edge between adjacent columns; share only where every row on it shows a share (design §4.4). */
+/**
+ * An edge between adjacent columns. share is set only where every row on it shows a share (design §4.4) and the
+ * rows are one rule's or agree on it. Never style or animate an edge as healthy unless state is "healthy".
+ */
 export interface MapEdge {
   id: string;
   source: string;
   target: string;
   share?: number;
+  /** The worst problem state of the rows on the edge. */
+  state: HealthState;
   /** Every row on the edge is an error or its share is failing. */
   broken: boolean;
   rows: number[];
@@ -75,7 +80,7 @@ function signalNode(s: PathSignal, r: PathRow, ids: RowIds): string {
  */
 export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new Set()): MapGraph {
   const nodes = new Map<string, MapNode>();
-  const edges = new Map<string, MapEdge & { shares: (number | undefined)[] }>();
+  const edges = new Map<string, MapEdge & { shares: (number | undefined)[]; rules: Set<string> }>();
   const node = (id: string, i: number, init: Omit<MapNode, "id" | "rows" | "state">) => {
     let n = nodes.get(id);
     if (!n) {
@@ -89,12 +94,16 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
     const id = `${source}>${target}`;
     let e = edges.get(id);
     if (!e) {
-      e = { id, source, target, broken: true, rows: [], shares: [] };
+      e = { id, source, target, state: "healthy", broken: true, rows: [], shares: [], rules: new Set() };
       edges.set(id, e);
     }
     e.rows.push(i);
+    e.state = worse(e.state, r.problem.state);
     e.broken &&= r.problem.state === "error" || r.shareState === "failing";
-    if (share) e.shares.push(r.shareState === "shown" ? r.share : undefined);
+    if (share) {
+      e.shares.push(r.shareState === "shown" ? r.share : undefined);
+      e.rules.add(`${source}#${r.rule}`);
+    }
   };
 
   const roots = new Set<string>();
@@ -149,9 +158,11 @@ export function buildGraph(rows: PathRow[], _expanded: ReadonlySet<string> = new
   }
   return {
     nodes: [...nodes.values()],
-    edges: [...edges.values()].map(({ shares, ...e }) => {
+    // Share is per rule: an edge over several rules shows it only when they agree.
+    edges: [...edges.values()].map(({ shares, rules, ...e }) => {
       const shown = shares.length > 0 && shares.every((s) => s !== undefined);
-      return shown ? { ...e, share: Math.max(...(shares as number[])) } : e;
+      const one = rules.size === 1 || shares.every((s) => s === shares[0]);
+      return shown && one ? { ...e, share: Math.max(...(shares as number[])) } : e;
     }),
   };
 }

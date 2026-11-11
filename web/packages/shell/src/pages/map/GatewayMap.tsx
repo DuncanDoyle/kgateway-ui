@@ -107,6 +107,7 @@ export function GatewayMap({ gateway, rows, stylesOverride }: GatewayMapProps) {
         nodesDraggable={false}
         nodesConnectable={false}
         fitView
+        onlyRenderVisibleElements
         minZoom={0.1}
       >
         <MiniMap pannable zoomable />

@@ -5,11 +5,11 @@ import { SWRConfig } from "swr";
 import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
-import type { GatewayDetail, LinkedRef, PathsResponse } from "../../api/types";
+import type { GatewayDetail, LinkedRef, PathRow, PathSummary, PathsResponse } from "../../api/types";
 import { renderWithTheme, testSWR } from "../../test/render";
 import { defaultThemes } from "../../theme/themes";
 import { GatewayPage } from "../explore/GatewayPage";
-import { useMapPaths } from "./mapData";
+import { dedupeRows, useMapPaths } from "./mapData";
 
 const ID = "kgw.kgateway";
 const API = `/api/v1/installs/${ID}`;
@@ -194,6 +194,85 @@ it("a first load shows its rows as pages arrive", async () => {
   release();
   await waitFor(() => expect(result.current).toMatchObject({ partial: false, done: true }));
   expect(result.current.rows).toHaveLength(300);
+});
+
+/** Serves rows() as a /paths result of 200-row pages with summary(); the path count is rows().length. */
+function serveResult(rows: () => PathRow[], summary: () => PathSummary, onPage?: (n: number) => void) {
+  serve((u) => {
+    const n = pageOf(u);
+    onPage?.(n);
+    const all = rows();
+    const next = (n + 1) * 200 < all.length ? `p${n + 1}` : undefined;
+    return { ...edgePaths(), rows: all.slice(n * 200, n * 200 + 200), next, summary: summary() };
+  });
+}
+const named = (k: number, state: PathRow["problem"]["state"] = "healthy"): PathRow => {
+  const base = edgePaths().rows[0] as PathRow;
+  return { ...base, routes: [{ ...(base.routes[0] as LinkedRef), name: `r${k}` }], problem: { state, signals: [] } };
+};
+const hookWrapper = ({ children }: { children: React.ReactNode }) => (
+  <SWRConfig value={testSWR()}>{children}</SWRConfig>
+);
+
+it("a row that turns bad between pages is not lost: the walk restarts when the result's counts change", async () => {
+  // Problem-first order moves r250 ahead of the page-one anchor once it fails, so a plain walk would skip it.
+  const healthy = Array.from({ length: 300 }, (_, k) => named(k));
+  const failed = [named(250, "error"), ...healthy.filter((_, k) => k !== 250)];
+  const base = edgePaths().summary;
+  const counts = (errors: number): PathSummary => ({
+    ...base,
+    paths: 300,
+    byState: { ...base.byState, error: { ...base.byState.error, paths: errors } },
+  });
+  let flipped = false;
+  serveResult(
+    () => (flipped ? failed : healthy),
+    () => counts(flipped ? 1 : 0),
+    (n) => {
+      if (n === 1) flipped = true;
+    },
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  const names = result.current.rows.map((r) => r.routes[0]?.name);
+  expect(names).toHaveLength(300);
+  expect(new Set(names).size).toBe(300);
+  expect(result.current.rows.find((r) => r.routes[0]?.name === "r250")?.problem.state).toBe("error");
+  expect(result.current.inconsistent).toBe(false);
+  // Page one, a page two whose counts differ, then a full second walk.
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", null, "p1"]);
+});
+
+it("a result that keeps changing is walked three times, then shown marked inconsistent", async () => {
+  const base = edgePaths().summary;
+  let calls = 0;
+  serveResult(
+    () => Array.from({ length: 300 }, (_, k) => named(k)),
+    () => ({ ...base, paths: 300 + calls++ }),
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.inconsistent).toBe(true));
+  expect(pathCalls()).toHaveLength(6);
+  expect(result.current.rows.length).toBeGreaterThan(0);
+});
+
+it("the same path on two pages collapses to one row with the worse state", () => {
+  const rows = dedupeRows([named(1), named(2), named(1, "error"), named(1, "warning")]);
+  expect(rows.map((r) => [r.routes[0]?.name, r.problem.state])).toEqual([
+    ["r1", "error"],
+    ["r2", "healthy"],
+  ]);
+  // A different rule, port or mirror flag is another path.
+  expect(
+    dedupeRows([
+      named(1),
+      { ...named(1), rule: named(1).rule + 1 },
+      { ...named(1), port: (named(1).port ?? 0) + 1 },
+      { ...named(1), mirror: !named(1).mirror },
+    ]),
+  ).toHaveLength(4);
 });
 
 it("2,500 matching paths load 2,000 in ten requests and say so", async () => {

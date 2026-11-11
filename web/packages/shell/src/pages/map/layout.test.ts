@@ -1,6 +1,6 @@
 import type { LinkedRef, PathRow } from "../../api/types";
 import { buildGraph, type MapGraph } from "./graph";
-import { INDENT, layoutColumns, type Point } from "./layout";
+import { INDENT, layoutColumns, type Point, ROW_H } from "./layout";
 
 const ref = (kind: string, name: string, namespace = "shop"): LinkedRef => ({
   group: kind === "Service" ? "" : "gateway.networking.k8s.io",
@@ -215,4 +215,54 @@ it("changed={route} re-runs only the routes column: Gateway and listener positio
     expect(after.get(id)).toEqual(before.get(id));
   expect(after.has("r:gateway.networking.k8s.io/HTTPRoute/shop/r0")).toBe(true);
   expect(new Set(ids(g2, "route").map((id) => after.get(id)?.y)).size).toBe(ids(g2, "route").length);
+});
+
+it("an edge's state is the worst of its rows, broken or not", () => {
+  const g = buildGraph(
+    [
+      row("http", ["r1"], "svc-a", { problem: { state: "warning", signals: [] } }),
+      row("http", ["r1"], "svc-a", { rule: 1, problem: { state: "error", signals: [] } }),
+      row("http", ["r2"], "svc-b"),
+    ],
+    new Set(),
+  );
+  const e = (route: string, b: string) =>
+    g.edges.find((x) => x.id === `r:gateway.networking.k8s.io/HTTPRoute/shop/${route}>b:/Service/shop/${b}`);
+  expect(e("r1", "svc-a")).toMatchObject({ state: "error", broken: false });
+  expect(e("r2", "svc-b")).toMatchObject({ state: "healthy", broken: false });
+  expect(g.edges.find((x) => x.source.startsWith("g:"))?.state).toBe("error");
+});
+
+it("an edge over several rules carries a share only when their shares agree", () => {
+  const g = buildGraph(
+    [
+      // r1 reaches svc-a from rules 0 and 1 with different shares: no share.
+      row("http", ["r1"], "svc-a", { share: 30 }),
+      row("http", ["r1"], "svc-a", { rule: 1, share: 70 }),
+      // r2 reaches svc-a from two rules with the same share, and from one rule on two listeners.
+      row("http", ["r2"], "svc-a", { share: 50 }),
+      row("http", ["r2"], "svc-a", { rule: 1, share: 50 }),
+      row("http", ["r3"], "svc-a", { share: 40 }),
+      row("https", ["r3"], "svc-a", { share: 40 }),
+    ],
+    new Set(),
+  );
+  const share = (route: string) =>
+    g.edges.find((x) => x.id === `r:gateway.networking.k8s.io/HTTPRoute/shop/${route}>b:/Service/shop/svc-a`)?.share;
+  expect(share("r1")).toBeUndefined();
+  expect(share("r2")).toBe(50);
+  expect(share("r3")).toBe(40);
+});
+
+it("a column with a node prev lacks is re-laid even when it is not in changed", () => {
+  const before = layoutColumns(buildGraph(crossingRows(), new Set()));
+  // A new listener and route; only routes are named as changed.
+  const g = buildGraph([...crossingRows(), row("l3", ["r9"], "b1")], new Set());
+  const after = layoutColumns(g, new Set(["route"]), before);
+  // The listeners column is laid out again as a whole: three even slots around 0.
+  const ys = ids(g, "listener").map((id) => after.get(id)?.y as number);
+  expect([...ys].sort((a, b) => a - b)).toEqual([-ROW_H, 0, ROW_H]);
+  expect(after.get("g:gateway.networking.k8s.io/Gateway/infra/edge")).toEqual(
+    before.get("g:gateway.networking.k8s.io/Gateway/infra/edge"),
+  );
 });

@@ -51,6 +51,7 @@ function sortBy<T>(
  * Positions in four fixed columns, each ordered by the barycentre of its connected nodes over a few sweeps,
  * so edges cross less (design §6.2). Delegated routes stay right under their root, indented. Deterministic.
  * With changed, only those columns are reordered; the others keep prev's positions, or their order in g.
+ * A column with a node prev lacks is reordered too, since a kept column has no place for it.
  */
 export function layoutColumns(
   g: MapGraph,
@@ -82,7 +83,8 @@ export function layoutColumns(
     return [...units.values()];
   });
 
-  const moves = (c: number) => !changed || changed.has(COLUMNS[c] as NodeKind);
+  const fresh = new Set(prev ? g.nodes.filter((n) => !prev.has(n.id)).map((n) => n.kind) : []);
+  const moves = (c: number) => !changed || changed.has(COLUMNS[c] as NodeKind) || fresh.has(COLUMNS[c] as NodeKind);
   const sweep = (c: number, r: number, adj: Map<string, string[]>) => {
     const col = cols[c] as Column;
     const ref = slots(cols[r] as Column);
