@@ -363,9 +363,14 @@ func (p *projector) refFindings(route objects.Ref) []refFinding {
 // attachment returns attachment a's signals, root its route.
 func (p *projector) attachment(a int32, root objects.Ref) *attSignals {
 	s := &p.atts[a]
-	if s.done {
-		return s
+	if !s.done {
+		p.attachmentInto(s, a, root)
 	}
+	return s
+}
+
+// attachmentInto derives attachment a's signals into s, root its route.
+func (p *projector) attachmentInto(s *attSignals, a int32, root objects.Ref) {
 	s.done = true
 	t, idx := p.t, p.in.Model.Index
 	at := &t.atts[a]
@@ -402,7 +407,41 @@ func (p *projector) attachment(a int32, root objects.Ref) *attSignals {
 		}
 	}
 	s.sigs = p.parent(s, root, int(at.parent))
-	return s
+}
+
+// AttachmentProblems is the own problem of each row's attachment, index-aligned
+// with rows: its Gateway, listener and route parent status signals as Project
+// derives them, a current ResolvedRefs=False included. Nothing is retained.
+func AttachmentProblems(t *Topology, in ProjectInput, rows []int32) []Problem {
+	p := &projector{t: t, in: in, findings: map[objects.Ref][]*health.Finding{}}
+	gws := map[objects.Ref]bool{}
+	for _, k := range rows {
+		gws[t.Gateway(t.Rows[k])] = true
+	}
+	for i := range in.Model.Health.Findings {
+		if f := &in.Model.Health.Findings[i]; f.Resource != nil && gws[*f.Resource] {
+			p.findings[*f.Resource] = append(p.findings[*f.Resource], f)
+		}
+	}
+	out := make([]Problem, len(rows))
+	for j, k := range rows {
+		r := t.Rows[k]
+		var s attSignals
+		root := t.Refs[t.routes[t.chain(r)[0]].ref]
+		p.attachmentInto(&s, r.att, root)
+		sigs := s.sigs
+		if s.refsFalse {
+			sigs = append(sigs, Signal{Kind: SignalRouteStatus, Code: "ResolvedRefs", Ref: root, State: health.StateError})
+		}
+		pr := Problem{State: health.StateHealthy, Signals: sigs}
+		for _, sg := range sigs {
+			if stateRank(sg.State) < stateRank(pr.State) {
+				pr.State = sg.State
+			}
+		}
+		out[j] = pr
+	}
+	return out
 }
 
 // parent appends the signals of route's status for spec parentRef i to s.sigs.

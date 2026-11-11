@@ -30,6 +30,9 @@ test("detail links open the page of the ref's kind", () => {
       link: "detail",
     }),
   ).toBe("/i/a.b/listenersets/gateway.networking.x-k8s.io/XListenerSet/n/e");
+  for (const kind of ["GRPCRoute", "TCPRoute", "TLSRoute"]) {
+    expect(objectPath("a.b", { ...ref, kind })).toBe(`/i/a.b/routes/gateway.networking.k8s.io/${kind}/shop/x`);
+  }
 });
 
 test("a downstream ListenerSet kind with a detail link opens the ListenerSet page", () => {

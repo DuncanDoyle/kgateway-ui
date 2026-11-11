@@ -1,0 +1,479 @@
+{
+  "body": {
+    "ancestors": [
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "GRPCRoute",
+              "link": "detail",
+              "name": "grpc",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "other",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "GRPCRoute",
+              "link": "detail",
+              "name": "grpc",
+              "namespace": "shop"
+            }
+          }
+        ]
+      }
+    ],
+    "ancestorsTruncated": false,
+    "annotations": {},
+    "attachments": [
+      {
+        "index": 0,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra",
+          "sectionName": "http"
+        },
+        "result": {
+          "computed": {
+            "by": "ui",
+            "coverage": [
+              "status-compatible"
+            ],
+            "label": "kgateway 2.4",
+            "rule": "hostname-intersection",
+            "rules": "kgateway-2.4",
+            "state": "checked"
+          },
+          "listeners": [
+            {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "count-agrees",
+                  "status-compatible"
+                ],
+                "label": "kgateway 2.4",
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listener": "http",
+              "resource": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "edge",
+                "namespace": "infra"
+              }
+            }
+          ],
+          "outcome": "accepted"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      },
+      {
+        "index": 1,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "result": {
+          "computed": {
+            "by": "ui",
+            "coverage": [
+              "status-compatible"
+            ],
+            "label": "kgateway 2.4",
+            "rule": "hostname-intersection",
+            "rules": "kgateway-2.4",
+            "state": "checked"
+          },
+          "listeners": [
+            {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "count-agrees",
+                  "status-compatible"
+                ],
+                "label": "kgateway 2.4",
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listener": "web",
+              "resource": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              }
+            }
+          ],
+          "outcome": "accepted"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "childCount": 0,
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "declaredCount": 0,
+    "generation": 1,
+    "health": "healthy",
+    "hostnames": [],
+    "install": "kgw.kgateway",
+    "parentRefs": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "name": "edge",
+        "namespace": "infra",
+        "sectionName": "http",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "name": "other",
+        "namespace": "infra",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "parents": [
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra",
+          "sectionName": "http"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "GRPCRoute",
+      "link": "detail",
+      "name": "grpc",
+      "namespace": "shop"
+    },
+    "ruleSet": "kgateway-2.4",
+    "ruleSetLabel": "kgateway 2.4",
+    "rules": [
+      {
+        "backendRefs": [
+          {
+            "endpoints": {
+              "complete": "complete",
+              "port": {
+                "name": "http",
+                "port": 80
+              },
+              "readAt": "2026-10-17T12:00:00Z",
+              "ready": 1,
+              "source": "kubernetes",
+              "total": 1
+            },
+            "filters": [],
+            "port": 80,
+            "problem": {
+              "signals": [
+                {
+                  "attachment": 1,
+                  "code": "Programmed",
+                  "kind": "listener",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "other",
+                    "namespace": "infra"
+                  },
+                  "state": "error"
+                },
+                {
+                  "attachment": 1,
+                  "code": "KGWUI-006",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "other",
+                    "namespace": "infra"
+                  },
+                  "state": "warning",
+                  "title": "Proxy deployment not found"
+                }
+              ],
+              "state": "error"
+            },
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "cart-svc",
+              "namespace": "shop"
+            },
+            "share": 25,
+            "shareState": "shown",
+            "weight": 1
+          },
+          {
+            "filters": [],
+            "port": 80,
+            "problem": {
+              "signals": [
+                {
+                  "code": "missing",
+                  "kind": "waiting",
+                  "ref": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "other-svc",
+                    "namespace": "shop"
+                  },
+                  "state": "unknown"
+                },
+                {
+                  "attachment": 1,
+                  "code": "Programmed",
+                  "kind": "listener",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "other",
+                    "namespace": "infra"
+                  },
+                  "state": "error"
+                },
+                {
+                  "attachment": 1,
+                  "code": "KGWUI-006",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "other",
+                    "namespace": "infra"
+                  },
+                  "state": "warning",
+                  "title": "Proxy deployment not found"
+                }
+              ],
+              "state": "error"
+            },
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "other-svc",
+              "namespace": "shop"
+            },
+            "share": 75,
+            "shareState": "shown",
+            "weight": 3
+          }
+        ],
+        "filters": [],
+        "index": 0,
+        "matches": [
+          {
+            "grpcMethod": {
+              "method": "Get",
+              "service": "cart.Cart",
+              "type": "Exact"
+            },
+            "headers": [
+              {
+                "name": "x-env",
+                "type": "Exact",
+                "value": "prod"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "serves": [
+      {
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "http",
+          "port": 80,
+          "protocol": "HTTP"
+        },
+        "state": "healthy"
+      },
+      {
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "state": "error"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

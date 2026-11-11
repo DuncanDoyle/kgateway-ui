@@ -1003,6 +1003,24 @@
               "state": "reported"
             },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "HTTPRoute",
@@ -1010,6 +1028,7 @@
               "name": "child",
               "namespace": "shop"
             },
+            "shareState": "not-shown",
             "weight": 1,
             "weightDefaulted": true
           },
@@ -1033,6 +1052,24 @@
               "state": "not-reported"
             },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "HTTPRoute",
@@ -1040,6 +1077,7 @@
               "name": "declared",
               "namespace": "shop"
             },
+            "shareState": "not-shown",
             "weight": 1,
             "weightDefaulted": true
           },
@@ -1063,6 +1101,24 @@
               "state": "not-found"
             },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "HTTPRoute",
@@ -1070,6 +1126,7 @@
               "name": "ghost",
               "namespace": "shop"
             },
+            "shareState": "not-shown",
             "weight": 1,
             "weightDefaulted": true
           },
@@ -1091,6 +1148,24 @@
               "selected": 10
             },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "HTTPRoute",
@@ -1098,6 +1173,7 @@
               "name": "*",
               "namespace": "shop"
             },
+            "shareState": "not-shown",
             "weight": 1,
             "weightDefaulted": true
           },
@@ -1120,6 +1196,24 @@
               "selected": 0
             },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "delegation.kgateway.dev",
               "kind": "label",
@@ -1127,6 +1221,7 @@
               "name": "team",
               "namespace": "shop"
             },
+            "shareState": "not-shown",
             "weight": 1,
             "weightDefaulted": true
           }
@@ -1146,8 +1241,46 @@
       {
         "backendRefs": [
           {
+            "endpoints": {
+              "complete": "unavailable",
+              "port": {
+                "port": 80
+              },
+              "readAt": "2026-10-17T12:00:00Z",
+              "source": "kubernetes"
+            },
             "filters": [],
             "port": 80,
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                },
+                {
+                  "code": "off",
+                  "kind": "coverage",
+                  "ref": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "cart-svc",
+                    "namespace": "shop"
+                  },
+                  "state": "unknown"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "",
               "kind": "Service",
@@ -1155,10 +1288,20 @@
               "name": "cart-svc",
               "namespace": "shop"
             },
+            "share": 33.333333333333336,
+            "shareState": "may-fail",
             "weight": 1,
             "weightDefaulted": true
           },
           {
+            "endpoints": {
+              "complete": "unavailable",
+              "port": {
+                "port": 8080
+              },
+              "readAt": "2026-10-17T12:00:00Z",
+              "source": "kubernetes"
+            },
             "filters": [
               {
                 "config": {
@@ -1195,6 +1338,36 @@
               }
             ],
             "port": 8080,
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                },
+                {
+                  "code": "off",
+                  "kind": "coverage",
+                  "ref": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "w1",
+                    "namespace": "shop"
+                  },
+                  "state": "unknown"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "",
               "kind": "Service",
@@ -1202,10 +1375,47 @@
               "name": "w1",
               "namespace": "shop"
             },
+            "share": 33.333333333333336,
+            "shareState": "may-fail",
             "weight": 1
           },
           {
+            "endpoints": {
+              "complete": "unavailable",
+              "readAt": "2026-10-17T12:00:00Z",
+              "source": "kubernetes"
+            },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                },
+                {
+                  "code": "off",
+                  "kind": "coverage",
+                  "ref": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "w0",
+                    "namespace": "shop"
+                  },
+                  "state": "unknown"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "",
               "kind": "Service",
@@ -1213,6 +1423,8 @@
               "name": "w0",
               "namespace": "shop"
             },
+            "share": 0,
+            "shareState": "no-traffic",
             "weight": 0
           },
           {
@@ -1228,7 +1440,30 @@
               },
               "state": "healthy"
             },
+            "endpoints": {
+              "complete": "not-applicable",
+              "readAt": "0001-01-01T00:00:00Z",
+              "source": "kubernetes"
+            },
             "filters": [],
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "gateway.kgateway.dev",
               "kind": "Backend",
@@ -1236,6 +1471,8 @@
               "name": "be1",
               "namespace": "shop"
             },
+            "share": 33.333333333333336,
+            "shareState": "may-fail",
             "weight": 1,
             "weightDefaulted": true
           }
@@ -1338,8 +1575,46 @@
       {
         "backendRefs": [
           {
+            "endpoints": {
+              "complete": "unavailable",
+              "port": {
+                "port": 80
+              },
+              "readAt": "2026-10-17T12:00:00Z",
+              "source": "kubernetes"
+            },
             "filters": [],
             "port": 80,
+            "problem": {
+              "signals": [
+                {
+                  "code": "KGWUI-013",
+                  "kind": "finding",
+                  "ref": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "HTTPRoute",
+                    "link": "detail",
+                    "name": "mid",
+                    "namespace": "shop"
+                  },
+                  "state": "error",
+                  "title": "Backend not found"
+                },
+                {
+                  "code": "off",
+                  "kind": "coverage",
+                  "ref": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "cart-svc",
+                    "namespace": "shop"
+                  },
+                  "state": "unknown"
+                }
+              ],
+              "state": "error"
+            },
             "ref": {
               "group": "",
               "kind": "Service",
@@ -1347,6 +1622,8 @@
               "name": "cart-svc",
               "namespace": "shop"
             },
+            "share": 100,
+            "shareState": "may-fail",
             "weight": 1,
             "weightDefaulted": true
           }
@@ -1376,6 +1653,42 @@
             ]
           }
         ]
+      }
+    ],
+    "serves": [
+      {
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "state": "error"
+      },
+      {
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [
+          "top.example.com"
+        ],
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "state": "healthy"
       }
     ]
   },

@@ -52,8 +52,11 @@ import routeDetailGolden from "../../../../../pkg/api/testdata/golden/route-deta
 import routeDetailCandidateGolden from "../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
 import routeDetailDelegationRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-delegation-restricted.json";
 import routeDetailEffectiveGolden from "../../../../../pkg/api/testdata/golden/route-detail-effective.json";
+import routeDetailGrpcGolden from "../../../../../pkg/api/testdata/golden/route-detail-grpc.json";
 import routeDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
 import routeDetailSelectedGolden from "../../../../../pkg/api/testdata/golden/route-detail-selected.json";
+import routeDetailTcpGolden from "../../../../../pkg/api/testdata/golden/route-detail-tcp.json";
+import routeDetailTlsGolden from "../../../../../pkg/api/testdata/golden/route-detail-tls.json";
 import routesGolden from "../../../../../pkg/api/testdata/golden/routes.json";
 import routesByBackendGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend.json";
 import routesByBackendRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend-restricted.json";
@@ -114,6 +117,7 @@ import type {
   GatewayProcesses,
   GatewayRow,
   GRPCMatch,
+  GRPCMethod,
   GrantShape,
   GroupKind,
   GroupList,
@@ -182,6 +186,7 @@ import type {
   StatusProgressEvidence,
   SuggestedFix,
   TerminationFacts,
+  TraceAttachment,
   TrailRefs,
   VersionPods,
   VersionSkewEvidence,
@@ -770,10 +775,48 @@ const listenerSetDetail = shape<ListenerSetDetail>(
   },
   { health: healthState },
 );
+const endpoints = shape<Endpoints>(
+  { source: "!", port: "?", runtime: "?", readAt: "!", complete: "!", ready: "?", total: "?", items: "?" },
+  {
+    port: shape<BackendPort>({ port: "!", name: "?" }),
+    runtime: shape<EndpointsRuntime>({ install: "!", gateway: "!", proxy: "!", instance: "!" }, { gateway: linkedRef }),
+    items: shape<Endpoint>({ address: "!", port: "?", ready: "!", serving: "!", terminating: "!", pod: "?" }),
+  },
+  {
+    complete: {
+      complete: 1,
+      partial: 1,
+      failed: 1,
+      unavailable: 1,
+      stale: 1,
+      "not-applicable": 1,
+      "timed-out": 1,
+      busy: 1,
+    },
+  },
+);
+const pathSignal = shape<PathSignal>(
+  { kind: "!", code: "?", title: "?", ref: "?", state: "!", attachment: "?" },
+  { ref: linkedRef },
+  {
+    kind: {
+      gateway: 1,
+      listener: 1,
+      "route-status": 1,
+      waiting: 1,
+      finding: 1,
+      delegation: 1,
+      coverage: 1,
+    },
+    state: healthState,
+  },
+);
+const pathProblem = shape<PathProblem>({ state: "!", signals: "!" }, { signals: pathSignal }, { state: healthState });
 const keyMatch = shape<KeyMatch>({ type: "!", name: "!", value: "!" });
+const grpcMethod = shape<GRPCMethod>({ type: "?", service: "?", method: "?" });
 const match = shape<Match>(
-  { path: "?", headers: "?", queryParams: "?", method: "?" },
-  { path: shape<PathMatch>({ type: "!", value: "!" }), headers: keyMatch, queryParams: keyMatch },
+  { path: "?", headers: "?", queryParams: "?", method: "?", grpcMethod: "?" },
+  { path: shape<PathMatch>({ type: "!", value: "!" }), headers: keyMatch, queryParams: keyMatch, grpcMethod },
 );
 const mirror = shape<Mirror>(
   { backendRef: "!", port: "?", percent: "?", fraction: "?" },
@@ -784,8 +827,21 @@ const filter = shape<Filter>(
   { type: "!", extensionRef: "?", mirror: "?", config: "?" },
   { extensionRef: linkedRef, mirror },
 );
+const shareStates = { shown: 1, "not-shown": 1, "no-traffic": 1, failing: 1, "may-fail": 1, mirror: 1 } as const;
 const backendRef = shape<BackendRef>(
-  { ref: "!", port: "?", weight: "!", weightDefaulted: "?", filters: "!", delegation: "?", backend: "?" },
+  {
+    ref: "!",
+    port: "?",
+    weight: "!",
+    weightDefaulted: "?",
+    filters: "!",
+    delegation: "?",
+    backend: "?",
+    share: "?",
+    shareState: "?",
+    problem: "?",
+    endpoints: "?",
+  },
   {
     ref: linkedRef,
     filters: filter,
@@ -799,11 +855,14 @@ const backendRef = shape<BackendRef>(
       { accepted: condition },
       { state: healthState },
     ),
+    problem: pathProblem,
+    endpoints,
   },
+  { shareState: shareStates },
 );
 const rule = shape<Rule>(
-  { index: "!", name: "?", matches: "!", filters: "!", backendRefs: "!" },
-  { matches: match, filters: filter, backendRefs: backendRef },
+  { index: "!", name: "?", matches: "!", filters: "!", backendRefs: "!", effectiveFilters: "?" },
+  { matches: match, filters: filter, backendRefs: backendRef, effectiveFilters: filter },
 );
 const ancestor = shape<AncestorPath>(
   { steps: "!", cycle: "!" },
@@ -892,6 +951,7 @@ const routeDetail = shape<RouteDetail>(
     parentRefs: "!",
     parents: "!",
     attachments: "?",
+    serves: "?",
     rules: "!",
     effective: "?",
     effectiveTruncated: "?",
@@ -910,6 +970,15 @@ const routeDetail = shape<RouteDetail>(
     attachments: shape<RouteAttachment>(
       { parentRef: "!", index: "!", target: "!", result: "!" },
       { parentRef, target: linkedRef, result: computedAttachment },
+    ),
+    serves: shape<TraceAttachment>(
+      { gateway: "!", listenerSet: "?", listener: "!", hostnames: "!", state: "!" },
+      {
+        gateway: linkedRef,
+        listenerSet: linkedRef,
+        listener: shape<PathListener>({ name: "!", protocol: "?", port: "?" }),
+      },
+      { state: healthState },
     ),
     rules: rule,
     effective: effectiveEdge,
@@ -1138,43 +1207,6 @@ const gatewayDetail = shape<GatewayDetail>(
 );
 // Paths (sub-phase 6.2).
 const pathCounts = shape<PathCounts>({ paths: "!", routes: "!", gateways: "!", backends: "!" });
-const endpoints = shape<Endpoints>(
-  { source: "!", port: "?", runtime: "?", readAt: "!", complete: "!", ready: "?", total: "?", items: "?" },
-  {
-    port: shape<BackendPort>({ port: "!", name: "?" }),
-    runtime: shape<EndpointsRuntime>({ install: "!", gateway: "!", proxy: "!", instance: "!" }, { gateway: linkedRef }),
-    items: shape<Endpoint>({ address: "!", port: "?", ready: "!", serving: "!", terminating: "!", pod: "?" }),
-  },
-  {
-    complete: {
-      complete: 1,
-      partial: 1,
-      failed: 1,
-      unavailable: 1,
-      stale: 1,
-      "not-applicable": 1,
-      "timed-out": 1,
-      busy: 1,
-    },
-  },
-);
-const pathSignal = shape<PathSignal>(
-  { kind: "!", code: "?", title: "?", ref: "?", state: "!" },
-  { ref: linkedRef },
-  {
-    kind: {
-      gateway: 1,
-      listener: 1,
-      "route-status": 1,
-      waiting: 1,
-      finding: 1,
-      delegation: 1,
-      coverage: 1,
-    },
-    state: healthState,
-  },
-);
-const pathProblem = shape<PathProblem>({ state: "!", signals: "!" }, { signals: pathSignal }, { state: healthState });
 const pathRow = shape<PathRow>(
   {
     gateway: "!",
@@ -1205,7 +1237,7 @@ const pathRow = shape<PathRow>(
     listener: shape<PathListener>({ name: "!", protocol: "?", port: "?" }),
     routes: linkedRef,
     matches: match,
-    grpcMatches: shape<GRPCMatch>({ method: "?", headers: "?" }, { headers: keyMatch }),
+    grpcMatches: shape<GRPCMatch>({ method: "?", headers: "?" }, { method: grpcMethod, headers: keyMatch }),
     delegation: shape<DelegationRef>(
       { mode: "!", namespace: "!", name: "?", label: "?", state: "?", selected: "?", attached: "?", computed: "?" },
       { computed },
@@ -1217,7 +1249,7 @@ const pathRow = shape<PathRow>(
   },
   {
     action: { backend: 1, redirect: 1, "direct-response": 1, none: 1, delegate: 1 },
-    shareState: { shown: 1, "not-shown": 1, "no-traffic": 1, failing: 1, "may-fail": 1, mirror: 1 },
+    shareState: shareStates,
     note: { unknown: 1, unconfirmable: 1, "not-computed": 1 },
   },
 );
@@ -1405,6 +1437,9 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["route-detail", routeDetailGolden.body satisfies Wide<RouteDetail>, routeDetail],
     ["route-detail-restricted", routeDetailRestrictedGolden.body satisfies Wide<RouteDetail>, routeDetail],
     ["route-detail-candidate", routeDetailCandidateGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-grpc", routeDetailGrpcGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-tcp", routeDetailTcpGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-tls", routeDetailTlsGolden.body satisfies Wide<RouteDetail>, routeDetail],
     ["route-delegation", routeDelegationGolden.body satisfies Wide<Page<DelegationRow>>, page(delegationRow)],
     ["route-delegation-cut", routeDelegationCutGolden.body satisfies Wide<Page<DelegationRow>>, page(delegationRow)],
     [

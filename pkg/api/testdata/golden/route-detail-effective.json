@@ -264,6 +264,24 @@
           }
         ]
       }
+    ],
+    "serves": [
+      {
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "state": "healthy"
+      }
     ]
   },
   "headers": {

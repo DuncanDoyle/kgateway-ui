@@ -370,31 +370,33 @@ type RouteAnnotations struct {
 	InheritParentMatcher *bool `json:"inheritParentMatcher,omitempty"`
 }
 
-// RouteDetail is GET …/routes/{group}/{kind}/{ns}/{name}, HTTPRoute only.
-// ChildCount and DeclaredCount count visible routes only.
+// RouteDetail is GET …/routes/{group}/{kind}/{ns}/{name} for HTTPRoute,
+// GRPCRoute, TCPRoute and TLSRoute. ChildCount and DeclaredCount count visible routes only.
 // Effective is view C per parent edge (2.4); EffectiveTruncated says the
-// route had more parent edges than were kept.
+// route had more parent edges than were kept. Serves are the attachments the
+// route's visible paths run through (design §7.1).
 type RouteDetail struct {
-	Install            string            `json:"install"`
-	Ref                LinkedRef         `json:"ref"`
-	Generation         int64             `json:"generation"`
-	Health             health.State      `json:"health"`
-	Candidate          *Candidate        `json:"candidate,omitempty"`
-	RuleSet            string            `json:"ruleSet,omitempty"`
-	RuleSetLabel       string            `json:"ruleSetLabel,omitempty"`
-	Hostnames          []string          `json:"hostnames"`
-	Annotations        RouteAnnotations  `json:"annotations"`
-	ParentRefs         []SpecParentRef   `json:"parentRefs"`
-	Parents            []ParentStatus    `json:"parents"`
-	Attachments        []RouteAttachment `json:"attachments,omitempty"`
-	Rules              []RuleDTO         `json:"rules"`
-	Effective          []EffectiveDTO    `json:"effective,omitempty"`
-	EffectiveTruncated bool              `json:"effectiveTruncated,omitempty"`
-	Ancestors          []AncestorPathDTO `json:"ancestors"`
-	AncestorsTruncated bool              `json:"ancestorsTruncated"`
-	ChildCount         int               `json:"childCount"`
-	DeclaredCount      int               `json:"declaredCount"`
-	CollectedAt        time.Time         `json:"collectedAt"`
+	Install            string               `json:"install"`
+	Ref                LinkedRef            `json:"ref"`
+	Generation         int64                `json:"generation"`
+	Health             health.State         `json:"health"`
+	Candidate          *Candidate           `json:"candidate,omitempty"`
+	RuleSet            string               `json:"ruleSet,omitempty"`
+	RuleSetLabel       string               `json:"ruleSetLabel,omitempty"`
+	Hostnames          []string             `json:"hostnames"`
+	Annotations        RouteAnnotations     `json:"annotations"`
+	ParentRefs         []SpecParentRef      `json:"parentRefs"`
+	Parents            []ParentStatus       `json:"parents"`
+	Attachments        []RouteAttachment    `json:"attachments,omitempty"`
+	Serves             []TraceAttachmentDTO `json:"serves,omitempty"`
+	Rules              []RuleDTO            `json:"rules"`
+	Effective          []EffectiveDTO       `json:"effective,omitempty"`
+	EffectiveTruncated bool                 `json:"effectiveTruncated,omitempty"`
+	Ancestors          []AncestorPathDTO    `json:"ancestors"`
+	AncestorsTruncated bool                 `json:"ancestorsTruncated"`
+	ChildCount         int                  `json:"childCount"`
+	DeclaredCount      int                  `json:"declaredCount"`
+	CollectedAt        time.Time            `json:"collectedAt"`
 }
 
 // PathMatchDTO is a path match after defaults.
@@ -410,24 +412,28 @@ type KeyMatchDTO struct {
 	Value string `json:"value"`
 }
 
-// MatchDTO is one HTTPRouteMatch after defaults.
+// MatchDTO is one HTTPRouteMatch after defaults, or one GRPCRouteMatch as
+// written: its headers and GRPCMethod. Method is the HTTP method only.
 type MatchDTO struct {
-	Path        *PathMatchDTO `json:"path,omitempty"`
-	Headers     []KeyMatchDTO `json:"headers,omitempty"`
-	QueryParams []KeyMatchDTO `json:"queryParams,omitempty"`
-	Method      string        `json:"method,omitempty"`
+	Path        *PathMatchDTO  `json:"path,omitempty"`
+	Headers     []KeyMatchDTO  `json:"headers,omitempty"`
+	QueryParams []KeyMatchDTO  `json:"queryParams,omitempty"`
+	Method      string         `json:"method,omitempty"`
+	GRPCMethod  *GRPCMethodDTO `json:"grpcMethod,omitempty"`
 }
 
 // RuleDTO is one spec rule. Omitted matches carry the CRD default, one
 // PathPrefix "/" match. An explicit empty list stays [] as written; kgateway
 // treats it as match-all (or, for an inheriting child, the parent's match),
-// so clients must not render it as "matches nothing".
+// so clients must not render it as "matches nothing". A TCPRoute or TLSRoute
+// rule has no matches: []. EffectiveFilters is reserved and never set.
 type RuleDTO struct {
-	Index       int             `json:"index"`
-	Name        string          `json:"name,omitempty"`
-	Matches     []MatchDTO      `json:"matches"`
-	Filters     []FilterDTO     `json:"filters"`
-	BackendRefs []BackendRefDTO `json:"backendRefs"`
+	Index            int             `json:"index"`
+	Name             string          `json:"name,omitempty"`
+	Matches          []MatchDTO      `json:"matches"`
+	Filters          []FilterDTO     `json:"filters"`
+	BackendRefs      []BackendRefDTO `json:"backendRefs"`
+	EffectiveFilters []FilterDTO     `json:"effectiveFilters,omitempty"`
 }
 
 // FractionDTO is a mirror fraction; the denominator defaults to 100.
@@ -484,7 +490,9 @@ type BackendStateDTO struct {
 }
 
 // BackendRefDTO is one rule backendRef. An absent weight is 1 with
-// WeightDefaulted; an absent port is omitted.
+// WeightDefaulted; an absent port is omitted. Share, ShareState, Problem and
+// Endpoints come from the ref's visible paths, absent without one: Problem is
+// the worst across the route's attachments.
 type BackendRefDTO struct {
 	Ref             LinkedRef         `json:"ref"`
 	Port            int32             `json:"port,omitempty"`
@@ -493,6 +501,20 @@ type BackendRefDTO struct {
 	Filters         []FilterDTO       `json:"filters"`
 	Delegation      *DelegationRefDTO `json:"delegation,omitempty"`
 	Backend         *BackendStateDTO  `json:"backend,omitempty"`
+	Share           *float64          `json:"share,omitempty"`
+	ShareState      string            `json:"shareState,omitempty"`
+	Problem         *ProblemDTO       `json:"problem,omitempty"`
+	Endpoints       *EndpointsDTO     `json:"endpoints,omitempty"`
+}
+
+// TraceAttachmentDTO is one attachment a route serves through, with the
+// state of its own Gateway, listener and parent status signals.
+type TraceAttachmentDTO struct {
+	Gateway     LinkedRef       `json:"gateway"`
+	ListenerSet *LinkedRef      `json:"listenerSet,omitempty"`
+	Listener    PathListenerDTO `json:"listener"`
+	Hostnames   []string        `json:"hostnames"`
+	State       health.State    `json:"state"`
 }
 
 // AncestorStepDTO is one up-chain step: a ref, or Restricted with no

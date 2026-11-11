@@ -254,11 +254,19 @@ export interface KeyMatch {
   name: string;
   value: string;
 }
+/** A GRPCRoute method match as written. */
+export interface GRPCMethod {
+  type?: string;
+  service?: string;
+  method?: string;
+}
+/** An HTTPRoute match after defaults, or a GRPCRoute match as written (headers and grpcMethod); method is HTTP only. */
 export interface Match {
   path?: PathMatch;
   headers?: KeyMatch[];
   queryParams?: KeyMatch[];
   method?: string;
+  grpcMethod?: GRPCMethod;
 }
 export interface Fraction {
   numerator: number;
@@ -294,6 +302,7 @@ export interface BackendState {
   accepted?: Condition;
   restricted?: boolean;
 }
+/** share, shareState, problem and endpoints come from the ref's visible paths; problem is the worst across the route's attachments. */
 export interface BackendRef {
   ref: LinkedRef;
   port?: number;
@@ -302,14 +311,28 @@ export interface BackendRef {
   filters: Filter[];
   delegation?: DelegationRef;
   backend?: BackendState;
+  share?: number;
+  shareState?: PathRow["shareState"];
+  problem?: PathProblem;
+  endpoints?: Endpoints;
 }
-/** One spec rule. An explicit empty matches list is match-all, never "matches nothing". */
+/** One spec rule. An explicit empty matches list is match-all, never "matches nothing"; TCPRoute and TLSRoute rules have []. */
 export interface Rule {
   index: number;
   name?: string;
   matches: Match[];
   filters: Filter[];
   backendRefs: BackendRef[];
+  /** Reserved; never set. */
+  effectiveFilters?: Filter[];
+}
+/** An attachment a route serves through, with the state of its own Gateway, listener and parent status signals. */
+export interface TraceAttachment {
+  gateway: LinkedRef;
+  listenerSet?: LinkedRef;
+  listener: PathListener;
+  hostnames: string[];
+  state: HealthState;
 }
 /** One up-chain step: a ref, or restricted with no identity. A hidden ancestor route has link none and the matches it delegated under (D-024). */
 export interface AncestorStep {
@@ -336,6 +359,7 @@ export interface RouteDetail {
   parentRefs: SpecParentRef[];
   parents: ParentStatus[];
   attachments?: RouteAttachment[];
+  serves?: TraceAttachment[];
   rules: Rule[];
   effective?: EffectiveEdge[];
   effectiveTruncated?: boolean;
@@ -415,7 +439,7 @@ export interface PathListener {
 }
 /** A GRPCRouteMatch as written. */
 export interface GRPCMatch {
-  method?: { type?: string; service?: string; method?: string };
+  method?: GRPCMethod;
   headers?: KeyMatch[];
 }
 /** One existing signal on a path's chain; code is a finding code, condition type, capability state or view C reason. */
@@ -426,6 +450,8 @@ export interface PathSignal {
   title?: string;
   ref?: LinkedRef;
   state: HealthState;
+  /** On a route detail backendRef: the serves index of the attachment the signal came from. */
+  attachment?: number;
 }
 /** A path's worst state and its signals that are not healthy. */
 export interface PathProblem {

@@ -685,7 +685,8 @@ func TestBuildWithoutPodsOrUIDs(t *testing.T) {
 
 func TestDetailKinds(t *testing.T) {
 	want := []objects.GroupKind{{Group: objects.GatewayAPIGroup, Kind: "Gateway"}, {Group: objects.GatewayAPIGroup, Kind: "ListenerSet"},
-		{Group: "gateway.networking.x-k8s.io", Kind: "XListenerSet"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}}
+		{Group: "gateway.networking.x-k8s.io", Kind: "XListenerSet"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"},
+		{Group: objects.GatewayAPIGroup, Kind: "GRPCRoute"}, {Group: objects.GatewayAPIGroup, Kind: "TCPRoute"}, {Group: objects.GatewayAPIGroup, Kind: "TLSRoute"}}
 	if got := DetailKinds(testutil.ServedUpstream()); !slices.Equal(got, want) {
 		t.Fatalf("DetailKinds %v", got)
 	}

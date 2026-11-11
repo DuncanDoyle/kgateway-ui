@@ -365,6 +365,13 @@ func (t *Topology) ListenerSet(r Row) *objects.Ref {
 	return &ls
 }
 
+// Attachment is the index of row r's attachment; rows of one view A member share it.
+func (t *Topology) Attachment(r Row) int32 { return r.att }
+
+// RefIndex is the index of row r's backendRef in its rule; false for a
+// mirror row or a rule with no backendRef.
+func (t *Topology) RefIndex(r Row) (int, bool) { return int(r.ref), r.ref >= 0 && r.mirror < 0 }
+
 // Listener is the row's listener.
 func (t *Topology) Listener(r Row) Listener { return t.listeners[t.atts[r.att].listener] }
 

@@ -471,11 +471,11 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 	if d == nil {
 		return
 	}
-	if r.PathValue("group") != objects.GatewayAPIGroup || r.PathValue("kind") != "HTTPRoute" {
+	if !explore.IsDetailRoute(r.PathValue("group"), r.PathValue("kind")) {
 		writeErr(w, http.StatusNotFound, noDetailView)
 		return
 	}
-	ref := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+	ref := objects.Ref{Group: objects.GatewayAPIGroup, Kind: r.PathValue("kind"), Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
 	// Admission and the Authorizer run before the up-chain walk (Task 20).
 	u, cand := d.open(w, ref)
 	if u == nil {
@@ -484,24 +484,41 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 	var v *objects.HTTPRouteView
 	var st health.State
 	id, row := d.ix.Row(ref)
-	if row && d.ix.Routes[id].View != nil {
+	switch {
+	case row && d.ix.Routes[id].View != nil:
 		v, st = d.ix.Routes[id].View, d.ix.Routes[id].State
-	} else {
+	case ref.Kind == "HTTPRoute":
 		v, st = objects.DecodeHTTPRoute(u), explore.RowState(ref, d.i.Health)
+	default:
+		// The other kinds share the HTTPRoute shape without annotations or delegation.
+		rv := objects.DecodeRoute(u)
+		v, st = &objects.HTTPRouteView{Hostnames: rv.Hostnames, ParentRefs: rv.ParentRefs, Parents: rv.Parents, Rules: objects.DecodeRouteRules(u)}, explore.RowState(ref, d.i.Health)
+		if row {
+			st = d.ix.Routes[id].State
+		}
 	}
 	out := RouteDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
 		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
-	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok {
+	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok && ref.Kind == "HTTPRoute" {
 		b := v.InheritParentMatcher
 		out.Annotations.InheritParentMatcher = &b
 	}
 	if row {
 		out.Attachments = d.attachments(id, v.ParentRefs)
 	}
+	tr := d.trace(ref)
+	out.Serves = tr.serves
+	titles := signalTitles(d.i, tr.signalSets()...)
 	for _, rule := range v.Rules {
-		out.Rules = append(out.Rules, d.rule(ref, rule))
+		dto := d.rule(ref, rule)
+		for i := range dto.BackendRefs {
+			if rt := tr.refs[refKey{rule.Index, i}]; rt != nil {
+				rt.apply(d.l, titles, &dto.BackendRefs[i])
+			}
+		}
+		out.Rules = append(out.Rules, dto)
 	}
 	out.Effective, out.EffectiveTruncated = d.effective(ref, v.InheritParentMatcher)
 	out.Ancestors, out.AncestorsTruncated = d.ancestors(ref)
@@ -591,8 +608,24 @@ func matchDTO(m objects.Match) MatchDTO {
 	return dto
 }
 
+// ruleMatches is r's matches on the wire for a route of kind: an HTTPRoute's
+// after defaults, a GRPCRoute's as written, none for TCPRoute and TLSRoute.
+func ruleMatches(kind string, r objects.Rule) []MatchDTO {
+	switch kind {
+	case "HTTPRoute":
+		return matchDTOs(r.Matches)
+	case "GRPCRoute":
+		out := make([]MatchDTO, 0, len(r.GRPCMatches))
+		for _, g := range grpcMatches(r.GRPCMatches) {
+			out = append(out, MatchDTO{Headers: g.Headers, GRPCMethod: g.Method})
+		}
+		return out
+	}
+	return []MatchDTO{}
+}
+
 func (d *detail) rule(route objects.Ref, r objects.Rule) RuleDTO {
-	out := RuleDTO{Index: r.Index, Name: r.Name, Matches: matchDTOs(r.Matches), Filters: d.filters(r.Filters), BackendRefs: make([]BackendRefDTO, 0, len(r.BackendRefs))}
+	out := RuleDTO{Index: r.Index, Name: r.Name, Matches: ruleMatches(route.Kind, r), Filters: d.filters(r.Filters), BackendRefs: make([]BackendRefDTO, 0, len(r.BackendRefs))}
 	for i, b := range r.BackendRefs {
 		out.BackendRefs = append(out.BackendRefs, d.backendRef(route, r.Index, i, b))
 	}
