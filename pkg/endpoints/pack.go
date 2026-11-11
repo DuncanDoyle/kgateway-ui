@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"math"
 	"net/netip"
 	"slices"
 	"time"
@@ -39,9 +40,24 @@ const (
 	ip6
 )
 
-// pack stores res; strings longer than 255 bytes, which valid addresses and Pod names never are, are cut.
-func pack(res Result) packed {
-	p := packed{complete: res.Complete, readAt: res.ReadAt, rows: make([]row, len(res.Items))}
+// packedOverhead is a memo entry's fixed size beyond its slices: the entry,
+// its list element and map slot, rounded up.
+const packedOverhead = 512
+
+// size is what p retains, for the memo's byte budget: a row is 12 bytes and a portKey 24.
+func (p *packed) size() int {
+	n := cap(p.arena) + 12*cap(p.rows) + 24*cap(p.ports) + packedOverhead
+	for _, k := range p.ports {
+		n += len(k.name)
+	}
+	return n
+}
+
+// pack stores res, and reports false when res has more distinct ports than
+// a row can index. Strings longer than 255 bytes, which valid addresses and Pod names never are, are cut.
+func pack(res Result) (packed, bool) {
+	// slices.Grow rounds a capacity up to the allocation's real size, which size counts.
+	p := packed{complete: res.Complete, readAt: res.ReadAt, rows: slices.Grow([]row(nil), len(res.Items))[:len(res.Items)]}
 	size := 0
 	var prevAddr, prevPod []byte
 	for _, e := range res.Items {
@@ -50,7 +66,7 @@ func pack(res Result) packed {
 		size += len(a) - shared(prevAddr, a) + len(pod) - shared(prevPod, pod)
 		prevAddr, prevPod = a, pod
 	}
-	p.arena = make([]byte, 0, size)
+	p.arena = slices.Grow([]byte(nil), size)
 	prevAddr, prevPod = nil, nil
 	for i, e := range res.Items {
 		flag, a := addrBytes(e.Address)
@@ -64,10 +80,13 @@ func pack(res Result) packed {
 		k := portKey{e.PortName, e.Port}
 		j := slices.Index(p.ports, k)
 		if j < 0 {
+			if len(p.ports) > math.MaxUint16 {
+				return packed{}, false
+			}
 			j = len(p.ports)
 			p.ports = append(p.ports, k)
 		}
-		r.port = uint16(j) //nolint:gosec // a read holds at most MaxEndpoints, far fewer distinct ports
+		r.port = uint16(j) //nolint:gosec // j ≤ MaxUint16, checked above
 		for _, c := range [...]struct {
 			on  bool
 			bit uint8
@@ -78,12 +97,13 @@ func pack(res Result) packed {
 		}
 		p.rows[i] = r
 	}
-	return p
+	return p, true
 }
 
-// addrBytes is an address as stored: an IP in binary with its flag, else its text.
+// addrBytes is an address as stored: an IP in binary with its flag when that
+// prints back as s, else its text.
 func addrBytes(s string) (uint8, []byte) {
-	if a, err := netip.ParseAddr(s); err == nil && a.Zone() == "" {
+	if a, err := netip.ParseAddr(s); err == nil && a.Zone() == "" && a.String() == s {
 		if a.Is4() {
 			return ip4, a.AsSlice()
 		}

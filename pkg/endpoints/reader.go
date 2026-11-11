@@ -38,7 +38,8 @@ type Result struct {
 }
 
 // ScopedReader reads the endpoints of Service svc in the install with ID
-// installID. It takes the ID, not an install, so providers need not import pkg/install.
+// installID. It takes the ID, not an install, so providers need not import
+// pkg/install. Callers authorise the backend before every call, memo hits included.
 type ScopedReader interface {
 	Endpoints(ctx context.Context, installID string, svc objects.Ref) (Result, error)
 }

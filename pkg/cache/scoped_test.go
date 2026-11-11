@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -14,12 +15,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+	testingclock "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
-var cartRef = objects.Ref{Kind: "Service", Namespace: "shop", Name: "cart"}
+var (
+	cartRef   = objects.Ref{Kind: "Service", Namespace: "shop", Name: "cart"}
+	readAt    = time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	readClock = testingclock.NewFakePassiveClock(readAt)
+)
 
 // pagedSlices serves slices as an API server pages a LIST: Limit items per
 // page and a continue token while more remain. With endless set, every page has a token.
@@ -77,11 +83,11 @@ func TestScopedReaderPages(t *testing.T) {
 		{"over 1,000 endpoints", pagedSlices{slices: cartSlices(11, 100)}, 2, 1000, endpoints.Partial},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := NewScopedReader(tc.p.client()).Endpoints(context.Background(), "install-1", cartRef)
+			res, err := NewScopedReader(tc.p.client(), readClock).Endpoints(context.Background(), "install-1", cartRef)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.Complete != tc.complete || len(res.Items) != tc.items || res.ReadAt.IsZero() {
+			if res.Complete != tc.complete || len(res.Items) != tc.items || !res.ReadAt.Equal(readAt) {
 				t.Errorf("result %s with %d items at %v, want %s with %d", res.Complete, len(res.Items), res.ReadAt, tc.complete, tc.items)
 			}
 			if len(tc.p.lists) != tc.pages {
@@ -108,7 +114,7 @@ func TestScopedReaderEndpoints(t *testing.T) {
 	unnamed := slice("shop", "cart-b", "cart", []discoveryv1.EndpointPort{{Port: i32p(7000)}})
 	unnamed.Endpoints = []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.3"}, Conditions: discoveryv1.EndpointConditions{Ready: boolp(false)}}}
 	p := pagedSlices{slices: []discoveryv1.EndpointSlice{*es, *unnamed}}
-	res, err := NewScopedReader(p.client()).Endpoints(context.Background(), "install-1", cartRef)
+	res, err := NewScopedReader(p.client(), readClock).Endpoints(context.Background(), "install-1", cartRef)
 	want := []endpoints.Endpoint{
 		{Address: "10.0.0.1", Port: 8080, PortName: "http", Ready: true, Serving: true, Pod: "cart-x2k9p"},
 		{Address: "10.0.0.1", Port: 9000, PortName: "grpc", Ready: true, Serving: true, Pod: "cart-x2k9p"},
@@ -127,8 +133,22 @@ func TestScopedReaderFails(t *testing.T) {
 	kube.PrependReactor("list", "endpointslices", func(clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("forbidden")
 	})
-	res, err := NewScopedReader(kube).Endpoints(context.Background(), "install-1", cartRef)
-	if err == nil || res.Complete != endpoints.Failed || len(res.Items) != 0 {
+	res, err := NewScopedReader(kube, readClock).Endpoints(context.Background(), "install-1", cartRef)
+	if err == nil || res.Complete != endpoints.Failed || len(res.Items) != 0 || !res.ReadAt.Equal(readAt) {
 		t.Fatalf("result %+v, %v; want failed with the error", res, err)
+	}
+}
+
+// A ref that is not a core Service is unavailable and lists nothing.
+func TestScopedReaderServicesOnly(t *testing.T) {
+	p := pagedSlices{slices: cartSlices(1, 1)}
+	r := NewScopedReader(p.client(), readClock)
+	for _, ref := range []objects.Ref{{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "shop", Name: "cart"}, {Kind: "Pod", Namespace: "shop", Name: "cart"}} {
+		if res, err := r.Endpoints(context.Background(), "install-1", ref); err != nil || res.Complete != endpoints.Unavailable {
+			t.Errorf("%+v: %+v, %v; want unavailable", ref, res, err)
+		}
+	}
+	if len(p.lists) != 0 {
+		t.Fatalf("%d LISTs, want none", len(p.lists))
 	}
 }

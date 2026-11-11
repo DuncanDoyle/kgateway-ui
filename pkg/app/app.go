@@ -291,7 +291,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		if o.Clock != nil {
 			clk = o.Clock
 		}
-		scoped = endpoints.Bounded(cache.NewScopedReader(c.Kube), endpoints.DefaultBounds, clk)
+		scoped = endpoints.Bounded(cache.NewScopedReader(c.Kube, clk), endpoints.DefaultBounds, clk)
 	}
 	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates),
 		api.WithCommands(reg.Commands), api.WithInstallCommands(commands), api.WithInstallFeatures(reg.FeaturesFor),

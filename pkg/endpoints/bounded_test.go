@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	testingclock "k8s.io/utils/clock/testing"
 
@@ -197,22 +198,39 @@ func (f readerFunc) Endpoints(ctx context.Context, id string, svc objects.Ref) (
 
 // TestMemoRetained fills the memo with MemoServices Services of MaxEndpoints
 // endpoints each, decoded fresh as a provider would, and holds its retained
-// heap to 1 MiB for an IPv4 and an IPv6 cluster.
+// heap to MemoBytes. At the IPv4 and IPv6 density every Service fits; with
+// FQDNs and Pod names sharing no prefix the byte budget evicts.
 func TestMemoRetained(t *testing.T) {
 	b := DefaultBounds
-	for _, family := range []struct {
-		name string
-		addr func(i int) string
+	rs := func(i, n int) string { // n pseudo-random lowercase letters
+		out := make([]byte, n)
+		h := uint64(i)*0x9E3779B97F4A7C15 + 1
+		for j := range out {
+			h ^= h >> 31
+			h *= 0xBF58476D1CE4E5B9
+			out[j] = 'a' + byte(h>>59)%26
+		}
+		return string(out)
+	}
+	for _, tc := range []struct {
+		name    string
+		addr    func(svc string, i int) string
+		pod     func(svc string, i int) string
+		fitsAll bool
 	}{
-		{"IPv4", func(i int) string { return fmt.Sprintf("10.244.%d.%d", node(i), i%250+2) }},
-		{"IPv6", func(i int) string { return fmt.Sprintf("fd00:10:244:%x::%x", node(i), i%250+2) }},
+		{"IPv4", func(_ string, i int) string { return fmt.Sprintf("10.244.%d.%d", node(i), i%250+2) },
+			func(svc string, i int) string { return svc + "-7d9f8b6c5d-" + podSuffix(i) }, true},
+		{"IPv6", func(_ string, i int) string { return fmt.Sprintf("fd00:10:244:%x::%x", node(i), i%250+2) },
+			func(svc string, i int) string { return svc + "-7d9f8b6c5d-" + podSuffix(i) }, true},
+		{"FQDN, no shared prefixes", func(svc string, i int) string { return rs(i, 40) + ".example.com" },
+			func(svc string, i int) string { return rs(i+1<<20, 50) }, false},
 	} {
-		t.Run(family.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			fill := readerFunc(func(_ context.Context, _ string, svc objects.Ref) (Result, error) {
 				items := make([]Endpoint, 0, b.MaxEndpoints)
 				for i := range b.MaxEndpoints {
-					items = append(items, Endpoint{Address: family.addr(i), Port: 8080, PortName: "http",
-						Ready: true, Serving: true, Pod: svc.Name + "-7d9f8b6c5d-" + podSuffix(i)})
+					items = append(items, Endpoint{Address: tc.addr(svc.Name, i), Port: 8080, PortName: "http",
+						Ready: true, Serving: true, Pod: tc.pod(svc.Name, i)})
 				}
 				return Result{Items: items, Complete: Partial}, nil
 			})
@@ -220,15 +238,22 @@ func TestMemoRetained(t *testing.T) {
 			before := heapAlloc()
 			for i := range b.MemoServices {
 				svc := objects.Ref{Kind: "Service", Namespace: "shop", Name: fmt.Sprintf("checkout-service-%02d", i)}
-				if _, err := r.Endpoints(context.Background(), "i1", svc); err != nil {
-					t.Fatal(err)
+				if res, err := r.Endpoints(context.Background(), "i1", svc); err != nil || res.Complete != Partial {
+					t.Fatalf("%s: %s, %v; want partial", svc.Name, res.Complete, err)
 				}
 			}
 			retained := int64(heapAlloc()) - int64(before)
-			runtime.KeepAlive(r)
-			t.Logf("memo of %d Services × %d endpoints retains %d B (%.2f MiB)", b.MemoServices, b.MaxEndpoints, retained, float64(retained)/(1<<20))
-			if retained > 1<<20 {
-				t.Errorf("memo retains %d B, budget 1 MiB", retained)
+			bd := r.(*bounded)
+			bd.mu.Lock()
+			kept, counted := bd.lru.Len(), bd.bytes
+			bd.mu.Unlock()
+			t.Logf("memo keeps %d of %d Services × %d endpoints; counts %d B, retains %d B (%.2f MiB)",
+				kept, b.MemoServices, b.MaxEndpoints, counted, retained, float64(retained)/(1<<20))
+			if retained > int64(b.MemoBytes) || counted > b.MemoBytes {
+				t.Errorf("memo retains %d B (counted %d), budget %d", retained, counted, b.MemoBytes)
+			}
+			if tc.fitsAll && kept != b.MemoServices {
+				t.Errorf("memo keeps %d Services, want all %d", kept, b.MemoServices)
 			}
 		})
 	}
@@ -257,7 +282,8 @@ func heapAlloc() uint64 {
 	return m.HeapAlloc
 }
 
-// A memo hit returns the endpoints the read did: both IP families, an FQDN,
+// A memo hit returns the endpoints the read did: both IP families, IPs not
+// written canonically, an FQDN,
 // several ports per address, every condition, and no Pod.
 func TestBoundedMemoHitKeepsEndpoints(t *testing.T) {
 	want := []Endpoint{
@@ -266,6 +292,8 @@ func TestBoundedMemoHitKeepsEndpoints(t *testing.T) {
 		{Address: "10.244.3.12", Port: 8080, PortName: "http", Serving: true, Terminating: true, Pod: "cart-7d9f8b6c5d-q7m4z"},
 		{Address: "fd00:10:244:3::c", Port: 8080, PortName: "http", Pod: "cart-5c6b7a8d9e-b2c3d"},
 		{Address: "::ffff:10.1.2.3", Port: 8080, PortName: "http", Ready: true},
+		{Address: "fd00:0:0::5", Port: 8080, PortName: "http", Ready: true},
+		{Address: "FD00::6", Port: 8080, PortName: "http", Ready: true},
 		{Address: "db.example.com", Port: 5432, Ready: true, Serving: true},
 		{Address: "10.244.1.8", Port: 5432, Ready: true},
 	}
@@ -282,5 +310,93 @@ func TestBoundedMemoHitKeepsEndpoints(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("reads %d, want 1", calls)
+	}
+}
+
+// A provider result over MaxEndpoints is cut and partial, read and remembered alike.
+func TestBoundedCutsToMaxEndpoints(t *testing.T) {
+	b := DefaultBounds
+	b.MaxEndpoints = 3
+	r := Bounded(readerFunc(func(context.Context, string, objects.Ref) (Result, error) {
+		items := make([]Endpoint, 5)
+		for i := range items {
+			items[i] = Endpoint{Address: fmt.Sprintf("10.0.0.%d", i+1), Port: int32(8000 + i)}
+		}
+		return Result{Items: items, Complete: Complete}, nil
+	}), b, testingclock.NewFakeClock(t0))
+	for range 2 {
+		if res, _ := r.Endpoints(context.Background(), "i1", svcRef(0)); res.Complete != Partial || len(res.Items) != 3 || res.Items[2].Address != "10.0.0.3" {
+			t.Fatalf("result %+v, want the first 3, partial", res)
+		}
+	}
+}
+
+// A result larger than MemoBytes is served but not remembered.
+func TestBoundedSkipsOversized(t *testing.T) {
+	b := DefaultBounds
+	b.MemoBytes = 1024
+	calls := 0
+	r := Bounded(readerFunc(func(context.Context, string, objects.Ref) (Result, error) {
+		calls++
+		items := make([]Endpoint, 100)
+		for i := range items {
+			items[i] = Endpoint{Address: fmt.Sprintf("10.0.%d.%d", i, i), Pod: fmt.Sprintf("pod-%03d", i)}
+		}
+		return Result{Items: items, Complete: Complete}, nil
+	}), b, testingclock.NewFakeClock(t0))
+	for range 2 {
+		if res, _ := r.Endpoints(context.Background(), "i1", svcRef(0)); res.Complete != Complete || len(res.Items) != 100 {
+			t.Fatalf("result %+v", res)
+		}
+	}
+	if calls != 2 || r.(*bounded).bytes != 0 {
+		t.Fatalf("reads %d, memo %d B; want 2 reads and an empty memo", calls, r.(*bounded).bytes)
+	}
+}
+
+// A request whose context has ended takes no slot: a deadline is timed-out,
+// a cancel failed. A provider's deadline error is timed-out too.
+func TestBoundedContext(t *testing.T) {
+	f := newFake(false)
+	r := Bounded(f, DefaultBounds, testingclock.NewFakeClock(t0))
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	past, cancel2 := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel2()
+	if res, err := r.Endpoints(cancelled, "i1", svcRef(0)); err == nil || res.Complete != Failed {
+		t.Errorf("cancelled: %+v, %v; want failed", res, err)
+	}
+	if res, err := r.Endpoints(past, "i1", svcRef(0)); err == nil || res.Complete != TimedOut {
+		t.Errorf("past deadline: %+v, %v; want timed-out", res, err)
+	}
+	if n := f.total.Load(); n != 0 {
+		t.Errorf("reads %d, want 0", n)
+	}
+	late := Bounded(readerFunc(func(context.Context, string, objects.Ref) (Result, error) {
+		return Result{Complete: Failed}, fmt.Errorf("list: %w", context.DeadlineExceeded)
+	}), DefaultBounds, testingclock.NewFakeClock(t0))
+	if res, err := late.Endpoints(context.Background(), "i1", svcRef(0)); err == nil || res.Complete != TimedOut {
+		t.Errorf("provider deadline: %+v, %v; want timed-out", res, err)
+	}
+}
+
+// Only core Service refs are read; any other kind is unavailable.
+func TestBoundedServicesOnly(t *testing.T) {
+	f := newFake(false)
+	r := Bounded(f, DefaultBounds, testingclock.NewFakeClock(t0))
+	for _, ref := range []objects.Ref{{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "shop", Name: "svc-0"}, {Kind: "Pod", Namespace: "shop", Name: "svc-0"}} {
+		if res, err := r.Endpoints(context.Background(), "i1", ref); err != nil || res.Complete != Unavailable {
+			t.Errorf("%+v: %+v, %v; want unavailable", ref, res, err)
+		}
+	}
+	if n := f.total.Load(); n != 0 {
+		t.Errorf("reads %d, want 0", n)
+	}
+}
+
+// size counts a row as 12 bytes and a portKey as 24.
+func TestPackedSizes(t *testing.T) {
+	if r, k := unsafe.Sizeof(row{}), unsafe.Sizeof(portKey{}); r != 12 || k != 24 {
+		t.Fatalf("row %d B, portKey %d B; size assumes 12 and 24", r, k)
 	}
 }

@@ -97,6 +97,7 @@ type handler struct {
 	// pathMemo holds the path topologies and projections; one per handler.
 	pathMemo *paths.Memo
 	// scoped reads one Service's endpoints for backend detail; never nil.
+	// Authorise the backend before every call, memo hits included.
 	scoped endpoints.ScopedReader
 }
 

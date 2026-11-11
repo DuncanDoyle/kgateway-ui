@@ -2,11 +2,11 @@ package cache
 
 import (
 	"context"
-	"time"
 
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -14,18 +14,23 @@ import (
 
 // NewScopedReader reads a Service's EndpointSlices with a paged, namespaced
 // LIST by the Service-name label, within endpoints.DefaultBounds' page and
-// endpoint limits. It keeps nothing; wrap it in endpoints.Bounded.
-func NewScopedReader(kube kubernetes.Interface) endpoints.ScopedReader {
-	return scopedReader{kube: kube, b: endpoints.DefaultBounds}
+// endpoint limits, stamping results with clk. It keeps nothing; wrap it in endpoints.Bounded.
+func NewScopedReader(kube kubernetes.Interface, clk clock.PassiveClock) endpoints.ScopedReader {
+	return scopedReader{kube: kube, b: endpoints.DefaultBounds, clock: clk}
 }
 
 type scopedReader struct {
-	kube kubernetes.Interface
-	b    endpoints.Bounds
+	kube  kubernetes.Interface
+	b     endpoints.Bounds
+	clock clock.PassiveClock
 }
 
-// Endpoints reads svc's endpoints; every install shares the one cluster, so installID is unused.
+// Endpoints reads svc's endpoints; every install shares the one cluster, so
+// installID is unused. A ref that is not a Service is Unavailable.
 func (r scopedReader) Endpoints(ctx context.Context, _ string, svc objects.Ref) (endpoints.Result, error) {
+	if svc.Group != "" || svc.Kind != "Service" {
+		return endpoints.Result{Complete: endpoints.Unavailable, ReadAt: r.clock.Now()}, nil
+	}
 	list := r.kube.DiscoveryV1().EndpointSlices(svc.Namespace)
 	opts := metav1.ListOptions{LabelSelector: discoveryv1.LabelServiceName + "=" + svc.Name, Limit: int64(r.b.PageSize)}
 	res := endpoints.Result{Complete: endpoints.Complete}
@@ -36,7 +41,7 @@ func (r scopedReader) Endpoints(ctx context.Context, _ string, svc objects.Ref) 
 		}
 		l, err := list.List(ctx, opts)
 		if err != nil {
-			return endpoints.Result{Complete: endpoints.Failed, ReadAt: time.Now()}, err
+			return endpoints.Result{Complete: endpoints.Failed, ReadAt: r.clock.Now()}, err
 		}
 		if !r.add(&res, l.Items) {
 			res.Complete = endpoints.Partial
@@ -47,7 +52,7 @@ func (r scopedReader) Endpoints(ctx context.Context, _ string, svc objects.Ref) 
 		}
 		opts.Continue = l.Continue
 	}
-	res.ReadAt = time.Now()
+	res.ReadAt = r.clock.Now()
 	return res, nil
 }
 
