@@ -47,6 +47,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/paths"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
@@ -1265,11 +1266,13 @@ func (s synthReader) Endpoints(_ context.Context, _ string, svc objects.Ref) (en
 	return endpoints.Result{Complete: endpoints.Complete, Items: items, ReadAt: testutil.Now}, nil
 }
 
-// backendHandler is pathsHandler with a bounded scoped reader over synthReader
-// whose memo never expires: entries leave it by its Service and byte caps only.
+// backendHandler is pathsHandler with the kgateway pack's consumers and a
+// bounded scoped reader over synthReader whose memo never expires: entries
+// leave it by its Service and byte caps only.
 func backendHandler(e *engine.Engine, m *engine.Model, authz Authorizer) http.Handler {
 	r := endpoints.Bounded(synthReader{snap: m.Snapshot, n: endpoints.DefaultBounds.MaxEndpoints}, endpoints.DefaultBounds, testutil.FakeClock())
-	return NewHandler(e, fstest.MapFS{}, authz, withPathMemo(paths.NewMemo(clocktesting.NewFakeClock(m.ComputedAt))), WithScopedReader(r))
+	return NewHandler(e, fstest.MapFS{}, authz, withPathMemo(paths.NewMemo(clocktesting.NewFakeClock(m.ComputedAt))), WithScopedReader(r),
+		WithBackendConsumers(kgateway.BackendConsumers))
 }
 
 // serviceDetails are the detail paths of up to n listed Services of install id, by name.
@@ -1372,11 +1375,16 @@ const heapBaseline = 25411584
 // apiHeapChildEnv makes TestBudgetHeapAPIWarm measure in this process and print one line.
 const apiHeapChildEnv = "SNELLIUS_API_HEAP_CHILD"
 
+// apiHeapOneGenEnv makes the heap children read every Service detail in one
+// publication, with no second compute: the attribution run, never gated.
+const apiHeapOneGenEnv = "SNELLIUS_API_HEAP_ONE_GENERATION"
+
 // apiHeapRun is one child's measurement: HeapInuse once the engine has computed
-// (the engine figure) and once paths are warm for every install, and HeapAlloc
-// freed by dropping the path memos.
+// (the engine figure), once a new publication settles after warm requests with
+// none since (the gated figure), and once requests warm it again, and HeapAlloc
+// freed by dropping the handler and its memos.
 type apiHeapRun struct {
-	Engine, Warm uint64
+	Engine, Settled, Warm uint64
 	// Alloc is the HeapAlloc warming added; Freed what dropping the handler and its memo freed.
 	Alloc, Freed int64
 	Paths        int
@@ -1386,9 +1394,11 @@ type apiHeapRun struct {
 }
 
 // TestBudgetHeapAPIWarm: as TestBudgetHeap, one fresh process per run and five
-// runs, the median heap retained once paths and backends are warm for every
-// install, and the scoped memo holds Service details from two publications, stays
-// ≤ 48 MiB over the 2.1 baseline (D-057). Extreme is reported: D-057 is a Large budget.
+// runs. Paths and backends are warmed for every install and 24 Service details
+// read, then the engine publishes again. The median heap retained right then,
+// with no request since, as in production, stays ≤ 48 MiB over the 2.1 baseline
+// (D-057). The figure after 36 more details on the new publication is reported.
+// Extreme is reported: D-057 is a Large budget.
 func TestBudgetHeapAPIWarm(t *testing.T) {
 	cases := append(slices.Clone(pathsTiers), scale.Extreme)
 	if name := os.Getenv(apiHeapChildEnv); name != "" {
@@ -1425,24 +1435,25 @@ func apiHeapBudget(t *testing.T, tier scale.Tier, gated bool) {
 		}
 		runs = append(runs, r)
 	}
-	t.Logf("run  engine (B)  warm (B)  API memos (B)  HeapAlloc added (B)  freed by dropping them (B)")
-	eng, api, freed, warm := make([]int64, len(runs)), make([]int64, len(runs)), make([]int64, len(runs)), make([]int64, len(runs))
+	t.Logf("run  engine (B)  settled (B)  warm (B)  API memos warm (B)  HeapAlloc added (B)  freed by dropping them (B)")
+	n := len(runs)
+	eng, api, freed, warm, settled := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
 	for i, r := range runs {
 		eng[i], api[i], freed[i] = int64(r.Engine)-heapBaseline, int64(r.Warm)-int64(r.Engine), r.Freed //nolint:gosec // heap sizes fit
-		warm[i] = int64(r.Warm) - heapBaseline                                                          //nolint:gosec // heap sizes fit
-		t.Logf("%d    %d    %d    %d    %d    %d", i+1, r.Engine, r.Warm, api[i], r.Alloc, r.Freed)
+		warm[i], settled[i] = int64(r.Warm)-heapBaseline, int64(r.Settled)-heapBaseline                 //nolint:gosec // heap sizes fit
+		t.Logf("%d    %d    %d    %d    %d    %d    %d", i+1, r.Engine, r.Settled, r.Warm, api[i], r.Alloc, r.Freed)
 	}
 	med := func(v []int64) int64 { v = slices.Clone(v); slices.Sort(v); return v[len(v)/2] }
-	// The gate is one child's whole figure; the engine and API medians are its breakdown.
-	em, am, fm, total := med(eng), med(api), med(freed), med(warm)
+	// The gate is one child's settled figure; the warm figure and the engine and API medians are its breakdown.
+	em, am, fm, wm, total := med(eng), med(api), med(freed), med(warm), med(settled)
 	note := "budget ≤ 48 MiB"
 	if !gated {
 		note = "reported: D-057 is a Large budget"
 	}
-	t.Logf("%s: %d paths (unmemoised %v), %d listed Services, %d Service details; warm retained median %+.1f MiB over the 2.1 baseline %d B (%s); breakdown: engine figure median %+.1f MiB, API memos median %+.2f MiB (freed by dropping them %.2f MiB)",
-		tier.Name, runs[0].Paths, runs[0].Unmemoised, runs[0].Backends, runs[0].Details, float64(total)/mib, heapBaseline, note, float64(em)/mib, float64(am)/mib, float64(fm)/mib)
+	t.Logf("%s: %d paths (unmemoised %v), %d listed Services, %d Service details; settled retained median %+.1f MiB over the 2.1 baseline %d B (%s); reported: warm again %+.1f MiB, engine figure %+.1f MiB, API memos warm %+.2f MiB (freed by dropping them %.2f MiB)",
+		tier.Name, runs[0].Paths, runs[0].Unmemoised, runs[0].Backends, runs[0].Details, float64(total)/mib, heapBaseline, note, float64(wm)/mib, float64(em)/mib, float64(am)/mib, float64(fm)/mib)
 	if gated && total > 48*mib {
-		t.Errorf("%s: warm retained heap %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
+		t.Errorf("%s: settled retained heap %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
 	}
 }
 
@@ -1472,13 +1483,21 @@ func apiHeapChild(t *testing.T, tier scale.Tier) {
 	if len(urls) < 48 {
 		t.Fatalf("%d Services listed, want 48", len(urls))
 	}
-	for _, u := range urls[:24] {
-		detailGet(t, h, u)
-	}
-	// The engine and the path memo then hold the new model only; m must not keep the old one.
-	m = e.Compute()
-	for _, u := range urls[12:] {
-		detailGet(t, h, u)
+	if os.Getenv(apiHeapOneGenEnv) != "" {
+		for _, u := range urls {
+			detailGet(t, h, u)
+		}
+		r.Settled = stats().HeapInuse
+	} else {
+		for _, u := range urls[:24] {
+			detailGet(t, h, u)
+		}
+		// The engine and the path memo then hold the new model only; m must not keep the old one.
+		m = e.Compute()
+		r.Settled = stats().HeapInuse
+		for _, u := range urls[12:] {
+			detailGet(t, h, u)
+		}
 	}
 	r.Details = len(urls)
 	warm := stats()
