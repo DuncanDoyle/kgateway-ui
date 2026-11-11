@@ -9,8 +9,8 @@ Status: implementing (design and plan approved 2026-11-10; plan approved on cond
 ### Queue
 Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a time:
 - [x] 6.1 cache access for kgwctl (Tasks 19–21) — closed 2026-11-10, phases/phase-6/phase-6.1-complete.md
-- [ ] 6.2 path model, paths API, path list (Tasks 22–32) ← CURRENT
-- [ ] 6.3 backends (Tasks 33–39)
+- [x] 6.2 path model, paths API, path list (Tasks 22–32) — closed 2026-11-11, phases/phase-6/phase-6.2-complete.md
+- [ ] 6.3 backends (Tasks 33–39) ← CURRENT
 - [ ] 6.4 route trace, all route kinds (Tasks 40–42)
 - [ ] 6.5 Gateway map, core (Tasks 43–47)
 - [ ] 6.6 Gateway map, the rest; phase close (Tasks 48–50)
@@ -25,9 +25,9 @@ Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a tim
 - [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 6.2 — Path model, paths API, path list (planned)
-Base: 6bf3a46
-Brief: phases/phase-6/phase-6.2-brief.md
+Sub-phase: 6.3 — Backends (planned)
+Base: 8727eac
+Brief: phases/phase-6/phase-6.3-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
