@@ -35,14 +35,15 @@ type Listener struct {
 // Row is one path: an attachment, a rule of the last route of its chain, and
 // one backendRef or mirror of that rule. It holds indexes into its Topology.
 type Row struct {
-	att, chain, rule int32
+	// ctx is the row's path context: its chain and delegation state.
+	att, ctx int32
+	rule     int16
 	// ref is the backendRef index in the rule; -1 for a rule-level mirror or a rule with no backendRef.
-	ref    int32
+	ref    int16
 	depOff uint32
 	depN   uint16
 	// mirror is the RequestMirror filter index on the ref, or on the rule when ref is -1; -1 for none.
 	mirror int16
-	action Action
 }
 
 // Input is everything Build reads for one install. A nil Index, Views or
@@ -62,7 +63,7 @@ type Input struct {
 type attachment struct {
 	resource, gateway int32 // Refs indexes
 	listener          int32 // listeners index
-	hostnames         []string
+	hostnames         int32 // hostnames index
 }
 
 // route is a route of some chain with its rules. HTTPRoute rules are the
@@ -81,10 +82,16 @@ type Topology struct {
 
 	atts      []attachment
 	listeners []Listener
+	// hostnames are the distinct hostname lists of the attachments.
+	hostnames [][]string
 	routes    []route
-	// chains are route indexes, root first; a row's rules are its chain's last route's.
-	chains [][]int32
-	deps   []int32
+	// hops are the routes indexes of every chain, root first, back to back.
+	// A row's rules are its chain's last route's.
+	hops []int32
+	// ctxs are the rows' path contexts; unknowns the reasons they index.
+	ctxs     []pathCtx
+	unknowns []computed.UnknownReason
+	deps     []int32
 	// delegates is Input.Delegates: whether a delegation backendRef delegates.
 	delegates bool
 }
@@ -94,12 +101,26 @@ type builder struct {
 	in     Input
 	t      *Topology
 	refs   map[objects.Ref]int32
-	routes map[objects.Ref]int32 // route ref → its root chain index
-	// listeners and sets intern listeners and dependency sets.
+	routes map[objects.Ref]int32 // route ref → its routes index
+	// listeners, sets and chains intern listeners, dependency sets and chains (hops offsets).
 	listeners map[listenerKey]int32
+	hosts     map[string]int32
 	sets      map[string]uint32
+	chains    map[string]uint32
 	set       []int32 // scratch dependency set and its key
 	key       []byte
+	// roots are the attachments of each route, and rootCtx its root path context.
+	roots   map[objects.Ref][]rootAtt
+	rootCtx map[int32]int32
+	// states interns delegation rows' path contexts (delegation.go).
+	states map[stateKey]int32
+	base   []int32 // scratch attachment deps of a delegated row
+}
+
+// rootAtt is an attachment with its dependency set.
+type rootAtt struct {
+	att  int32
+	base []int32
 }
 
 type listenerKey struct {
@@ -108,20 +129,24 @@ type listenerKey struct {
 }
 
 // Build derives the topology of in: one row per (view A attachment, rule,
-// backendRef), one per rule with no backendRef, and one per RequestMirror.
+// backendRef), one per rule with no backendRef, and one per RequestMirror,
+// then the same per view C context for delegated routes.
 func Build(in Input) *Topology {
 	t := &Topology{delegates: in.Delegates}
 	if in.Index == nil || in.Views == nil || in.Decode == nil {
 		return t
 	}
 	b := &builder{in: in, t: t, refs: map[objects.Ref]int32{}, routes: map[objects.Ref]int32{},
-		listeners: map[listenerKey]int32{}, sets: map[string]uint32{}}
+		listeners: map[listenerKey]int32{}, hosts: map[string]int32{}, sets: map[string]uint32{}, chains: map[string]uint32{},
+		roots: map[objects.Ref][]rootAtt{}, rootCtx: map[int32]int32{}, states: map[stateKey]int32{}}
 	for i := range in.Views.Attachment.Members {
 		b.member(&in.Views.Attachment.Members[i])
 	}
+	b.delegated()
 	// The memo retains the tables, so they are copied to their length.
 	t.Rows, t.Refs, t.deps = slices.Clone(t.Rows), slices.Clone(t.Refs), slices.Clone(t.deps)
-	t.atts, t.listeners = slices.Clone(t.atts), slices.Clone(t.listeners)
+	t.hostnames = slices.Clone(t.hostnames)
+	t.atts, t.listeners, t.hops, t.ctxs = slices.Clone(t.atts), slices.Clone(t.listeners), slices.Clone(t.hops), slices.Clone(t.ctxs)
 	return t
 }
 
@@ -138,11 +163,16 @@ func (b *builder) ref(r objects.Ref) int32 {
 
 // member adds the rows of one view A member.
 func (b *builder) member(m *computed.Member) {
-	chain, ok := b.chain(m.Route)
+	ri, ok := b.route(m.Route)
 	if !ok {
 		return
 	}
-	a := attachment{resource: b.ref(m.Resource), hostnames: m.Hostnames}
+	ctx, ok := b.rootCtx[ri]
+	if !ok {
+		ctx = b.ctx(pathCtx{off: b.chain([]int32{ri}), n: 1})
+		b.rootCtx[ri] = ctx
+	}
+	a := attachment{resource: b.ref(m.Resource), hostnames: b.hostnames(m.Hostnames)}
 	a.gateway = a.resource
 	var ls []objects.Listener
 	if id, ok := b.in.Index.FindGateway(m.Resource); ok && b.in.Index.Gateways[id].View != nil {
@@ -160,10 +190,29 @@ func (b *builder) member(m *computed.Member) {
 		base = append(base, b.ref(d))
 	}
 	base = append(base, a.gateway)
-	rules := b.t.routes[b.t.chains[chain][0]].rules
-	for ri := range rules {
-		b.rule(att, chain, int32(ri), &rules[ri], base) // #nosec G115 -- a rule index fits in int32
+	b.roots[m.Route] = append(b.roots[m.Route], rootAtt{att: att, base: base})
+	rules := b.t.routes[ri].rules
+	for i := range rules {
+		b.rule(att, ctx, i, &rules[i], base)
 	}
+}
+
+// hostnames interns the hostname list h; nil and empty stay apart.
+func (b *builder) hostnames(h []string) int32 {
+	b.key = b.key[:0]
+	if h != nil {
+		b.key = append(b.key, 1)
+	}
+	for _, s := range h {
+		b.key = append(append(b.key, s...), 0)
+	}
+	if i, ok := b.hosts[string(b.key)]; ok {
+		return i
+	}
+	i := int32(len(b.t.hostnames)) // #nosec G115 -- a hostname list count fits in int32
+	b.t.hostnames = append(b.t.hostnames, h)
+	b.hosts[string(b.key)] = i
+	return i
 }
 
 // listener interns the listener name of resource, whose spec listeners are ls.
@@ -182,10 +231,10 @@ func (b *builder) listener(resource int32, name string, ls []objects.Listener) i
 	return i
 }
 
-// chain returns the root chain of route ref, decoding its rules once.
-func (b *builder) chain(ref objects.Ref) (int32, bool) {
-	if c, ok := b.routes[ref]; ok {
-		return c, true
+// route returns the routes index of ref, decoding its rules once.
+func (b *builder) route(ref objects.Ref) (int32, bool) {
+	if i, ok := b.routes[ref]; ok {
+		return i, true
 	}
 	id, ok := b.in.Index.Row(ref)
 	if !ok {
@@ -200,36 +249,58 @@ func (b *builder) chain(ref objects.Ref) (int32, bool) {
 	}
 	ri := int32(len(b.t.routes)) // #nosec G115 -- a route count fits in int32
 	b.t.routes = append(b.t.routes, rt)
-	c := int32(len(b.t.chains)) // #nosec G115 -- a chain count fits in int32
-	b.t.chains = append(b.t.chains, []int32{ri})
-	b.routes[ref] = c
-	return c, true
+	b.routes[ref] = ri
+	return ri, true
 }
 
-// rule adds the rows of one rule: one per backendRef, or one with the
-// written action, then one per RequestMirror. base is the attachment's deps.
-func (b *builder) rule(att, chain, ri int32, r *objects.Rule, base []int32) {
+// chain interns the chain of routes indexes rs, root first, and returns its hops offset.
+func (b *builder) chain(rs []int32) uint32 {
+	b.key = b.key[:0]
+	for _, r := range rs {
+		b.key = binary.LittleEndian.AppendUint32(b.key, uint32(r)) // #nosec G115 -- a route index is never negative
+	}
+	if off, ok := b.chains[string(b.key)]; ok {
+		return off
+	}
+	off := uint32(len(b.t.hops)) // #nosec G115 -- the table fits in uint32
+	b.t.hops = append(b.t.hops, rs...)
+	b.chains[string(b.key)] = off
+	return off
+}
+
+// ctx appends a path context and returns its index.
+func (b *builder) ctx(p pathCtx) int32 {
+	b.t.ctxs = append(b.t.ctxs, p)
+	return int32(len(b.t.ctxs) - 1) // #nosec G115 -- a context count fits in int32
+}
+
+// rule adds the rows of rule ri in the path context ctx: one per backendRef,
+// or one with the written action, then one per RequestMirror. base is the
+// attachment's deps.
+func (b *builder) rule(att, ctx int32, ri int, r *objects.Rule, base []int32) {
+	rule := int16(ri) // #nosec G115 -- a route has at most 16 rules
 	if len(r.BackendRefs) == 0 {
-		b.add(Row{att: att, chain: chain, rule: ri, ref: -1, mirror: -1, action: writtenAction(r.Filters)}, base)
+		b.add(Row{att: att, ctx: ctx, rule: rule, ref: -1, mirror: -1}, base)
 	}
 	for i := range r.BackendRefs {
 		br := &r.BackendRefs[i]
-		ref := int32(i) // #nosec G115 -- a backendRef index fits in int32
+		ref := int16(i) // #nosec G115 -- a rule has at most 16 backendRefs
 		if br.Delegation != nil && b.in.Delegates {
-			// A delegation is one row whose backend is the delegation; view C's
-			// rows for the children it selects belong after it. Name mode
-			// names the child, so it is a dependency; the other modes reveal only the parent's spec.
+			// A delegation is one row whose backend is the delegation, with its view C
+			// rows' state; delegated() adds the children's rows. Name mode names the
+			// child, so it is a dependency; the other modes reveal only the parent's spec.
+			row := Row{att: att, ctx: b.refState(ctx, r.Index, i), rule: rule, ref: ref, mirror: -1}
 			if br.Delegation.Mode == objects.DelegationName {
-				b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base, b.ref(br.Ref))
+				b.add(row, base, b.ref(br.Ref))
 			} else {
-				b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base)
+				b.add(row, base)
 			}
 			continue
 		}
-		b.add(Row{att: att, chain: chain, rule: ri, ref: ref, mirror: -1}, base, b.ref(br.Ref))
-		b.mirrors(Row{att: att, chain: chain, rule: ri, ref: ref}, br.Filters, base)
+		b.add(Row{att: att, ctx: ctx, rule: rule, ref: ref, mirror: -1}, base, b.ref(br.Ref))
+		b.mirrors(Row{att: att, ctx: ctx, rule: rule, ref: ref}, br.Filters, base)
 	}
-	b.mirrors(Row{att: att, chain: chain, rule: ri, ref: -1}, r.Filters, base)
+	b.mirrors(Row{att: att, ctx: ctx, rule: rule, ref: -1}, r.Filters, base)
 }
 
 // mirrors adds one row per RequestMirror filter in fs.
@@ -295,11 +366,17 @@ func (t *Topology) ListenerSet(r Row) *objects.Ref {
 func (t *Topology) Listener(r Row) Listener { return t.listeners[t.atts[r.att].listener] }
 
 // Hostnames are the attachment's effective hostnames; nil for kinds without hostnames.
-func (t *Topology) Hostnames(r Row) []string { return t.atts[r.att].hostnames }
+func (t *Topology) Hostnames(r Row) []string { return t.hostnames[t.atts[r.att].hostnames] }
+
+// chain is the routes indexes of the row's chain, root first.
+func (t *Topology) chain(r Row) []int32 {
+	p := &t.ctxs[r.ctx]
+	return t.hops[p.off : p.off+uint32(p.n)]
+}
 
 // Chain is the row's route chain, root first.
 func (t *Topology) Chain(r Row) []objects.Ref {
-	c := t.chains[r.chain]
+	c := t.chain(r)
 	out := make([]objects.Ref, len(c))
 	for i, ri := range c {
 		out[i] = t.Refs[t.routes[ri].ref]
@@ -309,7 +386,7 @@ func (t *Topology) Chain(r Row) []objects.Ref {
 
 // Rule is the row's rule in the last route of its chain.
 func (t *Topology) Rule(r Row) *objects.Rule {
-	c := t.chains[r.chain]
+	c := t.chain(r)
 	return &t.routes[c[len(c)-1]].rules[r.rule]
 }
 
@@ -341,16 +418,22 @@ func (t *Topology) Mirror(r Row) (objects.MirrorFilter, bool) {
 
 // Action is what the row's rule does: ActionBackend for a backendRef or a
 // mirror, else the rule's written action.
-func (t *Topology) Action(r Row) Action { return r.action }
+func (t *Topology) Action(r Row) Action {
+	if r.ref >= 0 || r.mirror >= 0 {
+		return ActionBackend
+	}
+	return writtenAction(t.Rule(r).Filters)
+}
 
 // Deps is the row's dependency set: its attachment's, the Gateway, every route
-// of its chain and its backend or mirror target, as indexes into Refs.
+// of its chain, its backend or mirror target and, on a delegated route, its
+// view C row's, as indexes into Refs.
 func (t *Topology) Deps(r Row) explore.DepSet {
 	return explore.DepSet(t.deps[r.depOff : r.depOff+uint32(r.depN) : r.depOff+uint32(r.depN)])
 }
 
 // Bytes estimates the topology's retained size, for the memo cap (design §14).
-// HTTPRoute rules are the decoder's and are not counted.
+// HTTPRoute rules and view C matches are shared, not counted.
 func (t *Topology) Bytes() int {
 	n := int(unsafe.Sizeof(Topology{})) + cap(t.Rows)*int(unsafe.Sizeof(Row{})) + cap(t.deps)*4
 	n += cap(t.Refs) * int(unsafe.Sizeof(objects.Ref{}))
@@ -358,6 +441,7 @@ func (t *Topology) Bytes() int {
 		n += len(r.Group) + len(r.Kind) + len(r.Namespace) + len(r.Name)
 	}
 	n += cap(t.atts)*int(unsafe.Sizeof(attachment{})) + cap(t.listeners)*int(unsafe.Sizeof(Listener{}))
+	n += cap(t.hostnames) * int(unsafe.Sizeof([]string{}))
 	for _, l := range t.listeners {
 		n += len(l.Name) + len(l.Protocol)
 	}
@@ -368,10 +452,7 @@ func (t *Topology) Bytes() int {
 		}
 		n += ruleBytes(t.routes[i].rules)
 	}
-	n += cap(t.chains) * int(unsafe.Sizeof([]int32{}))
-	for _, c := range t.chains {
-		n += cap(c) * 4
-	}
+	n += cap(t.hops)*4 + cap(t.ctxs)*int(unsafe.Sizeof(pathCtx{})) + cap(t.unknowns)*int(unsafe.Sizeof(computed.UnknownReason("")))
 	return n
 }
 

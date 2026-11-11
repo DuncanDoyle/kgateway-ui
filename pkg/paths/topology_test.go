@@ -54,17 +54,24 @@ func buildWith(t testing.TB, snap *cache.Snapshot) (*paths.Topology, *engine.Ins
 // features on, the GatewayClass and objs.
 func world(t *testing.T, objs ...*unstructured.Unstructured) *paths.Topology {
 	t.Helper()
-	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1,
-		testutil.Env(install.ExperimentalEnv, "true"))
+	return build(t, worldSnap(t, "v2.4.7", nil, objs...))
+}
+
+// worldSnap is world's snapshot with the controller at tag and env added.
+func worldSnap(t *testing.T, tag string, env []corev1.EnvVar, objs ...*unstructured.Unstructured) *cache.Snapshot {
+	t.Helper()
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:"+tag, 1, 1,
+		append([]corev1.EnvVar{testutil.Env(install.ExperimentalEnv, "true")}, env...)...)
 	all := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true)}, objs...)
 	access := map[schema.GroupVersionResource]cache.Access{}
 	for _, k := range testutil.ServedUpstream() {
 		access[k.GVR()] = cache.Access{OK: true}
 	}
-	return build(t, &cache.Snapshot{Objects: testutil.ObjectsByGVR(t, all...), Access: access,
-		Namespaces:  []*corev1.Namespace{testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)},
+	return &cache.Snapshot{Objects: testutil.ObjectsByGVR(t, all...), Access: access,
+		Namespaces: []*corev1.Namespace{testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), testutil.Namespace("shop", nil),
+			testutil.Namespace("other", nil)},
 		Deployments: []*appsv1.Deployment{d, testutil.ProxyDeployment("infra", "edge", 1, 1)}, Pods: []*corev1.Pod{testutil.ControllerPod(d, "p", true)},
-		Synced: true, TakenAt: testutil.Now})
+		Synced: true, TakenAt: testutil.Now}
 }
 
 var ready = []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
@@ -300,7 +307,8 @@ func TestDepsCoverChain(t *testing.T) {
 		rule([]any{svc("a"), testutil.DelegateTo("infra", "child")}))
 	child := testutil.WithRules(testutil.HTTPRoute("infra", "child", nil), rule([]any{svc("c")}))
 	top := world(t, edge("http"), ls, route, child)
-	if len(top.Rows) != 2 {
+	// The root's two rows, then the child's from view C.
+	if len(top.Rows) != 3 {
 		t.Fatalf("rows: %d", len(top.Rows))
 	}
 	gw := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
@@ -331,8 +339,8 @@ func TestDepsCoverChain(t *testing.T) {
 }
 
 // TestPathsWorldRows builds the topology over the large-paths world: one row
-// per view A attachment, rule and ref, with each route's rules decoded here.
-// Delegated children's rows come from view C and are not counted.
+// per view A attachment, rule and ref on root routes, with each route's rules
+// decoded here, plus delegated rows from view C, within the memo cap.
 func TestPathsWorldRows(t *testing.T) {
 	tier := scale.Large.Paths()
 	per := map[objects.Ref]int{}
@@ -357,8 +365,18 @@ func TestPathsWorldRows(t *testing.T) {
 	for _, m := range i.Computed.Attachment.Members {
 		want += per[m.Route]
 	}
-	if len(top.Rows) != want || want == 0 {
-		t.Fatalf("rows %d, want %d", len(top.Rows), want)
+	roots := 0
+	for _, r := range top.Rows {
+		if len(top.Chain(r)) == 1 {
+			roots++
+		}
 	}
-	t.Logf("%s: %d rows over %d attachments, %d refs, %d bytes", tier.Name, len(top.Rows), len(i.Computed.Attachment.Members), len(top.Refs), top.Bytes())
+	if roots != want || want == 0 || len(top.Rows) == roots {
+		t.Fatalf("root rows %d, want %d; %d rows", roots, want, len(top.Rows))
+	}
+	if top.Bytes() > 2<<20 {
+		t.Fatalf("%d bytes, over the 2 MiB memo cap", top.Bytes())
+	}
+	t.Logf("%s: %d rows (%d delegated) over %d attachments, %d refs, %d bytes", tier.Name, len(top.Rows), len(top.Rows)-roots,
+		len(i.Computed.Attachment.Members), len(top.Refs), top.Bytes())
 }
