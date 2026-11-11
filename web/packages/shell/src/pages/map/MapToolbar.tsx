@@ -1,4 +1,4 @@
-import type { SerializedStyles } from "@emotion/react";
+import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Keyboard, Search, Table2 } from "lucide-react";
 import type { PathFacets } from "../../api/types";
@@ -27,6 +27,15 @@ const Bar = styled.div<{ stylesOverride?: SerializedStyles }>`
     min-width: 56px;
     font-size: ${(p) => p.theme.font.size.sm};
     color: ${(p) => p.theme.color.textMuted};
+  }
+  .find {
+    display: inline-flex;
+    align-items: center;
+    gap: ${(p) => p.theme.space(2)};
+  }
+  /* Map-only controls keep their space in the table view, so the chips and the toggle never move. */
+  .off {
+    visibility: hidden;
   }
   .end {
     display: inline-flex;
@@ -99,6 +108,9 @@ const Hint = styled.span`
 `;
 
 // region Helpers
+const hidden = css`
+  visibility: hidden;
+`;
 const PROBLEMS = "problems";
 const KINDS: FilterOption[] = ["HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute"].map((k) => ({ value: k, label: k }));
 
@@ -153,31 +165,29 @@ export function MapToolbar({
   return (
     <>
       <Bar stylesOverride={stylesOverride}>
-        {/* Find only moves the map, so the table view leaves it out. */}
-        {table ? null : (
-          <>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                onFindNext();
-              }}
-            >
-              <SearchBox>
-                <Search size={14} aria-hidden="true" />
-                <input
-                  type="search"
-                  aria-label={mapCopy.find}
-                  placeholder={mapCopy.findPlaceholder}
-                  value={find}
-                  onChange={(e) => onFind(e.target.value)}
-                />
-              </SearchBox>
-            </form>
-            <span className="found" role="status" data-testid="map-found">
-              {find && found ? (found.of ? mapCopy.found(found.at, found.of) : mapCopy.notFound) : ""}
-            </span>
-          </>
-        )}
+        {/* Find only moves the map, so the table view hides it. */}
+        <span className={table ? "find off" : "find"} data-testid="map-find">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              onFindNext();
+            }}
+          >
+            <SearchBox>
+              <Search size={14} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label={mapCopy.find}
+                placeholder={mapCopy.findPlaceholder}
+                value={find}
+                onChange={(e) => onFind(e.target.value)}
+              />
+            </SearchBox>
+          </form>
+          <span className="found" role="status" data-testid="map-found">
+            {find && found ? (found.of ? mapCopy.found(found.at, found.of) : mapCopy.notFound) : ""}
+          </span>
+        </span>
         <StateFilter
           label={mapCopy.problemsOnly}
           options={[{ value: PROBLEMS, label: mapCopy.problemsOnly }]}
@@ -198,13 +208,11 @@ export function MapToolbar({
           />
         ) : null}
         <span className="end">
-          {table ? null : (
-            <Tooltip label={mapCopy.keys} placement="end" wrap>
-              <Hint tabIndex={0} role="note" aria-label={mapCopy.keyboard} data-testid="map-keys">
-                <Keyboard size={16} aria-hidden="true" />
-              </Hint>
-            </Tooltip>
-          )}
+          <Tooltip label={mapCopy.keys} placement="end" wrap stylesOverride={table ? hidden : undefined}>
+            <Hint tabIndex={0} role="note" aria-label={mapCopy.keyboard} data-testid="map-keys">
+              <Keyboard size={16} aria-hidden="true" />
+            </Hint>
+          </Tooltip>
           <Tooltip label={mapCopy.tableTip} placement="end">
             <Toggle type="button" aria-pressed={table} onClick={() => onTable(!table)}>
               <Table2 size={14} aria-hidden="true" />

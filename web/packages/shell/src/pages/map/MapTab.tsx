@@ -62,8 +62,6 @@ const isLarge = (s: PathSummary) => s.routes > LARGE_GATEWAY || s.backends > LAR
 
 /** The table view's fixed order: the rows as the map loaded them, problems first. */
 const NO_SORT = { key: "problem", desc: false };
-/** The Gateway column repeats the Gateway this tab belongs to. */
-const OMIT = ["gateway"] as const;
 
 /** pending until the first summary; a large Gateway's counts, applied once the URL carries Problems only. */
 type Opening = "pending" | "done" | { routes: number; backends: number; applied: boolean };
@@ -221,7 +219,6 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
           onSort={() => {}}
           onPage={() => {}}
           emptyTitle={filtered ? listCopy.emptyFiltered(trafficCopy.noun[1]) : listCopy.empty(trafficCopy.noun[1])}
-          omit={OMIT}
           sortable={false}
         />
       ) : (

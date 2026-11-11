@@ -186,6 +186,7 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
       pointer.current = false;
     };
     // React Flow redraws a node that leaves and re-enters the visible area as a new element; focus follows it.
+    // This relies on Chromium firing focusout when a focused element is removed; Firefox does not.
     const lost = (e: Event) => {
       const id = nodeId(e.target);
       const t = e.target as HTMLElement;
@@ -283,8 +284,8 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
       centre(selected, v.zoom);
   }, [focus, selected, at]);
   // Moves focus to a node; one that onlyRenderVisibleElements left out is centred first, then focused once drawn.
+  // The node's own focus handler records it as the tab stop, so last changes only once focus has moved.
   const moveTo = (id: string) => {
-    setLast(id);
     const find = () => box.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
     const el = find();
     if (el) return el.focus();
@@ -309,7 +310,6 @@ export function GatewayMap({ graph, selected, onSelect, focus, view, stylesOverr
       if (to) moveTo(to);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      setLast(id);
       onSelect(id);
     }
   };

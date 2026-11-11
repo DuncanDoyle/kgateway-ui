@@ -584,7 +584,7 @@ it("Escape closes the panel from the map and from the panel", async () => {
 /** The name on a React Flow node wrapper's card. */
 const nameOf = (el: Element | null) => el?.querySelector(".name")?.textContent ?? "";
 
-it("arrow keys move focus along connections, focus lights the paths, Enter opens the panel and Escape returns", async () => {
+it("arrow keys move focus along connections, focus lights the paths, Enter or Space opens the panel and Escape returns", async () => {
   serve(() => edgePaths());
   mount("?tab=map");
   const map = await screen.findByTestId("gateway-map");
@@ -627,6 +627,12 @@ it("arrow keys move focus along connections, focus lights the paths, Enter opens
   await user.keyboard("{Escape}");
   expect(screen.queryByTestId("map-panel")).toBeNull();
   await waitFor(() => expect(nameOf(document.activeElement)).toBe(route));
+  // Space selects too.
+  await user.keyboard(" ");
+  const again = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(again).getByRole("heading", { level: 2 })).toHaveTextContent(route);
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(nameOf(document.activeElement)).toBe(route));
 });
 
 it("each node's accessible name gives its kind, name, state and failing paths", async () => {
@@ -667,7 +673,17 @@ it("the table toggle shows the map's rows as a path table, keeps the filters and
   await user.click(toggle);
   const table = await screen.findByRole("table", { name: "Paths through this Gateway" });
   // The same rows as the map's query: one per distinct path.
-  expect(within(table).getAllByRole("row").length - 1).toBe(dedupeRows(edgePaths().rows).length);
+  const want = dedupeRows(edgePaths().rows);
+  const body = within(table).getAllByRole("row").slice(1);
+  expect(body).toHaveLength(want.length);
+  // Each row names its listener and port beside the Gateway, so http and extra rows differ.
+  const listeners = body.map((tr) => tr.querySelector('[data-col="gateway"] .second')?.textContent);
+  expect(listeners.sort()).toEqual(
+    want.map((r) => (r.listener.port ? `${r.listener.name} :${r.listener.port}` : r.listener.name)).sort(),
+  );
+  expect(new Set(listeners).size).toBeGreaterThan(1);
+  // The find box keeps its space, hidden, so the chips do not move.
+  expect(screen.getByTestId("map-find")).toHaveClass("off");
   expect(screen.queryByTestId("gateway-map")).toBeNull();
   expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
   // The toggle refetches nothing: the table draws the rows the map loaded.
