@@ -10,6 +10,8 @@ import type {
   ListenerSetDetail,
   ListenerSetRow,
   Page,
+  PathRow,
+  PathsResponse,
   Ref,
   RouteDetail,
   RouteRow,
@@ -31,7 +33,7 @@ export const forInstall = <T extends { install: string }>(data: T | undefined, i
  * One list page, polled. A 400 on a request with a cursor sets cursorRejected and loads page one instead (design §8.6);
  * the page should then drop the cursor from its URL. isLaggy marks rows of the previous query while a new one loads.
  */
-export function useList<T>(id: string, list: string, query: URLSearchParams) {
+export function useList<T, P extends { install: string } = Page<T>>(id: string, list: string, query: URLSearchParams) {
   const { cache } = useSWRConfig();
   const path = `${installApi(id)}/${list}`;
   const hasCursor = query.has("cursor");
@@ -39,7 +41,7 @@ export function useList<T>(id: string, list: string, query: URLSearchParams) {
   // A rejected cursor is final: its key neither polls nor retries, so it never loops on a 400.
   const [rejected, setRejected] = useState<string>();
   const key = withQuery(path, query);
-  const paged = useSWR<Page<T>, ApiError>(key, apiFetch, {
+  const paged = useSWR<P, ApiError>(key, apiFetch, {
     ...live,
     // A filter or page change keeps the old rows until the new ones arrive; forInstall still hides another install's.
     keepPreviousData: true,
@@ -52,7 +54,7 @@ export function useList<T>(id: string, list: string, query: URLSearchParams) {
   const cursorRejected = rejects(paged.error);
   const pageOne = new URLSearchParams(query);
   pageOne.delete("cursor");
-  const first = useSWR<Page<T>, ApiError>(cursorRejected ? withQuery(path, pageOne) : null, apiFetch, live);
+  const first = useSWR<P, ApiError>(cursorRejected ? withQuery(path, pageOne) : null, apiFetch, live);
   const r = cursorRejected ? first : paged;
   const rKey = cursorRejected ? withQuery(path, pageOne) : key;
   // With keepPreviousData the rows may belong to the previous query. They show only while the new one loads
@@ -83,6 +85,11 @@ export function useGateways(id: string, query: URLSearchParams) {
 /** GET …/listenersets. */
 export function useListenerSets(id: string, query: URLSearchParams) {
   return useList<ListenerSetRow>(id, "listenersets", query);
+}
+
+/** GET …/paths: the install's paths, filtered, sorted and paged by the server (Phase 6 design §5). */
+export function usePaths(id: string, query: URLSearchParams) {
+  return useList<PathRow, PathsResponse>(id, "paths", query);
 }
 
 /** GET …/gateways/{ns}/{name}. */

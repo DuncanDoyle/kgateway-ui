@@ -1,0 +1,105 @@
+# Traffic scenario (Phase 6 design §5), applied after backends.yaml: one Gateway, traffic/traffic, whose paths
+# traffic.spec.ts asserts on. Every object carries e2e=traffic. setup.sh sets the TCPRoute's served version.
+apiVersion: v1
+kind: Namespace
+metadata: { name: traffic, labels: { team: a, e2e: traffic } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: traffic, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+    - name: tcp
+      port: 9000
+      protocol: TCP
+      allowedRoutes: { kinds: [{ kind: TCPRoute }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: echo, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  selector: { matchLabels: { app: echo } }
+  template:
+    metadata: { labels: { app: echo } }
+    spec: { containers: [{ name: httpbin, image: mccutchen/go-httpbin:v2.15.0, ports: [{ containerPort: 8080 }] }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web-a, namespace: traffic, labels: { e2e: traffic } }
+spec: { selector: { app: echo }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web-b, namespace: traffic, labels: { e2e: traffic } }
+spec: { selector: { app: echo }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+# A Service whose only Deployment is scaled to zero: 023 after its hold.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: asleep, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  replicas: 0
+  selector: { matchLabels: { app: asleep } }
+  template:
+    metadata: { labels: { app: asleep } }
+    spec: { containers: [{ name: httpbin, image: mccutchen/go-httpbin:v2.15.0, ports: [{ containerPort: 8080 }] }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: asleep, namespace: traffic, labels: { e2e: traffic } }
+spec: { selector: { app: asleep }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+# Two weighted refs in one rule: 90 % and 10 % of the rule's requests.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: weighted, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: http }]
+  hostnames: [shop.traffic.example]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /weighted } }]
+      backendRefs: [{ name: web-a, port: 8000, weight: 90 }, { name: web-b, port: 8000, weight: 10 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: asleep, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: http }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /asleep } }], backendRefs: [{ name: asleep, port: 8000 }] }]
+---
+# A ref to another namespace with no ReferenceGrant there (014).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: cross, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: http }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /cross } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
+---
+# A rule with a redirect and no backend.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: moved, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: http }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /old } }]
+      filters: [{ type: RequestRedirect, requestRedirect: { path: { type: ReplaceFullPath, replaceFullPath: /new }, statusCode: 301 } }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata: { name: grpc, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: http }]
+  hostnames: [grpc.traffic.example]
+  rules: [{ matches: [{ method: { service: echo.Echo, method: Ping } }], backendRefs: [{ name: web-a, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/TCPROUTE_VERSION
+kind: TCPRoute
+metadata: { name: tcp, namespace: traffic, labels: { e2e: traffic } }
+spec:
+  parentRefs: [{ name: traffic, sectionName: tcp }]
+  rules: [{ backendRefs: [{ name: web-b, port: 8000 }] }]

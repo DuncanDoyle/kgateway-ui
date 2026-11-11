@@ -134,10 +134,13 @@ func TestRealCluster(t *testing.T) {
 		}
 	}
 
-	// Gateways edge and self; posts in the unlabelled blog namespace must not count. An in-scope
-	// HTTPRoute is owned, so counted, when a parentRef names one of the install's Gateways or
-	// ListenerSets (denied ones included), or once the settled controller wrote it an entry (design §4.2).
+	// Gateways edge and self, and traffic with the explorer fixtures; posts in the unlabelled blog namespace
+	// must not count. An in-scope HTTPRoute is owned, so counted, when a parentRef names one of the install's
+	// Gateways or ListenerSets (denied ones included), or once the settled controller wrote it an entry (design §4.2).
 	routes, gateways := 0, 2
+	if os.Getenv("EXPLORER") != "0" {
+		gateways++ // traffic/traffic
+	}
 	if nack() {
 		gateways++ // infra/nack
 	}
@@ -228,7 +231,7 @@ const (
 )
 
 // scoped are install A's namespaces (team=a); blog is outside its scope.
-var scoped = []string{"infra", "shop", "store", "deleg", "closed", "flip"}
+var scoped = []string{"infra", "shop", "store", "deleg", "closed", "flip", "traffic"}
 
 // kubectl decodes `kubectl get … -o json` from the harness cluster into v. It
 // always passes the harness kubeconfig, so the user's current context is never used.

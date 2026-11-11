@@ -5,11 +5,14 @@ import { useGatewayDetail, useListenerSets } from "../../api/exploreHooks";
 import { useFeatureCheck, useListFilter } from "../../api/hooks";
 import type { LinkedRef, ListenerSetRow } from "../../api/types";
 import { columnCopy, dataPlaneCopy, detailCopy, gatewayCopy } from "../../copy/explorer";
+import { trafficCopy } from "../../copy/traffic";
 import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
+import { installPath } from "../../shell/paths";
+import { InlineLink } from "../../states/controls";
 import { DetailFrame, expectedRows, Facts, refParam, Section, SubList } from "./detailParts";
 import { DataPlaneSection } from "./gateway/DataPlaneSection";
 import { ListenerTable } from "./gateway/ListenerTable";
@@ -108,6 +111,12 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
               <dd>{data.class}</dd>
               <dt>{columnCopy.addresses}</dt>
               <dd>{data.addresses.length ? data.addresses.join(", ") : <Muted>{columnCopy.none}</Muted>}</dd>
+              <dt>{trafficCopy.title}</dt>
+              <dd>
+                <InlineLink to={`${installPath(id, "traffic")}?${new URLSearchParams({ gateway: `${ns}/${name}` })}`}>
+                  {trafficCopy.gatewayEntry}
+                </InlineLink>
+              </dd>
             </Facts>
           </Section>
           {/* Sent for a Gateway the install owns; it arrives with the detail, so nothing below moves. */}

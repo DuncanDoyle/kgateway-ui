@@ -136,6 +136,11 @@ it("Gateway page shows the status count and the computed count side by side", as
   expect(within(accepted).getByTestId("health-icon-healthy")).toBeInTheDocument();
   expect(screen.getByText("Attached ListenerSets (status): 1")).toBeInTheDocument();
   expect(screen.getByText("kgateway")).toBeInTheDocument();
+  // The Traffic entry point opens the path list narrowed to this Gateway.
+  expect(screen.getByRole("link", { name: "Paths through this Gateway" })).toHaveAttribute(
+    "href",
+    "/i/kgw.kgateway/traffic?gateway=infra%2Fedge",
+  );
 });
 
 /** Every health icon in the document: on a stale page all of them read unknown (design §6.3). */

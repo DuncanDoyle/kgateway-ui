@@ -11,6 +11,7 @@ import { FindingsPage } from "./findings/FindingsPage";
 import { DiagnosticsSection, InstallPage } from "./install/InstallPage";
 import { ProcessesPage } from "./processes/ProcessesPage";
 import { ResourcePage } from "./ResourcePage";
+import { TrafficPage } from "./traffic/TrafficPage";
 
 /** The upstream page implementations. */
 export const defaultPages: Required<CorePages> = {
@@ -27,4 +28,5 @@ export const defaultPages: Required<CorePages> = {
   RoutePage,
   DiagnosticsSection,
   ProcessesPage,
+  TrafficPage,
 };

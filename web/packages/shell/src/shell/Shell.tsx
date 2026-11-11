@@ -34,7 +34,7 @@ const Root = styled.div<{ stylesOverride?: SerializedStyles }>`
 const noExtension: ShellExtension = {};
 
 // The explorer's install-scoped paths (design §8.2); the CorePages slots replace their pages.
-const RESERVED = ["gateways", "listenersets", "routes"];
+const RESERVED = ["gateways", "listenersets", "routes", "traffic"];
 
 /** The reserved path an install-scoped contribution sits at or below, if any; every other path competes by router rank as in Phase 1. */
 export function reservedPathOf(r: RouteContribution): string | undefined {
@@ -97,11 +97,13 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
   const RoutePage = pages.RoutePage ?? defaultPages.RoutePage;
   const FindingPage = pages.FindingPage ?? defaultPages.FindingPage;
   const ProcessesPage = pages.ProcessesPage ?? defaultPages.ProcessesPage;
+  const TrafficPage = pages.TrafficPage ?? defaultPages.TrafficPage;
   // Core pages under /i/:id/; the install nav shows an entry only when its path is listed here.
   const installRoutes: [string, ComponentType][] = [
     ["", InstallPage],
     ["gateways", GatewaysPage],
     ["routes", RoutesPage],
+    ["traffic", TrafficPage],
     ["listenersets", ListenerSetsPage],
     ["gateways/:ns/:name", GatewayPage],
     ["listenersets/:group/:kind/:ns/:name", ListenerSetPage],

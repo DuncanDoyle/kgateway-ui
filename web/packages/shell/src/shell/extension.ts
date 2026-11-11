@@ -21,7 +21,7 @@ export interface Brand {
 
 /**
  * A page contributed by an extension, at a relative path (install-scoped ones under /i/:id/). Core paths win; one at or
- * below "gateways", "listenersets" or "routes" is ignored with a warning: use the CorePages slots.
+ * below "gateways", "listenersets", "routes" or "traffic" is ignored with a warning: use the CorePages slots.
  */
 export interface RouteContribution {
   path: string;
@@ -88,6 +88,8 @@ export interface CorePages {
   FindingPage?: ComponentType;
   /** The Processes page at processes (sub-phase 3.2). */
   ProcessesPage?: ComponentType;
+  /** The Traffic path list at traffic (Phase 6 sub-phase 6.2). */
+  TrafficPage?: ComponentType;
   /** Replaces the install page's Needs attention and Processes block (sub-phase 3.2). */
   DiagnosticsSection?: ComponentType<DiagnosticsSectionProps>;
 }
