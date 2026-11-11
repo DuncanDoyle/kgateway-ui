@@ -158,7 +158,8 @@ type EndpointsDTO struct {
 	Runtime *RuntimeDTO `json:"runtime,omitempty"`
 	// ReadAt is meaningless when Complete is not-applicable: nothing was read.
 	ReadAt time.Time `json:"readAt"`
-	// Complete is complete, partial, failed, unavailable, stale or not-applicable.
+	// Complete is complete, partial, failed, unavailable, stale or not-applicable;
+	// a backend detail's scoped read may also be timed-out or busy.
 	Complete string `json:"complete"`
 	// Ready and Total are absent unless the read establishes a count.
 	Ready *int          `json:"ready,omitempty"`

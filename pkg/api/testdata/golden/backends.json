@@ -1,0 +1,387 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "rows": [
+      {
+        "confirmed": 0,
+        "consumers": 0,
+        "endpoints": [],
+        "gateways": 0,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "Accepted",
+              "kind": "route-status",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute",
+                "link": "detail",
+                "name": "unattached",
+                "namespace": "shop"
+              },
+              "state": "error"
+            },
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "lonely-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "error"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "lonely-svc",
+          "namespace": "shop"
+        },
+        "routes": 1
+      },
+      {
+        "confirmed": 1,
+        "consumers": 0,
+        "endpoints": [
+          {
+            "complete": "not-applicable",
+            "readAt": "0001-01-01T00:00:00Z",
+            "source": "kubernetes"
+          }
+        ],
+        "gateways": 1,
+        "kind": "Backend · Static",
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "back",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            }
+          ],
+          "state": "warning"
+        },
+        "ref": {
+          "group": "gateway.kgateway.dev",
+          "kind": "Backend",
+          "link": "yaml",
+          "name": "be-used",
+          "namespace": "shop"
+        },
+        "routes": 1
+      },
+      {
+        "confirmed": 3,
+        "consumers": 0,
+        "endpoints": [
+          {
+            "complete": "complete",
+            "port": {
+              "name": "http",
+              "port": 80
+            },
+            "readAt": "2026-10-17T12:00:00Z",
+            "ready": 1,
+            "source": "kubernetes",
+            "total": 1
+          }
+        ],
+        "gateways": 2,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            }
+          ],
+          "state": "warning"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart-svc",
+          "namespace": "shop"
+        },
+        "routes": 3
+      },
+      {
+        "confirmed": 1,
+        "consumers": 0,
+        "endpoints": [
+          {
+            "complete": "not-applicable",
+            "port": {
+              "port": 80
+            },
+            "readAt": "2026-10-17T12:00:00Z",
+            "source": "kubernetes"
+          }
+        ],
+        "gateways": 1,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "back",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            }
+          ],
+          "state": "warning"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "ext-svc",
+          "namespace": "shop"
+        },
+        "routes": 1
+      },
+      {
+        "confirmed": 1,
+        "consumers": 0,
+        "endpoints": [
+          {
+            "complete": "complete",
+            "port": {
+              "name": "web",
+              "port": 80
+            },
+            "readAt": "2026-10-17T12:00:00Z",
+            "ready": 1,
+            "source": "kubernetes",
+            "total": 2
+          }
+        ],
+        "gateways": 1,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "back",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            }
+          ],
+          "state": "warning"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "named-svc",
+          "namespace": "shop"
+        },
+        "routes": 1
+      },
+      {
+        "confirmed": 2,
+        "consumers": 0,
+        "endpoints": [],
+        "gateways": 2,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            },
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "other-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "warning"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "other-svc",
+          "namespace": "shop"
+        },
+        "routes": 2
+      },
+      {
+        "confirmed": 0,
+        "consumers": 2,
+        "endpoints": [],
+        "gateways": 0,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "authz",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "unknown"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "authz",
+          "namespace": "shop"
+        },
+        "routes": 0
+      },
+      {
+        "confirmed": 2,
+        "consumers": 0,
+        "endpoints": [],
+        "gateways": 1,
+        "kind": "Service",
+        "problem": {
+          "signals": [
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "mirror-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "unknown"
+        },
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "mirror-svc",
+          "namespace": "shop"
+        },
+        "routes": 2
+      },
+      {
+        "confirmed": 0,
+        "consumers": 0,
+        "endpoints": [
+          {
+            "complete": "not-applicable",
+            "readAt": "0001-01-01T00:00:00Z",
+            "source": "kubernetes"
+          }
+        ],
+        "gateways": 0,
+        "kind": "Backend · Static",
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "ref": {
+          "group": "gateway.kgateway.dev",
+          "kind": "Backend",
+          "link": "none",
+          "name": "be-unused",
+          "namespace": "shop"
+        },
+        "routes": 0
+      },
+      {
+        "confirmed": 1,
+        "consumers": 0,
+        "endpoints": [
+          {
+            "complete": "not-applicable",
+            "readAt": "0001-01-01T00:00:00Z",
+            "source": "kubernetes"
+          }
+        ],
+        "gateways": 1,
+        "kind": "Backend · Static",
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "ref": {
+          "group": "gateway.kgateway.dev",
+          "kind": "Backend",
+          "link": "yaml",
+          "name": "be1",
+          "namespace": "shop"
+        },
+        "routes": 1
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

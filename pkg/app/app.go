@@ -35,6 +35,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
@@ -284,6 +285,12 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	// Each install's next steps, UI features and counted kinds come from its pack.
 	commands := func(i install.Install) diagnose.Commands { return reg.ImplFor(i).Commands }
+	consumers := func(i install.Install, o *install.Owned) []objects.Consumer {
+		if f := reg.ImplFor(i).BackendConsumers; f != nil {
+			return f(i, o)
+		}
+		return nil
+	}
 	// Backend detail reads endpoints on request only while the endpoints input is on.
 	var scoped endpoints.ScopedReader
 	if !o.Diagnostics.NoEndpoints {
@@ -295,7 +302,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates),
 		api.WithCommands(reg.Commands), api.WithInstallCommands(commands), api.WithInstallFeatures(reg.FeaturesFor),
-		api.WithPacks(reg.Packs()...), api.WithInstallKinds(reg.KindAppliesTo), api.WithScopedReader(scoped))
+		api.WithPacks(reg.Packs()...), api.WithInstallKinds(reg.KindAppliesTo), api.WithScopedReader(scoped), api.WithBackendConsumers(consumers))
 	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, kinds: mon, opts: o, discovered: discovered, reg: reg,
 		packs: extension.NewCore(extension.WithCollectors(packCols...)), collectors: packCols, collected: collected, deps: deps}, nil
 }

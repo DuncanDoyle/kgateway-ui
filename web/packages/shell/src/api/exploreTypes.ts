@@ -1,5 +1,5 @@
 import type { HealthState } from "../theme/tokens";
-import type { DataPlane, ProcessSet } from "./diagTypes";
+import type { DataPlane, ProcessSet, SuggestedFix } from "./diagTypes";
 import type { LabelSelector, Ref, RowReason } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
@@ -460,7 +460,8 @@ export interface Endpoints {
   runtime?: EndpointsRuntime;
   /** Meaningless when complete is "not-applicable": nothing was read. */
   readAt: string;
-  complete: "complete" | "partial" | "failed" | "unavailable" | "stale" | "not-applicable";
+  /** A backend detail's scoped read may also be "timed-out" or "busy". */
+  complete: "complete" | "partial" | "failed" | "unavailable" | "stale" | "not-applicable" | "timed-out" | "busy";
   ready?: number;
   total?: number;
   items?: Endpoint[];
@@ -533,5 +534,82 @@ export interface PathsResponse {
   next?: string;
   prev?: string;
   summary: PathSummary;
+  collectedAt: string;
+}
+
+/** Mirrors the backend DTOs of pkg/api/backends_types.go (sub-phase 6.3, design §8, §9). */
+
+/** One backend of the Backends list; counts cover only what the caller may see. */
+export interface BackendRow {
+  ref: LinkedRef;
+  /** "Service", "Backend · <spec.type>" or the ref's kind. */
+  kind: string;
+  /** One entry per referenced Service port, or one not-applicable entry for a Backend. */
+  endpoints: Endpoints[];
+  routes: number;
+  gateways: number;
+  consumers: number;
+  /** Paths on an attachment the route's status accepts. */
+  confirmed: number;
+  problem: PathProblem;
+}
+/** GET …/backends; hidden says a backend, path, route or consumer was left out. */
+export interface BackendsResponse {
+  install: string;
+  rows: BackendRow[];
+  next?: string;
+  prev?: string;
+  hidden?: boolean;
+  collectedAt: string;
+}
+/** A non-route object that uses a backend, such as a GatewayExtension. */
+export interface BackendConsumer {
+  consumer: LinkedRef;
+  role: string;
+  field: string;
+  port?: number;
+}
+/** One referenced port's chain as written and observed; named targetPorts stay unresolved. */
+export interface PortChain {
+  refPort: number;
+  servicePort?: number;
+  servicePortName?: string;
+  targetPort?: string;
+  targetName?: string;
+  slicePorts: number[];
+  noSuchPort?: boolean;
+  /** Set only when a complete read found no slice port for the name. */
+  noSlicePort?: boolean;
+}
+/** What the cache keeps of a Service. */
+export interface ServiceFact {
+  type: string;
+  ports: BackendPort[];
+}
+/** One route ref to the backend that does not resolve. */
+export interface RefExplanation {
+  route: LinkedRef;
+  rule: number;
+  ref: number;
+  kind: "attributed" | "candidate" | "waiting";
+  reason?: string;
+  explanation?: string;
+  fix?: SuggestedFix;
+}
+/** GET …/backends/{group}/{kind}/{ns}/{name}; status is the backend's own signals. */
+export interface BackendDetail {
+  install: string;
+  ref: LinkedRef;
+  kind: string;
+  type?: string;
+  problem: PathProblem;
+  status: PathSignal[];
+  exposure: PathsResponse;
+  consumers: BackendConsumer[];
+  sources: Endpoints[];
+  portChain: PortChain[];
+  explanations: RefExplanation[];
+  service?: ServiceFact;
+  conditions?: Condition[];
   collectedAt: string;
 }

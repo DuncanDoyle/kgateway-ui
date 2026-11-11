@@ -1,3 +1,6 @@
+import backendDetailBackendGolden from "../../../../../pkg/api/testdata/golden/backend-detail-backend.json";
+import backendDetailServiceGolden from "../../../../../pkg/api/testdata/golden/backend-detail-service.json";
+import backendsGolden from "../../../../../pkg/api/testdata/golden/backends.json";
 import badRequestGolden from "../../../../../pkg/api/testdata/golden/bad-request.json";
 import bareInstalls from "../../../../../pkg/api/testdata/golden/bare-installs.json";
 import bareMeta from "../../../../../pkg/api/testdata/golden/bare-meta.json";
@@ -63,9 +66,13 @@ import type {
   AllowedRoutes,
   AncestorPath,
   AncestorStep,
+  BackendConsumer,
+  BackendDetail,
   BackendPort,
   BackendRef,
+  BackendRow,
   BackendState,
+  BackendsResponse,
   Candidate,
   Capability,
   CheckHold,
@@ -142,6 +149,7 @@ import type {
   PathStep,
   PathSummary,
   PathsResponse,
+  PortChain,
   ProbeFacts,
   ProcessEvidence,
   ProcessesResponse,
@@ -152,6 +160,7 @@ import type {
   ProxyTypeRejects,
   Readiness,
   Ref,
+  RefExplanation,
   RefLocation,
   RefsEvidence,
   ReleaseModeCount,
@@ -164,6 +173,7 @@ import type {
   RuleReplacedEvidence,
   ScopeSummary,
   ServedKind,
+  ServiceFact,
   SpecParentRef,
   StatusProgressEvidence,
   SuggestedFix,
@@ -1131,8 +1141,36 @@ const endpoints = shape<Endpoints>(
     runtime: shape<EndpointsRuntime>({ install: "!", gateway: "!", proxy: "!", instance: "!" }, { gateway: linkedRef }),
     items: shape<Endpoint>({ address: "!", port: "?", ready: "!", serving: "!", terminating: "!", pod: "?" }),
   },
-  { complete: { complete: 1, partial: 1, failed: 1, unavailable: 1, stale: 1, "not-applicable": 1 } },
+  {
+    complete: {
+      complete: 1,
+      partial: 1,
+      failed: 1,
+      unavailable: 1,
+      stale: 1,
+      "not-applicable": 1,
+      "timed-out": 1,
+      busy: 1,
+    },
+  },
 );
+const pathSignal = shape<PathSignal>(
+  { kind: "!", code: "?", title: "?", ref: "?", state: "!" },
+  { ref: linkedRef },
+  {
+    kind: {
+      gateway: 1,
+      listener: 1,
+      "route-status": 1,
+      waiting: 1,
+      finding: 1,
+      delegation: 1,
+      coverage: 1,
+    },
+    state: healthState,
+  },
+);
+const pathProblem = shape<PathProblem>({ state: "!", signals: "!" }, { signals: pathSignal }, { state: healthState });
 const pathRow = shape<PathRow>(
   {
     gateway: "!",
@@ -1170,28 +1208,7 @@ const pathRow = shape<PathRow>(
       delegationRefEnums,
     ),
     backend: linkedRef,
-    problem: shape<PathProblem>(
-      { state: "!", signals: "!" },
-      {
-        signals: shape<PathSignal>(
-          { kind: "!", code: "?", title: "?", ref: "?", state: "!" },
-          { ref: linkedRef },
-          {
-            kind: {
-              gateway: 1,
-              listener: 1,
-              "route-status": 1,
-              waiting: 1,
-              finding: 1,
-              delegation: 1,
-              coverage: 1,
-            },
-            state: healthState,
-          },
-        ),
-      },
-      { state: healthState },
-    ),
+    problem: pathProblem,
     endpoints,
   },
   {
@@ -1232,6 +1249,68 @@ const pathsResponse = shape<PathsResponse>(
       },
       { notComputed: { "no-attachments": 1 } },
     ),
+  },
+);
+// Backends (sub-phase 6.3).
+const backendsResponse = shape<BackendsResponse>(
+  { install: "!", rows: "!", next: "?", prev: "?", hidden: "?", collectedAt: "!" },
+  {
+    rows: shape<BackendRow>(
+      {
+        ref: "!",
+        kind: "!",
+        endpoints: "!",
+        routes: "!",
+        gateways: "!",
+        consumers: "!",
+        confirmed: "!",
+        problem: "!",
+      },
+      { ref: linkedRef, endpoints, problem: pathProblem },
+    ),
+  },
+);
+const backendDetail = shape<BackendDetail>(
+  {
+    install: "!",
+    ref: "!",
+    kind: "!",
+    type: "?",
+    problem: "!",
+    status: "!",
+    exposure: "!",
+    consumers: "!",
+    sources: "!",
+    portChain: "!",
+    explanations: "!",
+    service: "?",
+    conditions: "?",
+    collectedAt: "!",
+  },
+  {
+    ref: linkedRef,
+    problem: pathProblem,
+    status: pathSignal,
+    exposure: pathsResponse,
+    consumers: shape<BackendConsumer>({ consumer: "!", role: "!", field: "!", port: "?" }, { consumer: linkedRef }),
+    sources: endpoints,
+    portChain: shape<PortChain>({
+      refPort: "!",
+      servicePort: "?",
+      servicePortName: "?",
+      targetPort: "?",
+      targetName: "?",
+      slicePorts: "!",
+      noSuchPort: "?",
+      noSlicePort: "?",
+    }),
+    explanations: shape<RefExplanation>(
+      { route: "!", rule: "!", ref: "!", kind: "!", reason: "?", explanation: "?", fix: "?" },
+      { route: linkedRef, fix: suggestedFix },
+      { kind: { attributed: 1, candidate: 1, waiting: 1 } },
+    ),
+    service: shape<ServiceFact>({ type: "!", ports: "!" }, { ports: shape<BackendPort>({ port: "!", name: "?" }) }),
+    conditions: condition,
   },
 );
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
@@ -1370,6 +1449,9 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["refs-restricted", refsRestrictedGolden.body satisfies Wide<TrailRefs>, trailRefs],
     ["paths", pathsGolden.body satisfies Wide<PathsResponse>, pathsResponse],
     ["paths-restricted", pathsRestrictedGolden.body satisfies Wide<PathsResponse>, pathsResponse],
+    ["backends", backendsGolden.body satisfies Wide<BackendsResponse>, backendsResponse],
+    ["backend-detail-service", backendDetailServiceGolden.body satisfies Wide<BackendDetail>, backendDetail],
+    ["backend-detail-backend", backendDetailBackendGolden.body satisfies Wide<BackendDetail>, backendDetail],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });
@@ -1591,5 +1673,17 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(rows.some((r) => r.endpoints?.complete === "not-applicable")).toBe(true);
     expect(pathsRestrictedGolden.body.summary.hidden).toBe(true);
     expect(pathsRestrictedGolden.body.rows.every((r) => r.gateway.name !== "edge")).toBe(true);
+  });
+
+  it("covers 6.3 backends: unused and failed refs, consumers, kinds and a named targetPort", () => {
+    const rows = backendsGolden.body.rows;
+    expect(rows.some((r) => r.kind === "Backend · Static" && r.routes === 0 && r.consumers === 0)).toBe(true);
+    expect(rows.some((r) => r.routes > 0 && r.confirmed === 0 && r.problem.state === "error")).toBe(true);
+    expect(rows.some((r) => r.consumers > 0)).toBe(true);
+    expect(rows.some((r) => r.endpoints.some((e) => e.complete === "not-applicable"))).toBe(true);
+    const [chain] = backendDetailServiceGolden.body.portChain;
+    expect(chain?.targetName).toBe("http-web");
+    expect(chain?.slicePorts).toEqual([8080]);
+    expect(backendDetailBackendGolden.body.type).toBe("Static");
   });
 });

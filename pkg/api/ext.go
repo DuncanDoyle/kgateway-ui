@@ -44,6 +44,8 @@ type handlerConfig struct {
 	pathMemo *paths.Memo
 	// scoped is the scoped endpoints reader; nil is endpoints.NoReader.
 	scoped endpoints.ScopedReader
+	// consumersFor, if set, gives an install's non-route backend consumers.
+	consumersFor func(install.Install, *install.Owned) []objects.Consumer
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

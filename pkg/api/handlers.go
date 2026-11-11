@@ -47,7 +47,7 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 		cfg.commands = diagnose.Kubectl{}
 	}
 	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor,
-		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor, pathMemo: cfg.pathMemo, scoped: cfg.scoped}
+		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor, pathMemo: cfg.pathMemo, scoped: cfg.scoped, consumersFor: cfg.consumersFor}
 	if h.pathMemo == nil {
 		h.pathMemo = paths.NewMemo(nil)
 	}
@@ -75,6 +75,8 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
 	mux.HandleFunc("GET /api/v1/installs/{id}/refs", h.refs)
 	mux.HandleFunc("GET /api/v1/installs/{id}/paths", h.pathList)
+	mux.HandleFunc("GET /api/v1/installs/{id}/backends", h.backendList)
+	mux.HandleFunc("GET /api/v1/installs/{id}/backends/{group}/{kind}/{ns}/{name}", h.backendDetail)
 	mountExts(mux, cfg.ext)
 	// Unknown /api/ paths, extension ones included, get a JSON 404, never the SPA.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
@@ -99,6 +101,8 @@ type handler struct {
 	// scoped reads one Service's endpoints for backend detail; never nil.
 	// Authorise the backend before every call, memo hits included.
 	scoped endpoints.ScopedReader
+	// consumersFor, if set, gives an install's non-route backend consumers.
+	consumersFor func(install.Install, *install.Owned) []objects.Consumer
 }
 
 // WithScopedReader reads one Service's endpoints for backend detail (design

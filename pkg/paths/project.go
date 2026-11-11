@@ -154,8 +154,7 @@ type projector struct {
 	edges    map[[2]objects.Ref]*Signal
 	refs     map[objects.Ref][]refFinding
 	ports    map[portKey]*portHealth
-	svcs     map[string]*cache.ServiceFact
-	slices   map[string][]*cache.SliceFact
+	facts    facts
 	backends map[objects.Ref]*unstructured.Unstructured
 	shares   map[*objects.Rule][]Share
 	// sets interns the rows' signal sets by content; key is its scratch key.
@@ -171,6 +170,7 @@ func Project(t *Topology, in ProjectInput) *Projection {
 	p := &projector{t: t, in: in, findings: map[objects.Ref][]*health.Finding{}, atts: make([]attSignals, len(t.atts)),
 		ctxs: map[int32][]Signal{}, edges: map[[2]objects.Ref]*Signal{}, refs: map[objects.Ref][]refFinding{}, ports: map[portKey]*portHealth{},
 		backends: map[objects.Ref]*unstructured.Unstructured{}, shares: map[*objects.Rule][]Share{}, sets: map[string][]Signal{}, na: map[int32]*Endpoints{}}
+	p.facts.snap = in.Snapshot
 	for i := range in.Model.Health.Findings {
 		f := &in.Model.Health.Findings[i]
 		if f.Resource != nil {
@@ -527,17 +527,24 @@ func (p *projector) backend(sigs []Signal, ref objects.Ref, port int32, traffic 
 			p.na[port] = &Endpoints{Complete: EndpointsNotApplicable, Port: port}
 		}
 		out.Endpoints[i] = p.na[port]
-		n := len(sigs)
-		for _, f := range p.findings[ref] {
-			if f.Code == health.CodeConditionFalse {
-				sigs = append(sigs, Signal{Kind: SignalFinding, Code: f.Code, Ref: ref, State: sevState(f.Severity)})
-			}
+		sigs = backendSignals(sigs, p.in.Model, ref, p.backends[ref], p.findings[ref])
+	}
+	return sigs
+}
+
+// backendSignals appends the signals of kgateway Backend ref, whose object is
+// b (nil when not in use) and whose findings are found: its KGWUI-002, else
+// waiting when the rule set's judge cannot judge it.
+func backendSignals(sigs []Signal, m *engine.InstallModel, ref objects.Ref, b *unstructured.Unstructured, found []*health.Finding) []Signal {
+	n := len(sigs)
+	for _, f := range found {
+		if f.Code == health.CodeConditionFalse {
+			sigs = append(sigs, Signal{Kind: SignalFinding, Code: f.Code, Ref: ref, State: sevState(f.Severity)})
 		}
-		// Without a 002, a Backend the rule set's judge cannot judge is waiting.
-		if b, j := p.backends[ref], p.in.Model.Rules.BackendJudge(); b != nil && j != nil && len(sigs) == n {
-			if v, _ := j.JudgeBackend(b); v == computed.BackendUnknown {
-				sigs = append(sigs, Signal{Kind: SignalWaiting, Code: "Accepted", Ref: ref, State: health.StateUnknown})
-			}
+	}
+	if j := m.Rules.BackendJudge(); b != nil && j != nil && len(sigs) == n {
+		if v, _ := j.JudgeBackend(b); v == computed.BackendUnknown {
+			sigs = append(sigs, Signal{Kind: SignalWaiting, Code: "Accepted", Ref: ref, State: health.StateUnknown})
 		}
 	}
 	return sigs
@@ -548,9 +555,45 @@ func (p *projector) port(k portKey) *portHealth {
 	if ph, ok := p.ports[k]; ok {
 		return ph
 	}
-	ph := &portHealth{}
+	ph := portHealthOf(p.in, &p.facts, k, p.findings[objects.Ref{Kind: "Service", Namespace: k.ns, Name: k.name}])
 	p.ports[k] = ph
-	snap := p.in.Snapshot
+	return ph
+}
+
+// facts finds Service facts and their slices in a snapshot, building its
+// tables on first use. need, when set, keeps only the slices of those Services.
+type facts struct {
+	snap   *cache.Snapshot
+	need   func(ns, name string) bool
+	svcs   map[string]*cache.ServiceFact
+	slices map[string][]*cache.SliceFact
+}
+
+// service returns Service ns/name's fact and slices; a nil fact when the cache lacks it.
+func (f *facts) service(ns, name string) (*cache.ServiceFact, []*cache.SliceFact) {
+	if f.svcs == nil {
+		f.svcs, f.slices = map[string]*cache.ServiceFact{}, map[string][]*cache.SliceFact{}
+		for i := range f.snap.Services {
+			s := &f.snap.Services[i]
+			if f.need == nil || f.need(s.Namespace, s.Name) {
+				f.svcs[s.Namespace+"/"+s.Name] = s
+			}
+		}
+		for i := range f.snap.EndpointSlices {
+			s := &f.snap.EndpointSlices[i]
+			if f.need == nil || f.need(s.Namespace, s.Service) {
+				f.slices[s.Namespace+"/"+s.Service] = append(f.slices[s.Namespace+"/"+s.Service], s)
+			}
+		}
+	}
+	return f.svcs[ns+"/"+name], f.slices[ns+"/"+name]
+}
+
+// portHealthOf is Service port k's summary in f, counted as KGWUI-023 counts
+// it, with the Service's findings found.
+func portHealthOf(in ProjectInput, f *facts, k portKey, found []*health.Finding) *portHealth {
+	ph := &portHealth{}
+	snap := in.Snapshot
 	ref := objects.Ref{Kind: "Service", Namespace: k.ns, Name: k.name}
 	coverage := func(complete, code string) *portHealth {
 		ph.ep = &Endpoints{Complete: complete, Port: k.port}
@@ -563,38 +606,27 @@ func (p *projector) port(k portKey) *portHealth {
 	switch {
 	case snap == nil:
 		return coverage(EndpointsUnavailable, string(health.AvailNotObserved))
-	case p.in.EndpointsCap == string(health.AvailDenied), p.in.EndpointsCap == string(health.AvailFailing):
-		return coverage(EndpointsFailed, p.in.EndpointsCap)
-	case p.in.EndpointsCap != EndpointsOn:
-		return coverage(EndpointsUnavailable, cmp.Or(p.in.EndpointsCap, string(health.AvailOff)))
+	case in.EndpointsCap == string(health.AvailDenied), in.EndpointsCap == string(health.AvailFailing):
+		return coverage(EndpointsFailed, in.EndpointsCap)
+	case in.EndpointsCap != EndpointsOn:
+		return coverage(EndpointsUnavailable, cmp.Or(in.EndpointsCap, string(health.AvailOff)))
 	case !health.EndpointsRead(snap, k.ns):
 		return coverage(EndpointsUnavailable, string(health.AvailNotObserved))
 	}
-	if p.svcs == nil {
-		p.svcs, p.slices = map[string]*cache.ServiceFact{}, map[string][]*cache.SliceFact{}
-		for i := range snap.Services {
-			s := &snap.Services[i]
-			p.svcs[s.Namespace+"/"+s.Name] = s
-		}
-		for i := range snap.EndpointSlices {
-			s := &snap.EndpointSlices[i]
-			p.slices[s.Namespace+"/"+s.Service] = append(p.slices[s.Namespace+"/"+s.Service], s)
-		}
-	}
-	svc := p.svcs[k.ns+"/"+k.name]
+	svc, slices := f.service(k.ns, k.name)
 	if svc != nil && svc.Type == "ExternalName" {
 		ph.ep = &Endpoints{Complete: EndpointsNotApplicable, Port: k.port, ReadAt: snap.TakenAt}
 		return ph
 	}
 	// A Service or port the cache lacks is waiting for 013 from the route's status, never healthy.
-	ev, ready := health.PortEndpoints(svc, p.slices[k.ns+"/"+k.name], k.port)
+	ev, ready := health.PortEndpoints(svc, slices, k.port)
 	if ev == nil {
 		ph.sig = &Signal{Kind: SignalWaiting, Code: "missing", Ref: ref, State: health.StateUnknown}
 		return ph
 	}
 	ph.ep = &Endpoints{Complete: EndpointsComplete, Ready: &ev.Ready, Total: &ev.Total, ReadAt: snap.TakenAt, Port: k.port, PortName: ev.PortName}
 	// The severity of an empty port is KGWUI-023's; while 023 holds or skips the ref it is unknown.
-	for _, f := range p.findings[ref] {
+	for _, f := range found {
 		if e, ok := f.Facts.(*health.EndpointsEvidence); ok && f.Code == health.CodeBackendNoReadyEndpoints && e.Port == k.port {
 			ph.found = append(ph.found, Signal{Kind: SignalFinding, Code: f.Code, Ref: ref, State: sevState(f.Severity)})
 		}

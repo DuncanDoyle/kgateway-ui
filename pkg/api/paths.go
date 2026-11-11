@@ -57,12 +57,24 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	t, proj, kept := h.pathModel(p, i)
+	resp, err := pathsPage(p, i, h.view(r), t, proj, kept, q)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+// pathModel is install i's topology from the path memo and its projection
+// for p; kept is false when the topology is over the memo cap.
+func (h *handler) pathModel(p *engine.Published, i *engine.InstallModel) (t *paths.Topology, proj *paths.Projection, kept bool) {
 	m, id := p.Model, i.Resolved.ID()
 	key := paths.TopoKey{Install: id, Source: m.Snapshot.Source, Seq: m.Seq}
 	if i.Computed != nil {
 		key.Views = i.Computed.Generation
 	}
-	t, kept := h.pathMemo.Topology(key, func() *paths.Topology {
+	t, kept = h.pathMemo.Topology(key, func() *paths.Topology {
 		in := paths.Input{Index: i.Index, Views: i.Computed, Delegates: i.Rules.Delegator() != nil}
 		if i.Index != nil {
 			in.Decode = indexViews{ix: i.Index}
@@ -70,26 +82,32 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 		return paths.Build(in)
 	})
 	project := func() *paths.Projection {
-		return paths.Project(t, paths.ProjectInput{Model: i, Next: m.Next, Snapshot: m.Snapshot, Now: m.ComputedAt, EndpointsCap: endpointsCap(i)})
+		return paths.Project(t, projectInput(p, i))
 	}
-	var proj *paths.Projection
 	if kept {
-		proj = h.pathMemo.Projection(p, id, t, project)
-	} else {
-		proj = project()
+		return t, h.pathMemo.Projection(p, id, t, project), true
 	}
-	v := h.view(r)
+	return t, project(), false
+}
+
+// projectInput is what the projection of install i in p reads.
+func projectInput(p *engine.Published, i *engine.InstallModel) paths.ProjectInput {
+	m := p.Model
+	return paths.ProjectInput{Model: i, Next: m.Next, Snapshot: m.Snapshot, Now: m.ComputedAt, EndpointsCap: endpointsCap(i)}
+}
+
+// pathsPage is the page of t, projected by proj, that q asks for, as the caller of v may see it.
+func pathsPage(p *engine.Published, i *engine.InstallModel, v *view, t *paths.Topology, proj *paths.Projection, kept bool, q paths.Query) (PathsResponse, error) {
 	var visible func(explore.DepSet) bool
 	if !v.all {
 		visible = func(d explore.DepSet) bool { return v.allowTable(t, d) }
 	}
 	pg, err := paths.Run(t, proj, q, visible)
 	if err != nil {
-		fail(w, err)
-		return
+		return PathsResponse{}, err
 	}
 	pg.Summary.Unmemoised = !kept
-	l := linkerFor(v, m, i)
+	l := linkerFor(v, p.Model, i)
 	titles := findingTitles(i, proj, pg.Rows)
 	rows := make([]PathRowDTO, 0, len(pg.Rows))
 	for _, k := range pg.Rows {
@@ -99,7 +117,7 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 	if i.Computed == nil {
 		sum.NotComputed = NotComputedNoAttachments
 	}
-	writeJSON(w, PathsResponse{Install: id, Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: sum, CollectedAt: wireTime(p.ConfirmedAt)})
+	return PathsResponse{Install: i.Resolved.ID(), Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: sum, CollectedAt: wireTime(p.ConfirmedAt)}, nil
 }
 
 // titleKey is a finding's code and resource.
@@ -113,9 +131,18 @@ type titleKey struct {
 // share both. Only the page's keys are held, so a request allocates per row
 // shown, not per finding.
 func findingTitles(i *engine.InstallModel, proj *paths.Projection, rows []int32) map[titleKey]string {
-	var out map[titleKey]string
+	sets := make([][]paths.Signal, 0, len(rows))
 	for _, k := range rows {
-		for _, s := range proj.Problems[k].Signals {
+		sets = append(sets, proj.Problems[k].Signals)
+	}
+	return signalTitles(i, sets...)
+}
+
+// signalTitles is findingTitles for the finding signals in sets.
+func signalTitles(i *engine.InstallModel, sets ...[]paths.Signal) map[titleKey]string {
+	var out map[titleKey]string
+	for _, set := range sets {
+		for _, s := range set {
 			if s.Kind == paths.SignalFinding {
 				if out == nil {
 					out = map[titleKey]string{}

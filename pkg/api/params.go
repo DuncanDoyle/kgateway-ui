@@ -279,3 +279,66 @@ func parsePathsQuery(r *http.Request) (paths.Query, error) {
 	}
 	return q, nil
 }
+
+// Backend list parameters (design §8.1). backendsSingle are allowed at most once.
+var (
+	backendsParams = []string{"kind", "namespace", "state", "used", "gateway", "q", "sort", "cursor", "limit"}
+	backendsSingle = []string{"kind", "namespace", "used", "q", "sort", "cursor", "limit"}
+)
+
+// parseBackendsQuery parses r's query for GET …/backends. It rejects unknown
+// and repeated single-valued parameters and malformed values;
+// paths.RunBackends validates the rest (states, used, sort keys, cursors).
+func parseBackendsQuery(r *http.Request) (paths.BackendQuery, error) {
+	var q paths.BackendQuery
+	vals, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return q, badParam("malformed query: %v", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(vals)) {
+		if !slices.Contains(backendsParams, name) {
+			return q, badParam("unknown parameter %q", name)
+		}
+		if len(vals[name]) > 1 && slices.Contains(backendsSingle, name) {
+			return q, badParam("parameter %q given more than once", name)
+		}
+	}
+	for _, name := range []string{"kind", "namespace", "used"} {
+		if vals.Has(name) && vals.Get(name) == "" {
+			return q, badParam("%s: want a value", name)
+		}
+	}
+	q.Kind, q.Namespace, q.Used, q.Q, q.Cursor = vals.Get("kind"), vals.Get("namespace"), vals.Get("used"), vals.Get("q"), vals.Get("cursor")
+	for _, v := range vals["gateway"] {
+		ns, name, ok := strings.Cut(v, "/")
+		if !ok || ns == "" || name == "" || strings.Contains(name, "/") {
+			return q, badParam("gateway %q: want namespace/name", v)
+		}
+		q.Gateways = append(q.Gateways, objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: ns, Name: name})
+	}
+	for _, v := range vals["state"] {
+		q.States = append(q.States, health.State(v))
+	}
+	if v := vals.Get("limit"); vals.Has("limit") {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > paths.MaxLimit {
+			return q, badParam("limit %q: want 1–%d", v, paths.MaxLimit)
+		}
+		q.Limit = n
+	}
+	if v := vals.Get("sort"); vals.Has("sort") {
+		key, dir, _ := strings.Cut(v, ".")
+		switch dir {
+		case "", "asc":
+		case "desc":
+			q.Desc = true
+		default:
+			return q, badParam("sort %q", v)
+		}
+		if key == "" {
+			return q, badParam("sort %q", v)
+		}
+		q.Sort = key
+	}
+	return q, nil
+}

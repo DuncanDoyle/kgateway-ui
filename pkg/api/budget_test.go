@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -41,6 +42,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -1239,6 +1241,130 @@ func TestBudgetPathsRequests(t *testing.T) {
 	}
 }
 
+// The backend detail budget of design §14 (6.3): one detail under 4 MiB
+// allocated, the scoped read included.
+const backendDetailAlloc = 4 << 20
+
+// synthReader serves n IPv4 endpoints for every Service, on the name of the
+// Service's first port: the most the scoped memo holds per Service.
+type synthReader struct {
+	snap *cache.Snapshot
+	n    int
+}
+
+func (s synthReader) Endpoints(_ context.Context, _ string, svc objects.Ref) (endpoints.Result, error) {
+	var name string
+	if f, _ := serviceFacts(s.snap, svc); f != nil && len(f.Ports) > 0 {
+		name = f.Ports[0].Name
+	}
+	items := make([]endpoints.Endpoint, s.n)
+	for i := range items {
+		items[i] = endpoints.Endpoint{Address: netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}).String(), Port: 8080, PortName: name,
+			Ready: i%2 == 0, Serving: i%2 == 0, Pod: svc.Name + "-7d4b9c6f5-" + strconv.Itoa(i)}
+	}
+	return endpoints.Result{Complete: endpoints.Complete, Items: items, ReadAt: testutil.Now}, nil
+}
+
+// backendHandler is pathsHandler with a bounded scoped reader over synthReader
+// whose memo never expires: entries leave it by its Service and byte caps only.
+func backendHandler(e *engine.Engine, m *engine.Model, authz Authorizer) http.Handler {
+	r := endpoints.Bounded(synthReader{snap: m.Snapshot, n: endpoints.DefaultBounds.MaxEndpoints}, endpoints.DefaultBounds, testutil.FakeClock())
+	return NewHandler(e, fstest.MapFS{}, authz, withPathMemo(paths.NewMemo(clocktesting.NewFakeClock(m.ComputedAt))), WithScopedReader(r))
+}
+
+// serviceDetails are the detail paths of up to n listed Services of install id, by name.
+func serviceDetails(t *testing.T, h http.Handler, id string, n int) []string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/installs/"+id+"/backends?kind=Service&sort=name&limit=200", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	var out BackendsResponse
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Fatalf("backends: %d %s", w.Code, w.Body)
+	}
+	var urls []string
+	for _, r := range out.Rows {
+		if len(urls) < n {
+			urls = append(urls, "/api/v1/installs/"+id+"/backends/-/Service/"+r.Ref.Namespace+"/"+r.Ref.Name)
+		}
+	}
+	return urls
+}
+
+// detailGet serves one backend detail through h; any status but 200 fails t.
+func detailGet(t *testing.T, h http.Handler, path string) BackendDetail {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	var out BackendDetail
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Errorf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	return out
+}
+
+// TestBudgetBackendDetail: at Large, with paths warm, rounds of concurrent
+// cold backend details (distinct Services, each read afresh with 1,000
+// endpoints, shown where the world has Service facts) allocate under 4 MiB per detail at the median, under AllowAll and
+// a restricting Authorizer (design §14).
+func TestBudgetBackendDetail(t *testing.T) {
+	const (
+		mib    = 1 << 20
+		rounds = 9
+	)
+	conc := endpoints.DefaultBounds.InFlight
+	for _, tier := range pathsTiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e, m, w := pathsEngine(t, tier)
+			defer runtime.KeepAlive(w)
+			id := m.Installs[0].Resolved.ID()
+			for _, a := range []struct {
+				name  string
+				authz Authorizer
+			}{{"allow-all", nil}, {"restricted", restricting}} {
+				h := backendHandler(e, m, a.authz)
+				pathsGet(t, h, "/api/v1/installs/"+id+"/paths")
+				urls := serviceDetails(t, h, id, rounds*conc)
+				if len(urls) < rounds*conc {
+					t.Fatalf("%s: %d Services listed, want %d", a.name, len(urls), rounds*conc)
+				}
+				var per []uint64
+				var times []time.Duration
+				var items int
+				for k := range rounds {
+					var wg sync.WaitGroup
+					var got atomic.Int64
+					before, start := allocated(), time.Now()
+					for _, u := range urls[k*conc : (k+1)*conc] {
+						wg.Go(func() {
+							d := detailGet(t, h, u)
+							for _, s := range d.Sources {
+								got.Add(int64(len(s.Items)))
+							}
+						})
+					}
+					wg.Wait()
+					times = append(times, time.Since(start))
+					per = append(per, (allocated()-before)/uint64(conc)) //nolint:gosec // conc is positive
+					items += int(got.Load())
+				}
+				slices.Sort(per)
+				slices.Sort(times)
+				med := per[len(per)/2]
+				t.Logf("%s %s: %d rounds of %d concurrent cold details, %d endpoints shown; median %.2f MiB allocated per detail, max %.2f (budget < %d MiB); median round %v",
+					tier.Name, a.name, rounds, conc, items, float64(med)/mib, float64(per[len(per)-1])/mib, backendDetailAlloc/mib, rd(times[len(times)/2]))
+				// Without Service facts the read is made but cannot be split by port name.
+				if items == 0 && len(m.Snapshot.Services) > 0 {
+					t.Errorf("%s %s: no endpoint was shown", tier.Name, a.name)
+				}
+				if med >= backendDetailAlloc {
+					t.Errorf("%s %s: a cold detail allocates %d B, budget < %d B", tier.Name, a.name, med, backendDetailAlloc)
+				}
+			}
+		})
+	}
+}
+
 // heapBaseline is the median "retained" HeapInuse of the 2.1 engine at Large
 // (docs/phases/phase-2/bench/2.2-baseline-heap.txt), as pkg/engine's TestBudgetHeap holds it.
 const heapBaseline = 25411584
@@ -1255,10 +1381,13 @@ type apiHeapRun struct {
 	Alloc, Freed int64
 	Paths        int
 	Unmemoised   bool
+	// Backends are listed over every install; Details the distinct Services read.
+	Backends, Details int
 }
 
 // TestBudgetHeapAPIWarm: as TestBudgetHeap, one fresh process per run and five
-// runs, the median heap retained once paths are warm for every install stays
+// runs, the median heap retained once paths and backends are warm for every
+// install, and the scoped memo holds Service details from two publications, stays
 // ≤ 48 MiB over the 2.1 baseline (D-057). Extreme is reported: D-057 is a Large budget.
 func TestBudgetHeapAPIWarm(t *testing.T) {
 	cases := append(slices.Clone(pathsTiers), scale.Extreme)
@@ -1310,8 +1439,8 @@ func apiHeapBudget(t *testing.T, tier scale.Tier, gated bool) {
 	if !gated {
 		note = "reported: D-057 is a Large budget"
 	}
-	t.Logf("%s: %d paths (unmemoised %v); warm retained median %+.1f MiB over the 2.1 baseline %d B (%s); breakdown: engine figure median %+.1f MiB, API memos median %+.2f MiB (freed by dropping them %.2f MiB)",
-		tier.Name, runs[0].Paths, runs[0].Unmemoised, float64(total)/mib, heapBaseline, note, float64(em)/mib, float64(am)/mib, float64(fm)/mib)
+	t.Logf("%s: %d paths (unmemoised %v), %d listed Services, %d Service details; warm retained median %+.1f MiB over the 2.1 baseline %d B (%s); breakdown: engine figure median %+.1f MiB, API memos median %+.2f MiB (freed by dropping them %.2f MiB)",
+		tier.Name, runs[0].Paths, runs[0].Unmemoised, runs[0].Backends, runs[0].Details, float64(total)/mib, heapBaseline, note, float64(em)/mib, float64(am)/mib, float64(fm)/mib)
 	if gated && total > 48*mib {
 		t.Errorf("%s: warm retained heap %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
 	}
@@ -1330,12 +1459,28 @@ func apiHeapChild(t *testing.T, tier scale.Tier) {
 	var r apiHeapRun
 	st := stats()
 	r.Engine = st.HeapInuse
-	h := pathsHandler(e, m, nil)
+	h := backendHandler(e, m, nil)
 	for _, i := range m.Installs {
 		_, _, out := pathsGet(t, h, "/api/v1/installs/"+i.Resolved.ID()+"/paths")
 		r.Paths += out.Summary.Paths
 		r.Unmemoised = r.Unmemoised || out.Summary.Unmemoised
+		r.Backends += len(serviceDetails(t, h, i.Resolved.ID(), 200))
 	}
+	// 48 distinct Services over two publications, the second's overlapping the
+	// first's, leave the scoped memo full across generations.
+	urls := serviceDetails(t, h, m.Installs[0].Resolved.ID(), 48)
+	if len(urls) < 48 {
+		t.Fatalf("%d Services listed, want 48", len(urls))
+	}
+	for _, u := range urls[:24] {
+		detailGet(t, h, u)
+	}
+	// The engine and the path memo then hold the new model only; m must not keep the old one.
+	m = e.Compute()
+	for _, u := range urls[12:] {
+		detailGet(t, h, u)
+	}
+	r.Details = len(urls)
 	warm := stats()
 	r.Warm, r.Alloc = warm.HeapInuse, int64(warm.HeapAlloc)-int64(st.HeapAlloc) //nolint:gosec // heap sizes fit
 	runtime.KeepAlive(h)                                                        // the handler and its memo go here
