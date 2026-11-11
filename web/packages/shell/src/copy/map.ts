@@ -23,7 +23,7 @@ export const mapCopy = {
   warn: (n: number, of: number) => `${n} of ${of} paths through this node have a warning`, // S781
   unknown: (n: number, of: number) => `${n} of ${of} paths through this node are unknown`, // S782
   healthy: (of: number) => `All ${of} paths are healthy`, // S783
-  healthyOne: "Its one path is healthy", // S792
+  healthyOne: "The one path through this node is healthy", // S792
   problems: "Problems", // S784
   noProblems: "Nothing on this node itself.", // S785
   endpoints: "Endpoints", // S786
@@ -36,7 +36,7 @@ export const mapCopy = {
     `Showing ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} paths.`, // S793
   nodeLabel: (kind: string, name: string, state: string) => `${kind} ${name}, ${state}`, // S794
   keys: "Arrow keys move along the paths. Enter opens details. Escape closes them.", // S795
-  keyboard: "Keyboard", // S796
+  keyboard: "Keyboard help", // S796
   table: "Table", // S797
   tableTip: "Show these paths as a table", // S798
   tableLabel: "Paths through this Gateway", // S799

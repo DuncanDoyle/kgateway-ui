@@ -558,7 +558,9 @@ it("a node with one healthy path says so in the singular", async () => {
   const map = await screen.findByTestId("gateway-map");
   expect(edgePaths().rows.filter((r) => r.routes[0]?.name === "via-ls")).toHaveLength(1);
   fireEvent.click(within(flowNode(map, "shop/via-ls")).getByTestId("map-node"));
-  expect(await screen.findByTestId("map-panel-counts")).toHaveTextContent(/^Its one path is healthy$/);
+  expect(await screen.findByTestId("map-panel-counts")).toHaveTextContent(
+    /^The one path through this node is healthy$/,
+  );
 });
 
 it("Escape closes the panel from the map and from the panel", async () => {
