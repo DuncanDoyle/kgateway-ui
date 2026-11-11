@@ -184,3 +184,30 @@ it("failing and may-fail parts carry a pattern, so a narrow part is not told apa
   expect(css).toMatch(/\[data-pattern="stripes"\]\{[^}]*repeating-linear-gradient/);
   expect(css).toMatch(/\[data-pattern="dots"\]\{[^}]*radial-gradient/);
 });
+
+it.each([
+  ["TCPRoute", "connections", "tcp", tcpGolden],
+  ["GRPCRoute", "requests", "grpc", grpcGolden],
+] as const)("a %s bar's heading and screen-reader label speak of %s", async (kind, noun, name, golden) => {
+  const rule = await open(kind, "shop", name, detail(golden));
+  const bar = within(rule).getByTestId("share-bar");
+  expect(bar).toHaveTextContent(`% of this rule's ${noun}`);
+  expect(within(bar).getByRole("img")).toHaveAccessibleName(new RegExp(`^Share of this rule's ${noun}: `));
+  const other = noun === "requests" ? "connections" : "requests";
+  expect(bar).not.toHaveTextContent(other);
+});
+
+it("a failing part's icon and label are separate, non-shrinking boxes", async () => {
+  const d = detail(grpcGolden);
+  (refs(d)[0] as BackendRef).shareState = "failing";
+  const rule = await open("GRPCRoute", "shop", "grpc", d);
+  const part = within(rule).getAllByTestId("share-segment")[0] as HTMLElement;
+  const icon = part.querySelector(".icon");
+  const pct = part.querySelector(".pct");
+  expect(icon?.querySelector('[data-testid="health-icon-error"]')).not.toBeNull();
+  expect(pct).toHaveTextContent(/^25 %$/);
+  expect(icon?.contains(pct as Node)).toBe(false);
+  // The icon needs more width than the label, so it appears at a larger container width.
+  const css = [...document.querySelectorAll("style")].map((x) => x.textContent ?? "").join("");
+  expect(css).toMatch(/@container \(min-width: ?76px\)\{[^{}]*\.icon\{[^}]*display:inline-flex/);
+});

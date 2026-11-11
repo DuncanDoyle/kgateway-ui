@@ -660,6 +660,10 @@ export const traceCopy = {
   failShare: (pct: string, tcp: boolean) => `${pct} of ${tcp ? "connections" : "requests"} fail`, // S758
   mayFailShare: (pct: string) => `${pct} may fail`, // S759
   noTraffic: "No traffic: every weight is 0", // S760
-  barLabel: (parts: string[]) => `Share of this rule's requests: ${parts.join(", ")}`, // S761
+  barLabel: (parts: string[], tcp: boolean) =>
+    tcp
+      ? `Share of this rule's connections: ${parts.join(", ")}` // S765
+      : `Share of this rule's requests: ${parts.join(", ")}`, // S761
+  connectionsHint: "% of this rule's connections", // S764
   onAttachment: (gateway: string, listener: string) => `On ${gateway}, listener ${listener}:`, // S762
 };

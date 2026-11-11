@@ -75,18 +75,33 @@ const Segment = styled.div<{ $share: number; $state: "shown" | HealthState }>`
     background-image: radial-gradient(${(p) => p.theme.color.status.warning.iconFg} 1.2px, transparent 1.6px);
     background-size: 5px 5px;
   }
+  /* Label and icon never shrink, so they never overlap; each shows only from the width it needs. */
   .fits {
     display: none;
+    flex: none;
+    align-items: center;
+    gap: 3px;
     padding: 0 3px;
     border-radius: 2px;
     background: inherit;
     background-image: none;
   }
+  .icon,
+  .pct {
+    display: inline-flex;
+    flex: none;
+  }
+  .icon {
+    display: none;
+  }
   @container (min-width: 48px) {
     .fits {
       display: inline-flex;
-      align-items: center;
-      gap: 3px;
+    }
+  }
+  @container (min-width: 76px) {
+    .icon {
+      display: inline-flex;
     }
   }
 `;
@@ -137,7 +152,7 @@ export function ShareBar({ refs, tcp, stylesOverride }: ShareBarProps) {
   return (
     <Wrap data-testid="share-bar" data-state={bar.kind} stylesOverride={stylesOverride}>
       <Caption>
-        <span>{pathColumnCopy.shareHint}</span>
+        <span>{tcp ? traceCopy.connectionsHint : pathColumnCopy.shareHint}</span>
         {bar.kind === "not-shown" ? (
           <Note>
             <HealthIcon state="unknown" size={14} notice />
@@ -168,7 +183,10 @@ export function ShareBar({ refs, tcp, stylesOverride }: ShareBarProps) {
           role="img"
           aria-label={
             bar.kind === "split"
-              ? traceCopy.barLabel(bar.parts.map((p) => `${p.name} ${shareCopy.percent(p.share)}`))
+              ? traceCopy.barLabel(
+                  bar.parts.map((p) => `${p.name} ${shareCopy.percent(p.share)}`),
+                  tcp,
+                )
               : traceCopy.noTraffic
           }
         >
@@ -185,8 +203,12 @@ export function ShareBar({ refs, tcp, stylesOverride }: ShareBarProps) {
                     data-pattern={pattern[s]}
                   >
                     <span className="fits">
-                      {s === "shown" ? null : <HealthIcon state={s} size={12} notice />}
-                      {shareCopy.percent(p.share)}
+                      {s === "shown" ? null : (
+                        <span className="icon">
+                          <HealthIcon state={s} size={12} notice />
+                        </span>
+                      )}
+                      <span className="pct">{shareCopy.percent(p.share)}</span>
                     </span>
                   </Segment>
                 );
