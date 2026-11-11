@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -496,16 +495,14 @@ const (
 	RefWaiting    = "waiting"
 )
 
-// Reference explanation wording (design §10). The Service sentences match
-// KGWUI-013's; a candidate quotes the route's reason and guesses nothing.
+// Reference explanation wording (design §10). A candidate quotes the route's
+// reason and guesses nothing.
 const (
-	refExplainNotPermitted   = "The controller does not permit this ref to another namespace."
-	refExplainNotFound       = "The controller cannot find this backend."
-	refExplainInvalidKind    = "The controller does not support this backend kind."
-	refExplainServiceMissing = "Service `%s` does not exist."
-	refExplainServicePort    = "Service `%s` has no port %d (ports: %s)."
-	refExplainCandidate      = "This route reports `ResolvedRefs=False` (%s) for one of these refs."
-	refExplainWaiting        = "Waiting for the controller: the route's status is older than its spec."
+	refExplainNotPermitted = "The controller does not permit this ref to another namespace."
+	refExplainNotFound     = "The controller cannot find this backend."
+	refExplainInvalidKind  = "The controller does not support this backend kind."
+	refExplainCandidate    = "This route reports `ResolvedRefs=False` (%s) for one of these refs."
+	refExplainWaiting      = "Waiting for the controller: the route's status is older than its spec."
 )
 
 // refUse is one place a route writes a backend: rule and backendRefs index
@@ -583,22 +580,21 @@ func refUses(row *explore.RouteRow, backend objects.Ref) []refUse {
 		rules = objects.DecodeRouteRules(row.Obj)
 	}
 	var out []refUse
-	mirrors := func(fs []objects.Filter, rule, ref int, path string) {
+	mirrors := func(fs []objects.Filter, rule, ref int) {
 		for k, f := range fs {
 			if f.Mirror != nil && f.Mirror.Backend == backend {
-				out = append(out, refUse{rule, ref, fmt.Sprintf("%s.filters[%d].requestMirror.backendRef", path, k), f.Mirror.Port})
+				out = append(out, refUse{rule, ref, health.RouteRefPath(rule, ref, k), f.Mirror.Port})
 			}
 		}
 	}
 	for i := range rules {
 		for j, br := range rules[i].BackendRefs {
-			path := fmt.Sprintf("spec.rules[%d].backendRefs[%d]", i, j)
 			if br.Ref == backend {
-				out = append(out, refUse{i, j, path, br.Port})
+				out = append(out, refUse{i, j, health.RouteRefPath(i, j, -1), br.Port})
 			}
-			mirrors(br.Filters, i, j, path)
+			mirrors(br.Filters, i, j)
 		}
-		mirrors(rules[i].Filters, i, -1, fmt.Sprintf("spec.rules[%d]", i))
+		mirrors(rules[i].Filters, i, -1)
 	}
 	return out
 }
@@ -662,14 +658,8 @@ func attributedText(f *health.Finding, ev *health.RefsEvidence, u refUse, reason
 	switch ev.Explanation {
 	case health.RefExplainKindNotServed:
 		return f.Message
-	case health.RefExplainServiceMissing:
-		return fmt.Sprintf(refExplainServiceMissing, c.Namespace+"/"+c.Name)
-	case health.RefExplainServicePort:
-		ports := make([]string, len(ev.Ports))
-		for k, p := range ev.Ports {
-			ports[k] = strconv.Itoa(int(p))
-		}
-		return fmt.Sprintf(refExplainServicePort, c.Namespace+"/"+c.Name, u.port, strings.Join(ports, ", "))
+	case health.RefExplainServiceMissing, health.RefExplainServicePort:
+		return health.RefServiceSentence(ev.Explanation, c.Namespace+"/"+c.Name, u.port, ev.Ports)
 	}
 	switch reason {
 	case reasonRefNotPermitted:

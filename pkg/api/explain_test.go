@@ -21,8 +21,8 @@ import (
 // shop/twice names shop/dup-svc twice (BackendNotFound, both exist);
 // shop/stale names shop/stale-svc with status one generation behind;
 // shop/mixed names the missing shop/gone-svc and shop/peer-svc, which
-// exists; shop/fine names store/cart and resolves.
-func explainWorld() []runtime.Object {
+// exists; shop/fine names store/cart and resolves. extra joins them.
+func explainWorld(extra ...runtime.Object) []runtime.Object {
 	svc := func(name string) *corev1.Service {
 		return &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: name, UID: types.UID("svc-shop-" + name)},
 			Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, Ports: []corev1.ServicePort{{Name: "http", Port: 80}}}}
@@ -32,9 +32,9 @@ func explainWorld() []runtime.Object {
 	stale.SetGeneration(2)
 	fine := testutil.WithRules(testutil.HTTPRoute("shop", "fine", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		map[string]any{"backendRefs": []any{cart}})
-	return world(refsRouteAs("denied", "RefNotPermitted", "", cart), refsRouteAs("twice", "BackendNotFound", "", svcRef("dup-svc"), svcRef("dup-svc")),
+	return world(append([]runtime.Object{refsRouteAs("denied", "RefNotPermitted", "", cart), refsRouteAs("twice", "BackendNotFound", "", svcRef("dup-svc"), svcRef("dup-svc")),
 		stale, refsRouteAs("mixed", "BackendNotFound", "", svcRef("gone-svc"), svcRef("peer-svc")), fine,
-		svc("dup-svc"), svc("stale-svc"), svc("peer-svc"))
+		svc("dup-svc"), svc("stale-svc"), svc("peer-svc")}, extra...)...)
 }
 
 // explainSetup reads endpoints from a fixed reader, so the golden's read time is fixed.
@@ -115,5 +115,31 @@ func TestRefExplanationRestricted(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != RefCandidate || got[0].Reason != "BackendNotFound" || got[0].Fix != nil ||
 		got[0].Explanation != "This route reports `ResolvedRefs=False` (BackendNotFound) for one of these refs." {
 		t.Fatalf("gone-svc with peer-svc hidden: %+v", got)
+	}
+}
+
+// §10: a mirror is attributed at its own path, a backendRef's mirror with
+// that ref's index and a rule filter's with -1.
+func TestRefExplanationMirrors(t *testing.T) {
+	onRef := svcRef("main-svc")
+	onRef["filters"] = []any{mirrorFilter("mir-a-svc")}
+	viaRef := refsRouteAs("mirror-ref", "BackendNotFound", "", onRef)
+	viaRule := refsRouteAs("mirror-rule", "BackendNotFound", "", svcRef("main-svc"))
+	viaRule.Object["spec"].(map[string]any)["rules"].([]any)[0].(map[string]any)["filters"] = []any{mirrorFilter("mir-b-svc")}
+	main := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "main-svc", UID: "svc-shop-main-svc"},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, Ports: []corev1.ServicePort{{Name: "http", Port: 80}}}}
+	_, srv, _ := startWith(t, explainSetup(nil), explainWorld(viaRef, viaRule, main)...)
+	for _, tc := range []struct {
+		svc, route, path string
+		ref              int
+	}{
+		{"mir-a-svc", "mirror-ref", "spec.rules[0].backendRefs[0].filters[0].requestMirror.backendRef", 0},
+		{"mir-b-svc", "mirror-rule", "spec.rules[0].filters[0].requestMirror.backendRef", -1},
+	} {
+		got := explanations(t, srv, "shop", tc.svc)
+		if len(got) != 1 || got[0].Kind != RefAttributed || got[0].Route.Name != tc.route || got[0].Path != tc.path || got[0].Ref != tc.ref ||
+			got[0].Explanation != "Service `shop/"+tc.svc+"` does not exist." {
+			t.Fatalf("%s explanations %+v", tc.svc, got)
+		}
 	}
 }
