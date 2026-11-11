@@ -22,9 +22,11 @@ type snapRef struct{ s *cache.Snapshot }
 
 func (r *snapRef) Snapshot() *cache.Snapshot { return r.s }
 
-// stateless is v's results without what persistence sets from history.
+// stateless is v's results without what persistence sets from history, and
+// without the generation, which numbers recomputations process-wide.
 func stateless(v *computed.Views) computed.Views {
 	out := *v
+	out.Generation = 0
 	out.Checks = slices.Clone(v.Checks)
 	for i := range out.Checks {
 		out.Checks[i].State, out.Checks[i].Mature, out.Checks[i].Since = "", false, time.Time{}
@@ -34,7 +36,8 @@ func stateless(v *computed.Views) computed.Views {
 
 // The views memo reuses results only for equal inputs: after each change the
 // engine's views equal a fresh engine's, an unchanged snapshot or an
-// annotation edit reuses them, and a change views read recomputes them.
+// annotation edit reuses them and their generation, and a change views read
+// recomputes them under a new generation.
 func TestViewsMemoMatchesFreshEngine(t *testing.T) {
 	now := testutil.Now
 	clock := func() time.Time { return now }
@@ -95,7 +98,11 @@ func TestViewsMemoMatchesFreshEngine(t *testing.T) {
 		return got
 	}
 	reused := func(a, b *computed.Views) bool {
-		return &a.Attachment.Outcomes[0] == &b.Attachment.Outcomes[0] && &a.Delegation.Rows[0] == &b.Delegation.Rows[0]
+		same := &a.Attachment.Outcomes[0] == &b.Attachment.Outcomes[0] && &a.Delegation.Rows[0] == &b.Delegation.Rows[0]
+		if same != (a.Generation == b.Generation) || a.Generation == 0 || b.Generation == 0 {
+			t.Fatalf("generations %d and %d for reused %v", a.Generation, b.Generation, same)
+		}
+		return same
 	}
 
 	v0 := compute("first")
@@ -134,7 +141,7 @@ func TestViewsMemoMatchesFreshEngine(t *testing.T) {
 	unstructured.RemoveNestedField(p.Object, "spec", "rules")
 	src.s = replace(routes, p)
 	v2 := compute("parent rules")
-	if reflect.DeepEqual(v1.Delegation.Reach, v2.Delegation.Reach) {
+	if reflect.DeepEqual(v1.Delegation.Reach, v2.Delegation.Reach) || v2.Generation <= v1.Generation {
 		t.Fatal("parent rules: reach not recomputed")
 	}
 
@@ -148,7 +155,7 @@ func TestViewsMemoMatchesFreshEngine(t *testing.T) {
 	}
 	src.s = &s
 	v3 := compute("namespace labels")
-	if reflect.DeepEqual(v2.Attachment.Outcomes, v3.Attachment.Outcomes) {
+	if reflect.DeepEqual(v2.Attachment.Outcomes, v3.Attachment.Outcomes) || v3.Generation <= v2.Generation {
 		t.Fatal("namespace labels: outcomes not recomputed")
 	}
 
