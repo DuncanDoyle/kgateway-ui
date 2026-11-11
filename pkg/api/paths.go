@@ -90,7 +90,7 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 	}
 	pg.Summary.Unmemoised = !kept
 	l := linkerFor(v, m, i)
-	titles := findingTitles(i)
+	titles := findingTitles(i, proj, pg.Rows)
 	rows := make([]PathRowDTO, 0, len(pg.Rows))
 	for _, k := range pg.Rows {
 		rows = append(rows, pathRow(l, titles, t, proj, k))
@@ -108,16 +108,32 @@ type titleKey struct {
 	ref  objects.Ref
 }
 
-// findingTitles maps each finding's code and resource to its message, the
-// first finding's when several share both.
-func findingTitles(i *engine.InstallModel) map[titleKey]string {
-	out := map[titleKey]string{}
-	for _, f := range i.Health.Findings {
+// findingTitles maps the code and resource of each finding signal on the
+// page's rows to its finding's message, the first finding's when several
+// share both. Only the page's keys are held, so a request allocates per row
+// shown, not per finding.
+func findingTitles(i *engine.InstallModel, proj *paths.Projection, rows []int32) map[titleKey]string {
+	var out map[titleKey]string
+	for _, k := range rows {
+		for _, s := range proj.Problems[k].Signals {
+			if s.Kind == paths.SignalFinding {
+				if out == nil {
+					out = map[titleKey]string{}
+				}
+				out[titleKey{s.Code, s.Ref}] = ""
+			}
+		}
+	}
+	if out == nil {
+		return nil
+	}
+	for j := range i.Health.Findings {
+		f := &i.Health.Findings[j]
 		if f.Resource == nil || f.Message == "" {
 			continue
 		}
 		k := titleKey{f.Code, *f.Resource}
-		if _, ok := out[k]; !ok {
+		if t, ok := out[k]; ok && t == "" {
 			out[k] = f.Message
 		}
 	}
