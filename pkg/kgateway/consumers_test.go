@@ -29,7 +29,9 @@ func extension(ns, name string, spec map[string]any) *unstructured.Unstructured 
 }
 
 func TestBackendConsumersOnePerRole(t *testing.T) {
-	grpc := func(ref map[string]any) map[string]any { return map[string]any{"grpcService": map[string]any{"backendRef": ref}} }
+	grpc := func(ref map[string]any) map[string]any {
+		return map[string]any{"grpcService": map[string]any{"backendRef": ref}}
+	}
 	owned := listed(
 		extension("shop", "auth", map[string]any{"extAuth": grpc(map[string]any{"name": "authz", "port": int64(9001)})}),
 		extension("shop", "authhttp", map[string]any{"extAuth": map[string]any{"httpService": map[string]any{"backendRef": map[string]any{"name": "authh", "namespace": "sec"}}}}),
