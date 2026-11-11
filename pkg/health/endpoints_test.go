@@ -336,3 +336,63 @@ func TestBackendEndpointsPreferTCPPort(t *testing.T) {
 		t.Fatalf("findings %+v", fs)
 	}
 }
+
+// PortEndpoints counts each fixture's Service port exactly as 023's evidence does.
+func TestPortEndpointsMatches023(t *testing.T) {
+	grpcSvc := cache.ServicePort{Name: "grpc", Port: 9000, Target: 9000}
+	fixtures := map[string]func(e *endpointsWorld){
+		"one port": func(*endpointsWorld) {},
+		"port order across slices": func(e *endpointsWorld) {
+			http, grpc := cache.SlicePort{Name: "http", Port: 8080}, cache.SlicePort{Name: "grpc", Port: 9000}
+			e.svcs[0].Ports = append(e.svcs[0].Ports, grpcSvc)
+			e.slices = []cache.SliceFact{
+				{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{http, grpc}, Ready: []int{0, 0}, Total: 1},
+				{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{grpc, http}, Ready: []int{0, 0}, Total: 1},
+			}
+			e.w.objs[2] = withRefs(e.w.objs[2], backendRef("cart", 8080, nil), backendRef("cart", 9000, nil))
+		},
+		"unnamed port": func(e *endpointsWorld) {
+			e.svcs[0].Ports[0].Name = ""
+			e.slices[0].Ports[0].Name = ""
+		},
+		"two ports": func(e *endpointsWorld) {
+			e.svcs[0].Ports = append(e.svcs[0].Ports, grpcSvc)
+			e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "grpc", Port: 9000})
+			e.slices[0].Ready = append(e.slices[0].Ready, 0)
+			e.w.objs[2] = withRefs(e.w.objs[2], backendRef("cart", 8080, nil), backendRef("cart", 9000, nil))
+		},
+		"dual stack": func(e *endpointsWorld) {
+			e.slices[0].AddressType = "IPv4"
+			e.slices = append(e.slices,
+				cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{0}, Total: 2, AddressType: "IPv6"},
+				cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{0}, Total: 1, AddressType: "IPv4"})
+		},
+		"prefer TCP": func(e *endpointsWorld) {
+			e.svcs[0].Ports = []cache.ServicePort{{Name: "dns-udp", Port: 8080, Target: 8080, Protocol: "UDP"}, {Name: "http", Port: 8080, Target: 8080, Protocol: "TCP"}}
+			e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "dns-udp", Port: 8080})
+			e.slices[0].Ready = []int{0, 3}
+		},
+	}
+	for name, mutate := range fixtures {
+		t.Run(name, func(t *testing.T) {
+			e := newEndpointsWorld()
+			mutate(e)
+			fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
+			if len(fs) == 0 {
+				t.Fatal("no 023 finding")
+			}
+			slices := make([]*cache.SliceFact, len(e.slices))
+			for i := range e.slices {
+				slices[i] = &e.slices[i]
+			}
+			for _, f := range fs {
+				want := *f.Facts.(*EndpointsEvidence)
+				got, anyReady := PortEndpoints(&e.svcs[0], slices, want.Port)
+				want.Routes = nil
+				if got == nil || anyReady || !reflect.DeepEqual(*got, want) {
+					t.Fatalf("port %d: got %+v (ready %v), want %+v", want.Port, got, anyReady, want)
+				}
+			}
+		})
+	}
+}

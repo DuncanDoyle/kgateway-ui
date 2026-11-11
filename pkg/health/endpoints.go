@@ -112,18 +112,12 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				unread[sp.ns] = true
 				continue // unknown, never ready
 			}
-			svc := svcs[sp.ns+"/"+sp.name]
-			if svc == nil || svc.Type == "ExternalName" {
-				continue
-			}
-			i := servicePortIndex(svc.Ports, sp.port)
-			if i < 0 {
-				continue // a port the Service lacks is KGWUI-013's
-			}
 			ev := evidence[sp]
 			if ev == nil {
-				ev, ready[sp] = sliceCounts(byService[sp.ns+"/"+sp.name], svc.Ports[i].Name)
-				ev.Service, ev.Port = sp.name, sp.port
+				// A port the Service lacks is KGWUI-013's.
+				if ev, ready[sp] = PortEndpoints(svcs[sp.ns+"/"+sp.name], byService[sp.ns+"/"+sp.name], sp.port); ev == nil {
+					continue
+				}
 				evidence[sp] = ev
 				order = append(order, sp)
 			}
@@ -193,6 +187,12 @@ func endpointsReadable(snap *cache.Snapshot, ns string) bool {
 	return snap.NamespaceAccess[cache.ServicesGVR][ns].OK && snap.NamespaceAccess[cache.EndpointSlicesGVR][ns].OK
 }
 
+// EndpointsRead reports whether snap holds the Services and EndpointSlices of
+// namespace ns: always for a cluster-wide snapshot, else when it read both there.
+func EndpointsRead(snap *cache.Snapshot, ns string) bool {
+	return len(snap.RequestedNamespaces) == 0 || endpointsReadable(snap, ns)
+}
+
 // resolvedHere reports whether route u has, on one of parents, a current
 // ResolvedRefs=True written by this install's controller.
 func (in Input) resolvedHere(u *unstructured.Unstructured, parents []objects.ParentRef) bool {
@@ -231,6 +231,22 @@ func serviceRefs(u *unstructured.Unstructured) []servicePort {
 		}
 	}
 	return out
+}
+
+// PortEndpoints counts the ready and total endpoints of svc's port numbered
+// port in slices, the Service's slices, as KGWUI-023 does. It returns nil for
+// a nil or ExternalName Service, or a port the Service lacks.
+func PortEndpoints(svc *cache.ServiceFact, slices []*cache.SliceFact, port int32) (ev *EndpointsEvidence, anyReady bool) {
+	if svc == nil || svc.Type == "ExternalName" {
+		return nil, false
+	}
+	i := servicePortIndex(svc.Ports, port)
+	if i < 0 {
+		return nil, false
+	}
+	ev, anyReady = sliceCounts(slices, svc.Ports[i].Name)
+	ev.Service, ev.Port = svc.Name, port
+	return ev, anyReady
 }
 
 // servicePortIndex is the index of the TCP Service port numbered port (route

@@ -64,6 +64,8 @@ type attachment struct {
 	resource, gateway int32 // Refs indexes
 	listener          int32 // listeners index
 	hostnames         int32 // hostnames index
+	// parent is the route's spec parentRef index of this attachment.
+	parent int32
 }
 
 // route is a route of some chain with its rules. HTTPRoute rules are the
@@ -173,7 +175,7 @@ func (b *builder) member(m *computed.Member) {
 		ctx = b.ctx(pathCtx{off: b.chain([]int32{ri}), n: 1})
 		b.rootCtx[ri] = ctx
 	}
-	a := attachment{resource: b.ref(m.Resource), hostnames: b.hostnames(m.Hostnames)}
+	a := attachment{resource: b.ref(m.Resource), hostnames: b.hostnames(m.Hostnames), parent: int32(m.ParentRef)} // #nosec G115 -- a parentRef index fits in int32
 	a.gateway = a.resource
 	var ls []objects.Listener
 	if id, ok := b.in.Index.FindGateway(m.Resource); ok && b.in.Index.Gateways[id].View != nil {
