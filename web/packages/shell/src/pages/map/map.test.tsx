@@ -801,17 +801,20 @@ it("expand and focus live in the URL: a reload restores both, and back and forwa
   nav.unmount();
 });
 
-it("a delegating route shows its delegated route only while expanded, and Escape leaves focus mode", async () => {
+const API_ROUTE = "r:gateway.networking.k8s.io/HTTPRoute/shop/api";
+
+it("a delegating route shows its delegated route at rest and can be collapsed; Escape leaves focus mode", async () => {
   serve(() => edgePaths());
   mount("?tab=map");
   const map = await screen.findByTestId("gateway-map");
-  expect(nodeNames(map)).not.toContain("shop/child");
+  expect(within(flowNode(map, "shop/child")).getByTestId("map-node")).toHaveTextContent(/Delegated/);
   fireEvent.click(within(flowNode(map, "shop/api")).getByTestId("map-node"));
   const panel = await screen.findByTestId("map-panel");
-  // The panel's Expand is the keyboard path to the same action.
-  await userEvent.setup().click(within(panel).getByRole("button", { name: "Expand" }));
-  await waitFor(() => expect(nodeNames(map)).toContain("shop/child"));
-  expect(within(flowNode(map, "shop/child")).getByTestId("map-node")).toHaveTextContent(/Delegated/);
+  // The panel's button is the keyboard path to the card's toggle.
+  await userEvent.setup().click(within(panel).getByRole("button", { name: "Hide delegated routes" }));
+  await waitFor(() => expect(nodeNames(map)).not.toContain("shop/child"));
+  expect(search().getAll("collapse")).toEqual([API_ROUTE]);
+  expect(within(flowNode(map, "shop/api")).getByTestId("map-node")).toHaveTextContent("+1 delegated");
   fireEvent.click(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Focus on this" }));
   await waitFor(() => expect(screen.getByTestId("map-focus")).toBeInTheDocument());
   const user = userEvent.setup();
@@ -823,4 +826,29 @@ it("a delegating route shows its delegated route only while expanded, and Escape
   await user.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByTestId("map-focus")).toBeNull());
   expect(screen.getByTestId("location")).not.toHaveTextContent("focus=");
+});
+
+it("find locates a route its collapsed parent hides: the parent opens and the route is selected", async () => {
+  serve(() => edgePaths());
+  mount(`?tab=map&collapse=${encodeURIComponent(API_ROUTE)}`);
+  const map = await screen.findByTestId("gateway-map");
+  expect(nodeNames(map)).not.toContain("shop/child");
+  await userEvent.setup().type(screen.getByRole("searchbox", { name: "Find a node" }), "child");
+  await waitFor(() => expect(nodeNames(screen.getByTestId("gateway-map"))).toContain("shop/child"));
+  expect(search().getAll("collapse")).toEqual([]);
+  expect(within(await screen.findByTestId("map-panel")).getByRole("heading", { level: 2 })).toHaveTextContent(
+    "shop/child",
+  );
+});
+
+it("a focus on a node not on the map says so and offers Clear focus; stale expand ids are dropped", async () => {
+  serve(() => edgePaths());
+  mount(`?tab=map&focus=r%3Agone&expand=${encodeURIComponent("r:gateway.networking.k8s.io/HTTPRoute/shop/gone")}`);
+  const map = await screen.findByTestId("gateway-map");
+  expect(await screen.findByTestId("map-focus")).toHaveTextContent("The focused node is not on the map.");
+  // The whole map shows.
+  expect(nodeNames(map)).toContain("shop/backends");
+  await waitFor(() => expect(search().getAll("expand")).toEqual([]));
+  await userEvent.setup().click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Clear focus" }));
+  await waitFor(() => expect(search().get("focus")).toBeNull());
 });

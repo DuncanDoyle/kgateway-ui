@@ -66,15 +66,12 @@ it("expanding a two-rule route adds two rule nodes and keeps every other node's 
   const changed = changedColumns(g1, g2);
   expect([...changed]).toEqual(["rule"]);
   const after = layoutColumns(g2, changed, before);
-  for (const n of g1.nodes) {
-    const p = after.get(n.id);
-    // The rule column opens between routes and backends; backends move right as a block, in the same order.
-    const shift = n.kind === "backend" ? COL_W : 0;
-    expect(p).toEqual({ x: (before.get(n.id)?.x ?? 0) + shift, y: before.get(n.id)?.y });
-  }
+  // The rule column's place is always kept, so every other node, backends included, stays where it was.
+  for (const n of g1.nodes) expect(after.get(n.id)).toEqual(before.get(n.id));
   for (const id of ids(g2, "rule")) expect(after.get(id)?.x).toBe(3 * COL_W);
+  for (const id of ids(g1, "backend")) expect(before.get(id)?.x).toBe(4 * COL_W);
 
-  // Collapse restores the graph; the rule column closes and the backends move back.
+  // Collapse restores the graph and every position.
   const g3 = buildGraph(twoRules());
   const back = layoutColumns(g3, changedColumns(g2, g3), after);
   expect(g3.nodes.map((n) => n.id)).toEqual(g1.nodes.map((n) => n.id));
@@ -82,54 +79,79 @@ it("expanding a two-rule route adds two rule nodes and keeps every other node's 
   for (const n of g1.nodes) expect(back.get(n.id)).toEqual(before.get(n.id));
 });
 
-it("a collapsed delegating route hides its children; expanding shows them under it, nested under their own parent", () => {
-  const rows = [
-    row("http", ["root", "mid", "leaf"], "svc-a"),
-    row("http", ["root", "mid"], "svc-b"),
-    row("http", ["root", "side"], "svc-c", {
-      problem: { state: "error", signals: [{ kind: "finding", ref: ref("HTTPRoute", "side"), state: "error" }] },
-    }),
-  ];
-  const closed = buildGraph(rows);
-  expect(ids(closed, "route")).toEqual([R("root")]);
-  // The hidden child's problem lands on the visible ancestor, so it never reads healthy.
-  expect(closed.nodes.find((n) => n.id === R("root"))?.state).toBe("error");
-  expect(closed.edges.map((e) => e.id)).toContain(`${R("root")}>${B("svc-a")}`);
+const sideSignal = {
+  kind: "finding",
+  code: "x",
+  title: "side breaks",
+  ref: ref("HTTPRoute", "side"),
+  state: "error",
+} as const;
+const nested = () => [
+  row("http", ["root", "mid", "leaf"], "svc-a"),
+  row("http", ["root", "mid"], "svc-b"),
+  row("http", ["root", "side"], "svc-c", { problem: { state: "error", signals: [sideSignal] } }),
+];
 
-  const one = buildGraph(rows, new Set([R("root")]));
-  expect(ids(one, "route")).toEqual([R("root"), chain("root", "mid"), chain("root", "side")]);
-  expect(one.nodes.find((n) => n.id === chain("root", "mid"))?.delegatedUnder).toBe(R("root"));
-  // mid is collapsed, so leaf's row ends at mid.
-  expect(one.edges.map((e) => e.id)).toContain(`${chain("root", "mid")}>${B("svc-a")}`);
-
-  const two = buildGraph(rows, new Set([R("root"), chain("root", "mid")]));
+it("delegated routes show at rest, each nested under its own parent", () => {
+  const g = buildGraph(nested());
   const leaf = chain("root", "mid", "leaf");
-  expect(two.nodes.find((n) => n.id === leaf)?.delegatedUnder).toBe(chain("root", "mid"));
-  const at = layoutColumns(two);
-  const order = ids(two, "route").sort((a, b) => (at.get(a)?.y ?? 0) - (at.get(b)?.y ?? 0));
+  expect(ids(g, "route")).toEqual([R("root"), chain("root", "mid"), leaf, chain("root", "side")]);
+  expect(g.nodes.find((n) => n.id === leaf)?.delegatedUnder).toBe(chain("root", "mid"));
+  expect(g.nodes.find((n) => n.id === chain("root", "mid"))).toMatchObject({ delegates: true, ends: true });
+  const at = layoutColumns(g);
+  const order = ids(g, "route").sort((a, b) => (at.get(a)?.y ?? 0) - (at.get(b)?.y ?? 0));
   // leaf sits right under mid, one indent deeper; side stays under root.
   expect(order.indexOf(leaf)).toBe(order.indexOf(chain("root", "mid")) + 1);
   expect(at.get(leaf)?.x).toBe((at.get(R("root"))?.x ?? 0) + 2 * INDENT);
   expect(at.get(chain("root", "side"))?.x).toBe((at.get(R("root"))?.x ?? 0) + INDENT);
   // Keyboard navigation reaches the nested child.
-  expect(nextNode(two, B("svc-a"), "ArrowLeft", at)).toBe(leaf);
+  expect(nextNode(g, B("svc-a"), "ArrowLeft", at)).toBe(leaf);
+});
+
+it("a collapsed route hides its delegated routes, counts them, and keeps their problems under their names", () => {
+  const g = buildGraph(nested(), new Set(), { collapsed: new Set([R("root")]) });
+  expect(ids(g, "route")).toEqual([R("root")]);
+  const root = g.nodes.find((n) => n.id === R("root"));
+  expect(root).toMatchObject({ collapsed: true, hiddenRoutes: 3, state: "error", problems: [] });
+  expect(root?.hiddenProblems).toEqual([{ route: "shop/side", signals: [sideSignal] }]);
+  expect(g.edges.map((e) => e.id)).toContain(`${R("root")}>${B("svc-a")}`);
+  // Collapsing mid only hides leaf; leaf's row ends at mid.
+  const mid = buildGraph(nested(), new Set(), { collapsed: new Set([chain("root", "mid")]) });
+  expect(ids(mid, "route")).toEqual([R("root"), chain("root", "mid"), chain("root", "side")]);
+  expect(mid.nodes.find((n) => n.id === chain("root", "mid"))?.hiddenRoutes).toBe(1);
+  expect(mid.edges.map((e) => e.id)).toContain(`${chain("root", "mid")}>${B("svc-a")}`);
+});
+
+it("an edge from a collapsed route keys shares by the hidden routes' rules: 30 % and 80 % show no share", () => {
+  const rows = [
+    row("http", ["root", "c1"], "svc-a", { share: 30 }),
+    row("http", ["root", "c1"], "svc-b", { share: 70 }),
+    row("http", ["root", "c2"], "svc-a", { share: 80 }),
+    row("http", ["root", "c2"], "svc-c", { share: 20 }),
+  ];
+  const g = buildGraph(rows, new Set(), { collapsed: new Set([R("root")]) });
+  const e = g.edges.find((x) => x.id === `${R("root")}>${B("svc-a")}`);
+  expect(e?.rows).toEqual([0, 2]);
+  expect(e?.share).toBeUndefined();
+  // One hidden route's rule alone still shows its share.
+  expect(g.edges.find((x) => x.id === `${R("root")}>${B("svc-b")}`)?.share).toBe(70);
 });
 
 it("a child delegated from two roots appears under each root it is reached from", () => {
   const rows = [row("http", ["p1", "child"], "svc-a"), row("https", ["p2", "child"], "svc-a")];
-  const g = buildGraph(rows, new Set([R("p1"), R("p2")]));
+  const g = buildGraph(rows);
   expect(ids(g, "route")).toEqual([R("p1"), chain("p1", "child"), R("p2"), chain("p2", "child")]);
   expect(g.nodes.find((n) => n.id === chain("p2", "child"))?.delegatedUnder).toBe(R("p2"));
   expect(g.nodes.find((n) => n.id === chain("p1", "child"))?.rows).toEqual([0]);
   // A route attached directly as well is its own root, apart from its delegated copies.
-  const direct = buildGraph([...rows, row("http", ["child"], "svc-a")], new Set([R("p1")]));
+  const direct = buildGraph([...rows, row("http", ["child"], "svc-a")]);
   expect(direct.nodes.find((n) => n.id === R("child"))?.delegatedUnder).toBeUndefined();
 });
 
 it("expanding a delegated leaf opens its rules between it and its backends", () => {
   const g = buildGraph(
     [row("http", ["root", "leaf"], "svc-a", { matches: prefix("/x") })],
-    new Set([R("root"), chain("root", "leaf")]),
+    new Set([chain("root", "leaf")]),
   );
   const rule = `u:${chain("root", "leaf")}#0`;
   expect(g.nodes.find((n) => n.id === rule)).toMatchObject({ kind: "rule", name: "PathPrefix /x", rule: 0 });

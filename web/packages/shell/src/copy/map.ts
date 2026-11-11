@@ -41,11 +41,15 @@ export const mapCopy = {
   tableTip: "Show these paths as a table", // S798
   tableLabel: "Paths through this Gateway", // S799
   rule: (n: number) => `Rule ${n}`, // S800
-  expand: "Expand", // S801
-  collapse: "Collapse", // S802
+  showRules: "Show rules", // S801
+  hideRules: "Hide rules", // S802
   expandNode: (name: string) => `Expand ${name}`, // S803
   collapseNode: (name: string) => `Collapse ${name}`, // S804
   focus: "Focus on this", // S805
   clearFocus: "Clear focus", // S806
   focused: (kind: string, name: string) => `Showing only the paths through ${kind} ${name}.`, // S807
+  hideDelegated: "Hide delegated routes", // S808
+  showDelegated: "Show delegated routes", // S809
+  hiddenDelegated: (n: number) => `+${n} delegated`, // S810
+  focusGone: "The focused node is not on the map.", // S811
 };

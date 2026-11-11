@@ -127,39 +127,83 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   }, [opening, summary, large, setFilter, params]);
   const prompt = typeof opening === "object" && problemsOnly(params) ? opening : undefined;
 
-  // ?expand= (repeatable) opens routes into rules and delegated routes; ?focus= keeps one node's paths (design §6.1).
+  // ?expand= opens routes into rules, ?collapse= hides a route's delegated routes (both repeatable), and ?focus=
+  // keeps one node's paths (design §6.1).
   const expandParam = params.getAll("expand").join("\n");
+  const collapseParam = params.getAll("collapse").join("\n");
   const expanded = useMemo(() => new Set(expandParam ? expandParam.split("\n") : []), [expandParam]);
+  const collapsed = useMemo(() => new Set(collapseParam ? collapseParam.split("\n") : []), [collapseParam]);
   const focusId = params.get("focus") ?? undefined;
   // Under a state filter the healthy rows are not loaded, so no edge can be known to be broken. The rows answer
   // paths.query, which lags the URL until a new filter's rows arrive.
   const stateFiltered = new URLSearchParams(paths.query?.split("?")[1] ?? "").has("state");
   const full = useMemo(
+    () => gatewayGraph(gateway, paths.rows, expanded, { stateFiltered, collapsed }),
+    [gateway, paths.rows, expanded, stateFiltered, collapsed],
+  );
+  // Every route, none collapsed: what find searches, and what expand and collapse ids are checked against.
+  const open = useMemo(
     () => gatewayGraph(gateway, paths.rows, expanded, { stateFiltered }),
     [gateway, paths.rows, expanded, stateFiltered],
   );
   const graph = useMemo(() => (focusId ? focusSubgraph(full, focusId) : full), [full, focusId]);
   const focusNode = focusId ? graph.nodes.find((n) => n.id === focusId) : undefined;
-  // Expand and focus are views the user steps through, so each change is a history entry for back and forward.
+  // Expand, collapse and focus are views the user steps through, so each change is a history entry.
   const setView = useCallback(
-    (change: (q: URLSearchParams) => void) => {
+    (change: (q: URLSearchParams) => void, replace = false) => {
       const q = new URLSearchParams(search);
       change(q);
       const s = q.toString();
-      navigate({ search: s ? `?${s}` : "" });
+      if (s !== new URLSearchParams(search).toString()) navigate({ search: s ? `?${s}` : "" }, { replace });
     },
     [search, navigate],
   );
+  // A route that delegates opens and closes its delegated routes; one that delegates none, its rules.
+  // Collapsing a route drops the expand and collapse ids of the routes under it.
   const onToggle = useCallback(
-    (id: string) =>
+    (id: string) => {
+      const n = full.nodes.find((x) => x.id === id);
+      const key = n?.delegates ? "collapse" : "expand";
       setView((q) => {
-        const all = q.getAll("expand");
-        q.delete("expand");
-        for (const x of all) if (x !== id) q.append("expand", x);
-        if (!all.includes(id)) q.append("expand", id);
-      }),
-    [setView],
+        const all = q.getAll(key);
+        const adding = !all.includes(id);
+        q.delete(key);
+        for (const x of all) if (x !== id) q.append(key, x);
+        if (adding) q.append(key, id);
+        if (adding && key === "collapse")
+          for (const k of ["expand", "collapse"]) {
+            const keep = q.getAll(k).filter((x) => !x.startsWith(`${id}~`));
+            q.delete(k);
+            for (const x of keep) q.append(k, x);
+          }
+      });
+    },
+    [full, setView],
   );
+  const onRules = (id: string) =>
+    setView((q) => {
+      const all = q.getAll("expand");
+      q.delete("expand");
+      for (const x of all) if (x !== id) q.append("expand", x);
+      if (!all.includes(id)) q.append("expand", id);
+    });
+  // Once every row of an unfiltered result has arrived, ids of routes no longer on it are dropped.
+  const unfiltered = !["state", "kind", "namespace", "q"].some((k) => params.has(k));
+  const stale = useMemo(() => {
+    if (!paths.done || !unfiltered) return [];
+    const ids = new Set(open.nodes.map((n) => n.id));
+    return [...expanded, ...collapsed].filter((id) => !ids.has(id));
+  }, [paths.done, unfiltered, open, expanded, collapsed]);
+  useEffect(() => {
+    if (!stale.length) return;
+    setView((q) => {
+      for (const k of ["expand", "collapse"]) {
+        const keep = q.getAll(k).filter((x) => !stale.includes(x));
+        q.delete(k);
+        for (const x of keep) q.append(k, x);
+      }
+    }, true);
+  }, [stale, setView]);
   const setFocusNode = (id?: string) => setView((q) => (id ? q.set("focus", id) : q.delete("focus")));
   // ?view=table shows the map's rows as a path table, the map's accessible equivalent (design §6.1, item 8).
   const table = params.get("view") === "table";
@@ -205,10 +249,22 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const [find, setFind] = useState("");
   const [at, setAt] = useState(0);
   const [centre, setCentre] = useState<{ id: string; seq: number }>();
-  const found = useMemo(() => matches(graph.nodes, find), [graph.nodes, find]);
+  // Find searches every route, including those a collapsed parent hides, within the focus when one is set.
+  const findable = useMemo(() => (focusId ? focusSubgraph(open, focusId) : open).nodes, [open, focusId]);
+  const found = useMemo(() => matches(findable, find), [findable, find]);
   const goTo = (list: MapNode[], k: number) => {
     const n = list[k];
     if (!n) return;
+    // A hidden route is shown first: every route above it leaves collapse.
+    if (n.kind === "route" && !graph.nodes.some((x) => x.id === n.id)) {
+      const parts = n.id.slice(2).split("~");
+      const above = parts.slice(1).map((_, i) => `r:${parts.slice(0, i + 1).join("~")}`);
+      setView((q) => {
+        const keep = q.getAll("collapse").filter((x) => !above.includes(x));
+        q.delete("collapse");
+        for (const x of keep) q.append("collapse", x);
+      });
+    }
     setSelected(n.id);
     setPanelFocus(false);
     setCentre((f) => ({ id: n.id, seq: (f?.seq ?? 0) + 1 }));
@@ -217,7 +273,7 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const onFind = (text: string) => {
     setFind(text);
     setAt(0);
-    goTo(matches(graph.nodes, text), 0);
+    goTo(matches(findable, text), 0);
   };
   const onFindNext = () => goTo(found, at % Math.max(found.length, 1));
 
@@ -258,7 +314,7 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
         {focusId ? (
           <span data-testid="map-focus">
-            {focusNode ? `${mapCopy.focused(kindLabel(focusNode), focusNode.name)} ` : null}
+            {focusNode ? `${mapCopy.focused(kindLabel(focusNode), focusNode.name)} ` : `${mapCopy.focusGone} `}
             <QuietButton type="button" onClick={clearFocus}>
               {mapCopy.clearFocus}
             </QuietButton>
@@ -309,7 +365,8 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
               rows={paths.rows}
               takeFocus={panelFocus}
               onClose={close}
-              onToggle={node.kind === "route" ? () => onToggle(node.id) : undefined}
+              onRules={() => onRules(node.id)}
+              onDelegated={() => onToggle(node.id)}
               focused={node.id === focusId}
               onFocus={(on) => setFocusNode(on ? node.id : undefined)}
             />

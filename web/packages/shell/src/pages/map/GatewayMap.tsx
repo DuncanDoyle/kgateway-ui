@@ -55,8 +55,12 @@ const Card = styled.div<{ $selected: boolean }>`
     background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
   }
   .kind {
+    padding-right: 20px;
     font-size: ${(p) => p.theme.font.size.xs};
     color: ${(p) => p.theme.color.textMuted};
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .name {
     font-family: ${(p) => p.theme.font.mono};
@@ -94,9 +98,11 @@ type MapNodeData = {
   state: HealthState;
   delegated: boolean;
   selected: boolean;
-  /** Set on a route card: expands or collapses it. */
+  /** Set on a route card: opens or closes it (its delegated routes, else its rules). */
   toggle?: () => void;
-  expanded?: boolean;
+  open?: boolean;
+  /** A collapsed route's count of hidden delegated routes. */
+  hidden?: number;
 };
 type MapFlowNode = Node<MapNodeData, "map">;
 type MapEdgeData = Pick<MapEdge, "state" | "broken" | "share"> & { dim: boolean };
@@ -127,6 +133,7 @@ function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
       <div className="kind">
         {data.kind}
         {data.delegated && ` · ${cellCopy.delegated}`}
+        {data.hidden ? ` · ${mapCopy.hiddenDelegated(data.hidden)}` : null}
       </div>
       <div className="name" title={data.name}>
         {data.name}
@@ -139,14 +146,14 @@ function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
           data-testid="map-toggle"
           // Out of the tab order: the map is one tab stop, and the side panel offers the same action by keyboard.
           tabIndex={-1}
-          aria-label={(data.expanded ? mapCopy.collapseNode : mapCopy.expandNode)(data.name)}
-          aria-expanded={data.expanded}
+          aria-label={(data.open ? mapCopy.collapseNode : mapCopy.expandNode)(data.name)}
+          aria-expanded={data.open}
           onClick={(e) => {
             e.stopPropagation();
             data.toggle?.();
           }}
         >
-          {data.expanded ? <Minus size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+          {data.open ? <Minus size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
         </Toggle>
       ) : null}
       <Handle type="source" position={Position.Right} isConnectable={false} />
@@ -203,7 +210,7 @@ interface GatewayMapProps {
   centre?: { id: string; seq: number };
   /** The query the graph's rows answer, and the focus; a new one redraws the canvas and fits it, a poll keeps the view. */
   view: string;
-  /** Expands or collapses a route node. */
+  /** Opens or closes a route node: shows or hides its delegated routes, or, for a route that delegates none, its rules. */
   onToggle?: (id: string) => void;
   stylesOverride?: SerializedStyles;
 }
@@ -277,7 +284,8 @@ export function GatewayMap({ graph, selected, onSelect, centre, view, onToggle, 
             delegated: !!n.delegatedUnder,
             selected: n.id === selected,
             toggle: n.kind === "route" && onToggle ? () => onToggle(n.id) : undefined,
-            expanded: !!n.expanded,
+            open: n.delegates ? !n.collapsed : !!n.expanded,
+            hidden: n.hiddenRoutes,
           },
           position: at.get(n.id) ?? { x: 0, y: 0 },
           // A fixed size: a new node object keeps its dimensions, so a hover never hides the map while it re-measures.

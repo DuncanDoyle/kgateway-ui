@@ -66,7 +66,7 @@ export function changedColumns(a: MapGraph, b: MapGraph): Set<NodeKind> {
 /**
  * Positions in fixed columns, each ordered by the barycentre of its connected nodes over a few sweeps,
  * so edges cross less (design §6.2). Delegated routes stay right under their parent, indented a step per level.
- * The rule column takes a place only when it has nodes. Deterministic.
+ * The rule column always keeps its place, so opening a route into rules moves no other column. Deterministic.
  * With changed, only those columns are reordered; the others keep prev's heights, or their order in g.
  * A column with a node prev lacks is reordered too, since a kept column has no place for it.
  */
@@ -130,9 +130,8 @@ export function layoutColumns(
 
   // Columns centre on y = 0; a column that did not move keeps prev's heights.
   const out = new Map<string, Point>();
-  const shown = COLUMNS.filter((k, c) => k !== "rule" || (cols[c] as Column).length > 0);
   cols.forEach((col, c) => {
-    const x = shown.indexOf(COLUMNS[c] as NodeKind) * COL_W;
+    const x = c * COL_W;
     const depth = new Map<string, number>();
     const walk = (u: Unit, d: number) => {
       depth.set(u.id, d);

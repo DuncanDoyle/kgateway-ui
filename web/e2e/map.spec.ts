@@ -318,7 +318,15 @@ test("expanding a route opens its rule between it and its backends, keeps the ot
   page,
 }) => {
   const map = await openMap(page);
-  const fixed = [node(map, "traffic/traffic"), node(map, "http"), node(map, "traffic/asleep").first()];
+  // Every column keeps its place, backends included: the rule column's place is always kept.
+  const fixed = [
+    node(map, "traffic/traffic"),
+    node(map, "http"),
+    node(map, "traffic/asleep").first(),
+    node(map, "traffic/web-a"),
+    node(map, "traffic/web-b"),
+    node(map, "shop/httpbin"),
+  ];
   const before = await Promise.all(fixed.map(position));
   await node(map, "traffic/weighted")
     .getByRole("button", { name: mapCopy.expandNode("traffic/weighted") })
@@ -327,7 +335,6 @@ test("expanding a route opens its rule between it and its backends, keeps the ot
   const rule = node(map, "PathPrefix /weighted");
   await expect(rule).toHaveCount(1);
   await expect(rule.locator(".kind")).toHaveText(mapCopy.rule(1));
-  // The Gateway, listener and route columns did not move.
   expect(await Promise.all(fixed.map(position))).toEqual(before);
   // Each rule edge carries its rule's share: 90 % is drawn thicker than 10 %.
   const rid = await rule.getAttribute("data-id");

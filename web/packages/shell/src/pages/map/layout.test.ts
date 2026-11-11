@@ -73,7 +73,7 @@ it("one node per distinct Gateway, listener, route and backend, each with the ro
   expect(new Set(g.edges.map((e) => e.id)).size).toBe(g.edges.length);
 });
 
-it("an expanded root's delegated routes sit under it with delegatedUnder, and only the root has a listener edge", () => {
+it("delegated routes sit under their root with delegatedUnder, and only the root has a listener edge", () => {
   const rows = [
     row("http", ["parent"], undefined, { action: "delegate", shareState: "not-shown", share: undefined }),
     row("http", ["parent", "child"], "svc-a"),
@@ -81,7 +81,7 @@ it("an expanded root's delegated routes sit under it with delegatedUnder, and on
     row("http", ["parent", "child2"], "svc-b"),
   ];
   const root = "r:gateway.networking.k8s.io/HTTPRoute/shop/parent";
-  const g = buildGraph(rows, new Set([root]));
+  const g = buildGraph(rows, new Set());
   // A delegated route's id is its chain from the root.
   const child = `${root}~gateway.networking.k8s.io/HTTPRoute/shop/child`;
   const child2 = `${root}~gateway.networking.k8s.io/HTTPRoute/shop/child2`;
@@ -104,10 +104,7 @@ it("an expanded root's delegated routes sit under it with delegatedUnder, and on
 });
 
 it("a route attached directly and also delegated is a root", () => {
-  const g = buildGraph(
-    [row("http", ["parent", "child"], "svc-a"), row("http", ["child"], "svc-a")],
-    new Set(["r:gateway.networking.k8s.io/HTTPRoute/shop/parent"]),
-  );
+  const g = buildGraph([row("http", ["parent", "child"], "svc-a"), row("http", ["child"], "svc-a")], new Set());
   expect(
     g.nodes.find((n) => n.id === "r:gateway.networking.k8s.io/HTTPRoute/shop/child")?.delegatedUnder,
   ).toBeUndefined();

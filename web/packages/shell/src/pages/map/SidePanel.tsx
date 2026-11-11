@@ -55,6 +55,13 @@ const Panel = styled.aside<{ stylesOverride?: SerializedStyles }>`
     margin: ${(p) => p.theme.space(3)} 0 ${(p) => p.theme.space(1)};
     font-size: ${(p) => p.theme.font.size.sm};
   }
+  h4.route {
+    margin: ${(p) => p.theme.space(2)} 0 ${(p) => p.theme.space(1)};
+    font-family: ${(p) => p.theme.font.mono};
+    font-size: ${(p) => p.theme.font.size.code};
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
   ul {
     margin: 0;
     padding: 0;
@@ -153,8 +160,10 @@ interface SidePanelProps {
   /** Move focus into the panel when it mounts; the map keys it by node, so another node mounts it again. */
   takeFocus?: boolean;
   onClose: () => void;
-  /** Expands or collapses a route node. */
-  onToggle?: () => void;
+  /** Shows or hides a route's rule nodes. */
+  onRules?: () => void;
+  /** Shows or hides a delegating route's delegated routes. */
+  onDelegated?: () => void;
   /** The map is focused on this node. */
   focused: boolean;
   /** Focuses the map on this node, or clears the focus. */
@@ -173,7 +182,8 @@ export function SidePanel({
   rows,
   takeFocus,
   onClose,
-  onToggle,
+  onRules,
+  onDelegated,
   focused,
   onFocus,
   stylesOverride,
@@ -200,6 +210,7 @@ export function SidePanel({
           <div className="kind">
             {kindLabel(node)}
             {node.delegatedUnder && ` · ${cellCopy.delegated}`}
+            {node.hiddenRoutes ? ` · ${mapCopy.hiddenDelegated(node.hiddenRoutes)}` : null}
           </div>
           <h2>{node.name}</h2>
           <HealthBadge state={node.state} />
@@ -209,9 +220,14 @@ export function SidePanel({
         </Close>
       </header>
       <div className="actions">
-        {node.kind === "route" && onToggle ? (
-          <TextButton type="button" onClick={onToggle}>
-            {node.expanded ? mapCopy.collapse : mapCopy.expand}
+        {node.delegates && onDelegated ? (
+          <TextButton type="button" onClick={onDelegated}>
+            {node.collapsed ? mapCopy.showDelegated : mapCopy.hideDelegated}
+          </TextButton>
+        ) : null}
+        {node.ends && onRules ? (
+          <TextButton type="button" onClick={onRules}>
+            {node.expanded ? mapCopy.hideRules : mapCopy.showRules}
           </TextButton>
         ) : null}
         <TextButton type="button" onClick={() => onFocus(!focused)}>
@@ -253,6 +269,23 @@ export function SidePanel({
           ) : (
             <p className="muted">{mapCopy.noProblems}</p>
           )}
+          {/* A collapsed route's hidden delegated routes keep their own problems, under their names. */}
+          {node.hiddenProblems?.map((h) => (
+            <section key={h.route} data-testid="map-panel-hidden">
+              <h4 className="route">{h.route}</h4>
+              <ul>
+                {h.signals.map((s) => {
+                  const text = signalText(s);
+                  return (
+                    <li key={`${s.kind}|${text}`}>
+                      <HealthIcon state={s.state} size={14} />
+                      {text}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
         </>
       )}
       {ports.length ? (
