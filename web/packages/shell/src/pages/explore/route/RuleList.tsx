@@ -316,7 +316,7 @@ function BackendItem({ b, installId, serves, tcp }: BackendItemProps) {
 // region Component
 interface RuleListProps {
   installId: string;
-  /** The route's kind: TCPRoute and TLSRoute rules have no matches or filters, and connections fail. */
+  /** The route's kind: TCPRoute and TLSRoute rules have no matches, and connections fail. */
   kind: string;
   rules: Rule[];
   /** The attachments the backend lines' signals index. */
@@ -341,7 +341,7 @@ export function RuleList({ installId, kind, rules, serves = [], stylesOverride }
               {routeCopy.rule(r.index + 1)}
               {r.name ? <span className="name">{r.name}</span> : null}
             </h3>
-            {/* TCPRoute and TLSRoute rules match every connection and have no filters. */}
+            {/* TCPRoute and TLSRoute rules match every connection; the Filters area stays (§7.3). */}
             {tcp ? null : (
               <div>
                 <h4>{routeCopy.matches}</h4>
@@ -363,16 +363,14 @@ export function RuleList({ installId, kind, rules, serves = [], stylesOverride }
                 )}
               </div>
             )}
-            {tcp ? null : (
-              <div className="filters" data-testid="rule-filters">
-                <h4>{routeCopy.filters}</h4>
-                {r.filters.length ? (
-                  <FilterList filters={r.filters} installId={installId} />
-                ) : (
-                  <span className="muted">{traceCopy.noFilters}</span>
-                )}
-              </div>
-            )}
+            <div className="filters" data-testid="rule-filters">
+              <h4>{routeCopy.filters}</h4>
+              {r.filters.length ? (
+                <FilterList filters={r.filters} installId={installId} />
+              ) : (
+                <span className="muted">{traceCopy.noFilters}</span>
+              )}
+            </div>
             <div className="refs">
               <h4>{routeCopy.backendRefs}</h4>
               <ShareBar refs={r.backendRefs} tcp={tcp} />

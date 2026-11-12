@@ -4,6 +4,7 @@ import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
 import grpcGolden from "../../../../../../pkg/api/testdata/golden/route-detail-grpc.json";
 import tcpGolden from "../../../../../../pkg/api/testdata/golden/route-detail-tcp.json";
+import tlsGolden from "../../../../../../pkg/api/testdata/golden/route-detail-tls.json";
 import type { BackendRef, RouteDetail } from "../../api/types";
 import { traceCopy } from "../../copy/explorer";
 import { hrefPath, renderWithTheme } from "../../test/render";
@@ -81,7 +82,7 @@ it("serves lists each attachment with its state, and a backend's signals name th
   );
 });
 
-it("a TCPRoute shows no match line or filters, and a failing ref says connections fail", async () => {
+it("a TCPRoute shows no match line, and a failing ref says connections fail", async () => {
   const d = detail(tcpGolden);
   const cart = refs(d).find((b) => b.ref.name === "cart-svc") as BackendRef;
   cart.shareState = "failing";
@@ -93,13 +94,22 @@ it("a TCPRoute shows no match line or filters, and a failing ref says connection
   expect(within(rule).queryByTestId("match")).toBeNull();
   expect(within(rule).queryByTestId("match-empty")).toBeNull();
   expect(within(rule).queryByText("Matches")).toBeNull();
-  expect(within(rule).queryByTestId("rule-filters")).toBeNull();
   expect(within(rule).getByTestId("share-failing")).toHaveTextContent("100 % of connections fail");
   expect(within(line(rule, "cart-svc")).getByTestId("share")).toHaveTextContent("Share 100 % connections fail");
   expect(rule).not.toHaveTextContent("requests fail");
   // Weight 0 beside a weighted ref: 0 % with no traffic, and no part of the bar.
   expect(within(line(rule, "other-svc")).getByTestId("share")).toHaveTextContent("Share 0 % no traffic");
   expect(within(rule).getAllByTestId("share-segment")).toHaveLength(1);
+});
+
+it.each([
+  ["TCPRoute", "tcp", tcpGolden],
+  ["TLSRoute", "tls", tlsGolden],
+] as const)("a %s rule keeps the marked Filters area, as an HTTP rule does", async (kind, name, golden) => {
+  const rule = await open(kind, "shop", name, detail(golden));
+  const area = within(rule).getByTestId("rule-filters");
+  expect(within(area).getByRole("heading", { name: "Filters" })).toBeVisible();
+  expect(area).toHaveTextContent(traceCopy.noFilters);
 });
 
 it("all weights 0: the bar says no traffic and every ref shows 0 %, no traffic", async () => {
