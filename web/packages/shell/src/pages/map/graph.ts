@@ -101,10 +101,11 @@ interface RowIds {
   end?: string;
 }
 
-/** The node a signal belongs to, by its kind and ref; anything unplaced goes to the row's last node. */
+/** The node a signal belongs to, by its kind, listener and ref; anything unplaced goes to the row's last node. */
 function signalNode(s: PathSignal, r: PathRow, ids: RowIds): string {
   const last = ids.end ?? ids.routes[ids.routes.length - 1] ?? ids.listener;
-  if (s.kind === "listener" || (s.kind === "waiting" && s.code === "listener")) return ids.listener;
+  if (s.kind === "listener" || s.listener === r.listener.name || (s.kind === "waiting" && s.code === "listener"))
+    return ids.listener;
   if (same(s.ref, r.backend) && ids.end) return ids.end;
   const i = r.routes.findIndex((x) => same(s.ref, x));
   if (i >= 0) return ids.routes[i] ?? last;

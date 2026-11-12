@@ -664,6 +664,29 @@ it("each node's accessible name gives its kind, name, state and failing paths", 
   expect(map).not.toHaveTextContent(/delete/i);
 });
 
+it("a listener whose Programmed condition is missing waits on its own node; the healthy Gateway is not blamed", async () => {
+  serve(() => {
+    const b = edgePaths();
+    const rows = b.rows.map((r) => {
+      if (r.listenerSet || r.listener.name !== "http") return r;
+      // The server names the listener on a waiting signal whose ref is the Gateway.
+      const signal = {
+        kind: "waiting" as const,
+        code: "Programmed",
+        ref: r.gateway,
+        listener: "http",
+        state: "unknown" as const,
+      };
+      return { ...r, problem: { state: "unknown" as const, signals: [signal] } };
+    });
+    return { ...b, rows };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  expect(flowNode(map, "http").getAttribute("aria-label")).toMatch(/^Listener http, Unknown/);
+  expect(flowNode(map, "infra/edge").getAttribute("aria-label")).toMatch(/^Gateway infra\/edge, Healthy/);
+});
+
 it("the table toggle shows the map's rows as a path table, keeps the filters and lives in the URL", async () => {
   serve(() => edgePaths());
   mount("?tab=map&kind=HTTPRoute");
