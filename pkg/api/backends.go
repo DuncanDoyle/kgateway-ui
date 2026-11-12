@@ -13,6 +13,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/paths"
@@ -154,7 +155,16 @@ func (h *handler) backendDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case ref.Group == "" && ref.Kind == "Service":
-		h.serviceDetail(r.Context(), &out, p.Model, i.Resolved.ID(), b)
+		if h.serviceDetail(r.Context(), &out, p.Model, i.Resolved.ID(), b) {
+			// The read contradicts the cache the problem comes from: unknown at best, never its green.
+			w := paths.Signal{Kind: paths.SignalWaiting, Code: health.CodeBackendNoReadyEndpoints, Ref: ref, State: health.StateUnknown}
+			pr := paths.Problem{State: b.Problem.State, Signals: append(slices.Clip(b.Problem.Signals), w)}
+			if pr.State == health.StateHealthy {
+				pr.State = health.StateUnknown
+			}
+			out.Problem = problemDTO(l, titles, pr)
+			out.Status = problemDTO(l, titles, paths.Problem{Signals: append(slices.Clip(b.Own), w)}).Signals
+		}
 	default:
 		if u, _ := stored(p.Model, ref); u != nil {
 			out.Conditions = conditions(u, objects.Conditions(u))
@@ -167,8 +177,9 @@ func (h *handler) backendDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 // serviceDetail fills a Service's facts, its endpoints per referenced port
-// and its port chain (design §9). The caller has authorised the Service.
-func (h *handler) serviceDetail(ctx context.Context, out *BackendDetail, m *engine.Model, install string, b *paths.Backend) {
+// and its port chain (design §9). The caller has authorised the Service. It
+// reports whether a complete read found no ready endpoint on a port the cache counts ready.
+func (h *handler) serviceDetail(ctx context.Context, out *BackendDetail, m *engine.Model, install string, b *paths.Backend) (disagree bool) {
 	svc, ss := serviceFacts(m.Snapshot, b.Ref)
 	if svc != nil {
 		out.Service = &ServiceFactDTO{Type: svc.Type, Ports: make([]PortDTO, 0, len(svc.Ports))}
@@ -207,6 +218,9 @@ func (h *handler) serviceDetail(ctx context.Context, out *BackendDetail, m *engi
 			src.Items = portItems(res.Items, sp.Name)
 			if res.Complete == endpoints.Complete {
 				src.Ready, src.Total = familyCounts(src.Items)
+				if *src.Ready == 0 && c != nil && c.Ready != nil && *c.Ready > 0 {
+					src.CachedReady, disagree = c.Ready, true
+				}
 			} else if c != nil && c.Complete == paths.EndpointsComplete {
 				src.Ready, src.Total, src.ReadAt = c.Ready, c.Total, wireTime(c.ReadAt)
 			}
@@ -227,6 +241,7 @@ func (h *handler) serviceDetail(ctx context.Context, out *BackendDetail, m *engi
 		out.Sources = append(out.Sources, src)
 		out.PortChain = append(out.PortChain, chain)
 	}
+	return disagree
 }
 
 // serviceFacts are the cached fact of Service ref, nil when absent, and its

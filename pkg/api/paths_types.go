@@ -168,6 +168,9 @@ type EndpointsDTO struct {
 	Ready *int          `json:"ready,omitempty"`
 	Total *int          `json:"total,omitempty"`
 	Items []EndpointDTO `json:"items,omitempty"`
+	// CachedReady is the cache's ready count, set only when a complete read
+	// finds none ready while the cache counts some: the two sources disagree.
+	CachedReady *int `json:"cachedReady,omitempty"`
 }
 
 // PortDTO is a backend port and its Service port name, when known.

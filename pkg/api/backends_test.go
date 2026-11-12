@@ -443,6 +443,30 @@ func TestBackendsUnusedRejected(t *testing.T) {
 	}
 }
 
+// §9.3, D-006: a complete scoped read with no ready endpoint, while the cache
+// counts one ready, makes the detail unknown at best and keeps the cached
+// count beside the read's; no finding is added.
+func TestBackendDetailReadContradictsCache(t *testing.T) {
+	r := &countingReader{items: map[string][]endpoints.Endpoint{
+		"named-svc": {{Address: "10.0.1.1", Port: 8080, PortName: "web", Pod: "named-a"}, {Address: "10.0.1.2", Port: 8080, PortName: "web", Pod: "named-b"}},
+		"cart-svc":  namedReader().items["cart-svc"]}}
+	_, srv, _ := startWith(t, backendsSetup(nil, r), backendsWorld()...)
+	d := get[BackendDetail](t, srv, detailURL("-", "Service", "named-svc"), 200)
+	s := d.Sources[0]
+	if s.Complete != endpoints.Complete || s.Ready == nil || *s.Ready != 0 || s.CachedReady == nil || *s.CachedReady != 1 {
+		t.Fatalf("source %+v (cachedReady %v)", s, s.CachedReady)
+	}
+	waiting := func(sg SignalDTO) bool { return sg.Kind == paths.SignalWaiting && sg.Code == "KGWUI-023" && sg.State == "unknown" }
+	if d.Problem.State == "healthy" || !slices.ContainsFunc(d.Problem.Signals, waiting) || !slices.ContainsFunc(d.Status, waiting) {
+		t.Fatalf("problem %+v status %+v", d.Problem, d.Status)
+	}
+	// The cache and a read that agree add nothing.
+	agree := get[BackendDetail](t, srv, detailURL("-", "Service", "cart-svc"), 200)
+	if agree.Sources[0].CachedReady != nil || slices.ContainsFunc(agree.Status, waiting) {
+		t.Fatalf("agreeing read %+v status %+v", agree.Sources[0], agree.Status)
+	}
+}
+
 // §8.1, §13: the list's facets are the Gateways and namespaces of the visible
 // backends; each applies every filter but its own, so a selected value keeps
 // the others selectable.
