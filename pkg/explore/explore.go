@@ -124,7 +124,7 @@ type ParentLink struct {
 	// Accepted, ResolvedRefs and the install's optional route types (design §7.3).
 	Cond *metav1.Condition
 	// Programming is the first current False optional type when Cond is
-	// ResolvedRefs: a programming failure that Cond's order would hide.
+	// Accepted or ResolvedRefs: a programming failure that Cond's order would hide.
 	Programming *metav1.Condition
 	// Pending is why the status entry is not current, for a pending link.
 	Pending string

@@ -542,7 +542,8 @@ func (p *projector) delegation(ctx int32, routes []objects.Ref) []Signal {
 // expected (2.3 writes none under the key) gives nothing, missing, stale or
 // undecided gives waiting. A current entry's False conditions are errors,
 // except the UnsupportedValue a compatible check expects from another
-// context's hostname rejection. Without a check, the status alone decides.
+// context's hostname rejection; a programming failure beside it still counts.
+// Without a check, the status alone decides.
 // The last child's ResolvedRefs=False is left to its 013 and 014 when it has any.
 func (p *projector) hop(parent, child objects.Ref, last bool) []Signal {
 	waiting := []Signal{{Kind: SignalWaiting, Ref: child, State: health.StateUnknown}}

@@ -516,6 +516,9 @@ func TestProjectDelegatedChildStatus(t *testing.T) {
 		testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByParent"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
 	unsupported := testutil.RouteParent{Ref: apiRef, Controller: testutil.Controller, Conds: []metav1.Condition{
 		testutil.Cond("Accepted", metav1.ConditionFalse, "UnsupportedValue"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	// An independent programming failure whose reason gives no KGWUI-015.
+	unsupportedInvalid := unsupported
+	unsupportedInvalid.Conds = append(slices.Clone(unsupported.Conds), testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "Invalid"))
 	// The parentRef written without its namespace: 2.3 writes no entry under the synthesized key.
 	unkeyed := []objects.ParentRef{{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "api"}}
 	// expectRejection stands in for view C expecting the hostname stage's
@@ -544,6 +547,7 @@ func TestProjectDelegatedChildStatus(t *testing.T) {
 		{"rejection view C does not expect", "v2.5.0", nil, []testutil.RouteParent{unsupported}, false, nil, health.StateError},
 		{"2.3 writes no entry", "v2.3.0", unkeyed, nil, false, nil, health.StateHealthy},
 		{"rejection view C expects", "v2.5.0", nil, []testutil.RouteParent{unsupported}, false, expectRejection, health.StateHealthy},
+		{"expected rejection beside a programming failure", "v2.5.0", nil, []testutil.RouteParent{unsupportedInvalid}, false, expectRejection, health.StateError},
 	} {
 		plain := testutil.WithRules(testutil.HTTPRoute("shop", "plain", tc.parents, tc.status...), prefixes([]string{"/api/a"}, svc("cart")))
 		if tc.stale {

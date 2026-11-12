@@ -339,7 +339,7 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 		}
 	}
 	if c := objects.FindCondition(cs, "Accepted"); c != nil && c.Status == metav1.ConditionFalse {
-		l.Cond = c
+		l.Cond, l.Programming = c, optional
 		return l
 	}
 	if c := objects.FindCondition(cs, "ResolvedRefs"); c != nil && c.Status == metav1.ConditionFalse {
