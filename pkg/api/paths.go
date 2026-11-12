@@ -64,6 +64,7 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	resp.Revision = h.revision(p)
 	writeJSON(w, resp)
 }
 
@@ -119,14 +120,15 @@ func pathsPage(p *engine.Published, i *engine.InstallModel, v *view, t *paths.To
 	if i.Computed == nil {
 		sum.NotComputed = NotComputedNoAttachments
 	}
-	return PathsResponse{Install: i.Resolved.ID(), Revision: revision(p), Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: sum,
-		CollectedAt: wireTime(p.ConfirmedAt)}, nil
+	return PathsResponse{Install: i.Resolved.ID(), Rows: rows, Next: pg.Next, Prev: pg.Prev, Summary: sum, CollectedAt: wireTime(p.ConfirmedAt)}, nil
 }
 
-// revision is the model Seq the projection is keyed by. One Seq fixes the
-// snapshot and computed views, so the topology generation too; the views
-// generation is not added, being a process-wide counter that varies by caller.
-func revision(p *engine.Published) string { return strconv.FormatUint(p.Model.Seq, 10) }
+// revision is this process's boot value and the model Seq the projection is
+// keyed by. One Seq fixes the snapshot and computed views, so the topology
+// too; the boot value tells two processes' equal Seqs apart.
+func (h *handler) revision(p *engine.Published) string {
+	return h.boot + "." + strconv.FormatUint(p.Model.Seq, 10)
+}
 
 // titleKey is a finding's code and resource.
 type titleKey struct {

@@ -46,7 +46,13 @@ type handlerConfig struct {
 	scoped endpoints.ScopedReader
 	// consumersFor, if set, gives an install's non-route backend consumers.
 	consumersFor func(install.Install, *install.Owned) []objects.Consumer
+	// boot names this process in path revisions; "" is the start time.
+	boot string
 }
+
+// WithBoot names the process in the paths revision instead of its start
+// time, so tests get stable bodies.
+func WithBoot(boot string) HandlerOption { return func(c *handlerConfig) { c.boot = boot } }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with
 // CheckExtMounts first; NewHandler logs and skips a mount that fails it.

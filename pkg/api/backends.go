@@ -140,6 +140,7 @@ func (h *handler) backendDetail(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	exposure.Revision = h.revision(p)
 	l := linkerFor(v, p.Model, i)
 	titles := signalTitles(i, b.Problem.Signals)
 	out := BackendDetail{Install: i.Resolved.ID(), Ref: l.linked(ref), Kind: backendKind(b), Type: b.Type, Problem: problemDTO(l, titles, b.Problem),

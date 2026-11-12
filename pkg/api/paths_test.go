@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -349,8 +351,15 @@ func TestPathsRevision(t *testing.T) {
 	}
 	h.clk.set(testutil.Now)
 	h.e.Compute()
-	if again := get[PathsResponse](t, h.srv, pathsURL+"?limit=2&cursor="+first.Next, 200); again.Revision == first.Revision {
+	again := get[PathsResponse](t, h.srv, pathsURL+"?limit=2&cursor="+first.Next, 200)
+	if again.Revision == first.Revision {
 		t.Fatalf("revision %q unchanged by a new publication", again.Revision)
+	}
+	// Another process at the same Seq, as across a restart, has another revision.
+	restarted := httptest.NewServer(NewHandler(h.e, fstest.MapFS{}, nil, WithBoot("other-boot")))
+	t.Cleanup(restarted.Close)
+	if r := get[PathsResponse](t, restarted, pathsURL+"?limit=2", 200).Revision; r == again.Revision {
+		t.Fatalf("revision %q is the same in another process", r)
 	}
 }
 

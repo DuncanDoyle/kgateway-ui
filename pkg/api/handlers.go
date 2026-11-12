@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,9 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	}
 	if h.scoped == nil {
 		h.scoped = endpoints.NoReader
+	}
+	if h.boot = cfg.boot; h.boot == "" {
+		h.boot = strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -103,6 +107,8 @@ type handler struct {
 	scoped endpoints.ScopedReader
 	// consumersFor, if set, gives an install's non-route backend consumers.
 	consumersFor func(install.Install, *install.Owned) []objects.Consumer
+	// boot names this process in path revisions, so a new process restarts a walk.
+	boot string
 }
 
 // WithScopedReader reads one Service's endpoints for backend detail (design
