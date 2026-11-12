@@ -91,23 +91,36 @@ func routeBackendRefs(u *unstructured.Unstructured) []writtenRef {
 		p, hasPort := m["port"].(int64)
 		out = append(out, writtenRef{RefLocation{Path: path, Ref: r}, del, int32(p), hasPort}) //nolint:gosec // a port fits in int32
 	}
-	mirrors := func(fs any, path string) {
+	mirrors := func(fs any, rule, ref int) {
 		for k, f := range asList(fs) {
 			if m, ok := asMap(asMap(f)["requestMirror"])["backendRef"].(map[string]any); ok {
-				add(m, fmt.Sprintf("%s.filters[%d].requestMirror.backendRef", path, k))
+				add(m, RouteRefPath(rule, ref, k))
 			}
 		}
 	}
 	for i, r := range rules {
 		rm := asMap(r)
 		for j, b := range asList(rm["backendRefs"]) {
-			path := fmt.Sprintf("spec.rules[%d].backendRefs[%d]", i, j)
-			add(asMap(b), path)
-			mirrors(asMap(b)["filters"], path)
+			add(asMap(b), RouteRefPath(i, j, -1))
+			mirrors(asMap(b)["filters"], i, j)
 		}
-		mirrors(rm["filters"], fmt.Sprintf("spec.rules[%d]", i))
+		mirrors(rm["filters"], i, -1)
 	}
 	return out
+}
+
+// RouteRefPath is where a route writes a ref, as KGWUI-013/014 candidates
+// name it: backendRefs[ref] of rule, or with filter >= 0 that filter's
+// mirror, on the rule itself when ref is -1.
+func RouteRefPath(rule, ref, filter int) string {
+	path := fmt.Sprintf("spec.rules[%d]", rule)
+	if ref >= 0 {
+		path += fmt.Sprintf(".backendRefs[%d]", ref)
+	}
+	if filter >= 0 {
+		path += fmt.Sprintf(".filters[%d].requestMirror.backendRef", filter)
+	}
+	return path
 }
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
@@ -350,15 +363,20 @@ func kindNotServedMessage(bad []RefLocation) string {
 // field is a core Service ref with a Service the cache lacks or a port it
 // lacks, and every other ref is a core Service ref the cache shows resolving.
 // A ref the UI cannot check may be the cause, so it leaves the finding as is.
-// It needs the Services watch OK: absence from a cache that is not synced says nothing.
+// It needs the Services watch OK, and in a scoped snapshot each ref's namespace
+// read: absence from a cache that did not read it says nothing.
 func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []writtenRef) {
 	if in.Snapshot == nil || !in.Snapshot.Access[cache.ServicesGVR].OK {
 		return
 	}
+	scoped := len(in.Snapshot.RequestedNamespaces) > 0
 	var hit *writtenRef
 	var hitSvc *cache.ServiceFact
 	for i, r := range field {
 		if r.delegation || r.Ref.Group != "" || r.Ref.Kind != "Service" {
+			return
+		}
+		if scoped && !in.Snapshot.NamespaceAccess[cache.ServicesGVR][r.Ref.Namespace].OK {
 			return
 		}
 		svc := in.service(r.Ref)
@@ -381,15 +399,26 @@ func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []written
 		f.Evidence = append(f.Evidence, r.Ref)
 	}
 	if hitSvc == nil {
-		ev.Explanation, f.Detail = RefExplainServiceMissing, fmt.Sprintf(refServiceMissingMessage, name)+" "+f.Detail
+		ev.Explanation, f.Detail = RefExplainServiceMissing, RefServiceSentence(RefExplainServiceMissing, name, 0, nil)+" "+f.Detail
 		return
 	}
-	ports := make([]string, len(hitSvc.Ports))
-	for i, p := range hitSvc.Ports {
-		ports[i] = strconv.Itoa(int(p.Port))
+	for _, p := range hitSvc.Ports {
 		ev.Ports = append(ev.Ports, p.Port)
 	}
-	ev.Explanation, f.Detail = RefExplainServicePort, fmt.Sprintf(refServicePortMessage, name, hit.port, strings.Join(ports, ", "))+" "+f.Detail
+	ev.Explanation, f.Detail = RefExplainServicePort, RefServiceSentence(RefExplainServicePort, name, hit.port, ev.Ports)+" "+f.Detail
+}
+
+// RefServiceSentence is explanation 2 or 3 in plain words for Service name
+// ("namespace/name"): it does not exist, or has no port among ports.
+func RefServiceSentence(explanation, name string, port int32, ports []int32) string {
+	if explanation == RefExplainServiceMissing {
+		return fmt.Sprintf(refServiceMissingMessage, name)
+	}
+	ps := make([]string, len(ports))
+	for i, p := range ports {
+		ps[i] = strconv.Itoa(int(p))
+	}
+	return fmt.Sprintf(refServicePortMessage, name, port, strings.Join(ps, ", "))
 }
 
 // service returns the cached Service r names, or nil.

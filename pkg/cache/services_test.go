@@ -81,8 +81,8 @@ func TestServiceTransformShape(t *testing.T) {
 	w := newEndpointsWorld(t, true, []runtime.Object{svc, ext}, nil)
 	s := w.c.Snapshot()
 	want := []ServiceFact{
-		{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []ServicePort{{"http", 80, 0, "TCP"}, {"metrics", 9090, 9091, "UDP"}}},
-		{Namespace: "shop", Name: "ext", Type: "ExternalName", Ports: []ServicePort{{"http", 80, 80, "TCP"}}},
+		{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []ServicePort{{Name: "http", Port: 80, Protocol: "TCP", TargetName: "web"}, {Name: "metrics", Port: 9090, Target: 9091, Protocol: "UDP"}}},
+		{Namespace: "shop", Name: "ext", Type: "ExternalName", Ports: []ServicePort{{Name: "http", Port: 80, Target: 80, Protocol: "TCP"}}},
 	}
 	if len(s.Services) != 2 {
 		t.Fatalf("Services %+v, want %+v", s.Services, want)
@@ -93,13 +93,28 @@ func TestServiceTransformShape(t *testing.T) {
 			t.Errorf("Service %d: %+v, want %+v", i, g, want[i])
 		}
 	}
-	for _, o := range w.c.services.inf.GetStore().List() {
+	for _, o := range w.c.services[0].inf.GetStore().List() {
 		if _, ok := o.(*serviceEntry); !ok {
 			t.Fatalf("stored Service %T, want only its fact", o)
 		}
 	}
 	if !s.Access[ServicesGVR].OK || !s.Access[EndpointSlicesGVR].OK {
 		t.Fatalf("access %+v", s.Access)
+	}
+}
+
+// A named targetPort keeps its name and has no number; a numeric one has no name.
+func TestServiceFactTargetName(t *testing.T) {
+	svc := testutil.Service("shop", "cart", nil)
+	svc.Spec.Ports = []corev1.ServicePort{
+		{Name: "http", Port: 80, TargetPort: intstr.FromString("web")},
+		{Name: "admin", Port: 9000, TargetPort: intstr.FromInt32(9001)},
+	}
+	w := newEndpointsWorld(t, true, []runtime.Object{svc}, nil)
+	s := w.c.Snapshot()
+	want := []ServicePort{{Name: "http", Port: 80, Protocol: "TCP", TargetName: "web"}, {Name: "admin", Port: 9000, Target: 9001, Protocol: "TCP"}}
+	if len(s.Services) != 1 || !slices.Equal(s.Services[0].Ports, want) {
+		t.Fatalf("Services %+v, want ports %+v", s.Services, want)
 	}
 }
 
@@ -129,7 +144,7 @@ func TestSliceFactsCountReadyPerPortName(t *testing.T) {
 			t.Errorf("slice %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	for _, o := range w.c.slices.inf.GetStore().List() {
+	for _, o := range w.c.slices[0].inf.GetStore().List() {
 		if _, ok := o.(*sliceEntry); !ok {
 			t.Fatalf("stored EndpointSlice %T, want only its fact", o)
 		}

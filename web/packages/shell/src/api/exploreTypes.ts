@@ -1,5 +1,5 @@
 import type { HealthState } from "../theme/tokens";
-import type { DataPlane, ProcessSet } from "./diagTypes";
+import type { DataPlane, ProcessSet, SuggestedFix } from "./diagTypes";
 import type { LabelSelector, Ref, RowReason } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
@@ -254,11 +254,19 @@ export interface KeyMatch {
   name: string;
   value: string;
 }
+/** A GRPCRoute method match as written. */
+export interface GRPCMethod {
+  type?: string;
+  service?: string;
+  method?: string;
+}
+/** An HTTPRoute match after defaults, or a GRPCRoute match as written (headers and grpcMethod); method is HTTP only. */
 export interface Match {
   path?: PathMatch;
   headers?: KeyMatch[];
   queryParams?: KeyMatch[];
   method?: string;
+  grpcMethod?: GRPCMethod;
 }
 export interface Fraction {
   numerator: number;
@@ -294,6 +302,7 @@ export interface BackendState {
   accepted?: Condition;
   restricted?: boolean;
 }
+/** share, shareState, problem and endpoints come from the ref's visible paths; problem is the worst across the route's attachments. */
 export interface BackendRef {
   ref: LinkedRef;
   port?: number;
@@ -302,14 +311,28 @@ export interface BackendRef {
   filters: Filter[];
   delegation?: DelegationRef;
   backend?: BackendState;
+  share?: number;
+  shareState?: PathRow["shareState"];
+  problem?: PathProblem;
+  endpoints?: Endpoints;
 }
-/** One spec rule. An explicit empty matches list is match-all, never "matches nothing". */
+/** One spec rule. An explicit empty matches list is match-all, never "matches nothing"; TCPRoute and TLSRoute rules have []. */
 export interface Rule {
   index: number;
   name?: string;
   matches: Match[];
   filters: Filter[];
   backendRefs: BackendRef[];
+  /** Reserved; never set. */
+  effectiveFilters?: Filter[];
+}
+/** An attachment a route serves through, with the state of its own Gateway, listener and parent status signals. */
+export interface TraceAttachment {
+  gateway: LinkedRef;
+  listenerSet?: LinkedRef;
+  listener: PathListener;
+  hostnames: string[];
+  state: HealthState;
 }
 /** One up-chain step: a ref, or restricted with no identity. A hidden ancestor route has link none and the matches it delegated under (D-024). */
 export interface AncestorStep {
@@ -336,6 +359,7 @@ export interface RouteDetail {
   parentRefs: SpecParentRef[];
   parents: ParentStatus[];
   attachments?: RouteAttachment[];
+  serves?: TraceAttachment[];
   rules: Rule[];
   effective?: EffectiveEdge[];
   effectiveTruncated?: boolean;
@@ -403,4 +427,242 @@ export interface DelegationRow {
   contextsTruncated?: boolean;
   computed: Computed;
   observed: { entry?: ParentStatus; parentCondition?: Condition };
+}
+
+/** Mirrors the path DTOs of pkg/api/paths_types.go (sub-phase 6.2, design §4, §5, §9.5). */
+
+/** A path row's listener; protocol and port are absent when the spec has no such listener. */
+export interface PathListener {
+  name: string;
+  protocol?: string;
+  port?: number;
+}
+/** A GRPCRouteMatch as written. */
+export interface GRPCMatch {
+  method?: GRPCMethod;
+  headers?: KeyMatch[];
+}
+/** One existing signal on a path's chain; code is a finding code, condition type, capability state or view C reason. */
+export interface PathSignal {
+  kind: "gateway" | "listener" | "route-status" | "waiting" | "finding" | "delegation" | "coverage";
+  code?: string;
+  /** A finding signal's message, as the findings API shows it. */
+  title?: string;
+  ref?: LinkedRef;
+  state: HealthState;
+  /** On a route detail backendRef: the serves index of the attachment the signal came from. */
+  attachment?: number;
+  /** The listener of ref a listener's signal is about, waiting ones included. */
+  listener?: string;
+}
+/** A path's worst state and its signals that are not healthy. */
+export interface PathProblem {
+  state: HealthState;
+  signals: PathSignal[];
+}
+/** A backend port and its Service port name, when known. */
+export interface BackendPort {
+  port: number;
+  name?: string;
+}
+/** The proxy process a per-proxy endpoints source reads (#35); never set yet. */
+export interface EndpointsRuntime {
+  install: string;
+  gateway: LinkedRef;
+  proxy: string;
+  instance: string;
+}
+/** One endpoint of a backend detail read. */
+export interface Endpoint {
+  address: string;
+  port?: number;
+  ready: boolean;
+  serving: boolean;
+  terminating: boolean;
+  pod?: string;
+}
+/** One backend port's endpoints from one source; ready and total only when the read establishes a count. */
+export interface Endpoints {
+  source: string;
+  port?: BackendPort;
+  runtime?: EndpointsRuntime;
+  /** Meaningless when complete is "not-applicable": nothing was read. */
+  readAt: string;
+  /** A backend detail's scoped read may also be "timed-out" or "busy". */
+  complete: "complete" | "partial" | "failed" | "unavailable" | "stale" | "not-applicable" | "timed-out" | "busy";
+  ready?: number;
+  total?: number;
+  items?: Endpoint[];
+  /** The cache's ready count, only when a complete read finds none ready while the cache counts some. */
+  cachedReady?: number;
+}
+/**
+ * One path: Gateway → listener → hostnames → route chain → rule → backend.
+ * matches applies to HTTPRoute rows, grpcMatches to GRPCRoute rows; TCPRoute and TLSRoute rows have neither.
+ * matches is null on a delegated row whose view C match is unknown ("match unknown").
+ */
+export interface PathRow {
+  /** The row's identity, unique among the rows of one revision. */
+  id?: string;
+  gateway: LinkedRef;
+  listenerSet?: LinkedRef;
+  listener: PathListener;
+  hostnames: string[];
+  routes: LinkedRef[];
+  delegated: boolean;
+  rule: number;
+  matches: Match[] | null;
+  grpcMatches?: GRPCMatch[];
+  action: "backend" | "redirect" | "direct-response" | "none" | "delegate";
+  delegation?: DelegationRef;
+  backend?: LinkedRef;
+  port?: number;
+  weight: number;
+  share?: number;
+  shareState: "shown" | "not-shown" | "no-traffic" | "failing" | "may-fail" | "mirror";
+  mirror: boolean;
+  mirrorPercent?: number;
+  problem: PathProblem;
+  endpoints?: Endpoints;
+  note?: "unknown" | "unconfirmable" | "not-computed";
+}
+/** Counts of filtered visible paths and the distinct routes, Gateways and backends they reach. */
+export interface PathCounts {
+  paths: number;
+  routes: number;
+  gateways: number;
+  backends: number;
+}
+/** The whole filtered result the caller may see; hidden says some paths were left out. */
+export interface PathSummary extends PathCounts {
+  byState: Record<HealthState, PathCounts>;
+  /** Why no path was computed: "no-attachments" when the install has no computed views. */
+  notComputed?: "no-attachments";
+  endpointsNotRead?: boolean;
+  hidden?: boolean;
+  unmemoised?: boolean;
+  /** The Gateways and route namespaces of the visible rows, each counted with every filter but its own; absent from older servers. */
+  facets?: PathFacets;
+}
+/** A Gateway and the paths through it. */
+export interface GatewayFacet {
+  ref: LinkedRef;
+  paths: number;
+}
+/** A route namespace and the paths with a route in it. */
+export interface NamespaceFacet {
+  name: string;
+  paths: number;
+}
+/** The gateway and namespace filter values, sorted by name. */
+export interface PathFacets {
+  gateways: GatewayFacet[];
+  namespaces: NamespaceFacet[];
+}
+/** GET …/paths. */
+export interface PathsResponse {
+  install: string;
+  /** The publication the page was cut from; pages of one walk agree on it. */
+  revision?: string;
+  rows: PathRow[];
+  next?: string;
+  prev?: string;
+  summary: PathSummary;
+  collectedAt: string;
+}
+
+/** Mirrors the backend DTOs of pkg/api/backends_types.go (sub-phase 6.3, design §8, §9). */
+
+/** One backend of the Backends list; counts cover only what the caller may see. */
+export interface BackendRow {
+  ref: LinkedRef;
+  /** "Service", "Backend · <spec.type>" or the ref's kind. */
+  kind: string;
+  /** One entry per referenced Service port, or one not-applicable entry for a Backend. */
+  endpoints: Endpoints[];
+  routes: number;
+  gateways: number;
+  consumers: number;
+  /** Paths on an attachment the route's status accepts. */
+  confirmed: number;
+  problem: PathProblem;
+}
+/** GET …/backends; hidden says a backend, path, route or consumer was left out. */
+export interface BackendsResponse {
+  install: string;
+  rows: BackendRow[];
+  next?: string;
+  prev?: string;
+  hidden?: boolean;
+  /** The Gateways and namespaces of the visible backends, each counted with every filter but its own. */
+  facets?: BackendFacets;
+  collectedAt: string;
+}
+/** A Gateway and the backends it has a visible path to. */
+export interface BackendGatewayFacet {
+  ref: LinkedRef;
+  backends: number;
+}
+/** A namespace and the backends in it. */
+export interface BackendNamespaceFacet {
+  name: string;
+  backends: number;
+}
+/** The gateway and namespace filter values of the Backends list, sorted by name. */
+export interface BackendFacets {
+  gateways: BackendGatewayFacet[];
+  namespaces: BackendNamespaceFacet[];
+}
+/** A non-route object that uses a backend, such as a GatewayExtension. */
+export interface BackendConsumer {
+  consumer: LinkedRef;
+  role: string;
+  field: string;
+  port?: number;
+}
+/** One referenced port's chain as written and observed; named targetPorts stay unresolved. */
+export interface PortChain {
+  refPort: number;
+  servicePort?: number;
+  servicePortName?: string;
+  targetPort?: string;
+  targetName?: string;
+  slicePorts: number[];
+  noSuchPort?: boolean;
+  /** Set only when a complete read found no slice port for the name. */
+  noSlicePort?: boolean;
+}
+/** What the cache keeps of a Service. */
+export interface ServiceFact {
+  type: string;
+  ports: BackendPort[];
+}
+/** One route ref to the backend that does not resolve; ref is -1 for a rule filter's mirror, and path tells them apart. */
+export interface RefExplanation {
+  route: LinkedRef;
+  rule: number;
+  ref: number;
+  /** Where the route writes the ref, e.g. spec.rules[0].backendRefs[0]. */
+  path: string;
+  kind: "attributed" | "candidate" | "waiting";
+  reason?: string;
+  explanation?: string;
+  fix?: SuggestedFix;
+}
+/** GET …/backends/{group}/{kind}/{ns}/{name}; status is the backend's own signals. */
+export interface BackendDetail {
+  install: string;
+  ref: LinkedRef;
+  kind: string;
+  type?: string;
+  problem: PathProblem;
+  status: PathSignal[];
+  exposure: PathsResponse;
+  consumers: BackendConsumer[];
+  sources: Endpoints[];
+  portChain: PortChain[];
+  explanations: RefExplanation[];
+  service?: ServiceFact;
+  conditions?: Condition[];
+  collectedAt: string;
 }

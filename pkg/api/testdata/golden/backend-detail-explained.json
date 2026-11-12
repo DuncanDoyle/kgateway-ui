@@ -1,0 +1,312 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "consumers": [],
+    "explanations": [
+      {
+        "explanation": "The controller does not permit this ref to another namespace.",
+        "fix": {
+          "basis": "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace.",
+          "create": true,
+          "target": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "ReferenceGrant",
+            "link": "none",
+            "name": "allow-shop-httproute-service-cart",
+            "namespace": "store"
+          },
+          "title": "Create a ReferenceGrant in `store`",
+          "yaml": "apiVersion: gateway.networking.k8s.io/v1beta1\nkind: ReferenceGrant\nmetadata:\n  name: allow-shop-httproute-service-cart\n  namespace: store\nspec:\n  from:\n  - group: gateway.networking.k8s.io\n    kind: HTTPRoute\n    namespace: shop\n  to:\n  - group: \"\"\n    kind: Service\n    name: cart\n"
+        },
+        "kind": "attributed",
+        "path": "spec.rules[0].backendRefs[0]",
+        "reason": "RefNotPermitted",
+        "ref": 0,
+        "route": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "denied",
+          "namespace": "shop"
+        },
+        "rule": 0
+      }
+    ],
+    "exposure": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "revision": "2p7ms4l7j3155",
+      "rows": [
+        {
+          "action": "backend",
+          "backend": {
+            "group": "",
+            "kind": "Service",
+            "link": "none",
+            "name": "cart",
+            "namespace": "store"
+          },
+          "delegated": false,
+          "gateway": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "edge",
+            "namespace": "infra"
+          },
+          "hostnames": [],
+          "id": "20yh6a47szvz5",
+          "listener": {
+            "name": "http",
+            "port": 8080,
+            "protocol": "HTTP"
+          },
+          "matches": [
+            {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/"
+              }
+            }
+          ],
+          "mirror": false,
+          "port": 80,
+          "problem": {
+            "signals": [
+              {
+                "code": "KGWUI-014",
+                "kind": "finding",
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "link": "detail",
+                  "name": "denied",
+                  "namespace": "shop"
+                },
+                "state": "error",
+                "title": "Reference not permitted (missing ReferenceGrant)"
+              },
+              {
+                "code": "missing",
+                "kind": "waiting",
+                "ref": {
+                  "group": "",
+                  "kind": "Service",
+                  "link": "none",
+                  "name": "cart",
+                  "namespace": "store"
+                },
+                "state": "unknown"
+              }
+            ],
+            "state": "error"
+          },
+          "routes": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "denied",
+              "namespace": "shop"
+            }
+          ],
+          "rule": 0,
+          "share": 100,
+          "shareState": "failing",
+          "weight": 1
+        },
+        {
+          "action": "backend",
+          "backend": {
+            "group": "",
+            "kind": "Service",
+            "link": "none",
+            "name": "cart",
+            "namespace": "store"
+          },
+          "delegated": false,
+          "gateway": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "edge",
+            "namespace": "infra"
+          },
+          "hostnames": [],
+          "id": "1qmnyajdmsn1m",
+          "listener": {
+            "name": "http",
+            "port": 8080,
+            "protocol": "HTTP"
+          },
+          "matches": [
+            {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/"
+              }
+            }
+          ],
+          "mirror": false,
+          "port": 80,
+          "problem": {
+            "signals": [
+              {
+                "code": "missing",
+                "kind": "waiting",
+                "ref": {
+                  "group": "",
+                  "kind": "Service",
+                  "link": "none",
+                  "name": "cart",
+                  "namespace": "store"
+                },
+                "state": "unknown"
+              }
+            ],
+            "state": "unknown"
+          },
+          "routes": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "fine",
+              "namespace": "shop"
+            }
+          ],
+          "rule": 0,
+          "share": 100,
+          "shareState": "shown",
+          "weight": 1
+        }
+      ],
+      "summary": {
+        "backends": 1,
+        "byState": {
+          "error": {
+            "backends": 1,
+            "gateways": 1,
+            "paths": 1,
+            "routes": 1
+          },
+          "healthy": {
+            "backends": 0,
+            "gateways": 0,
+            "paths": 0,
+            "routes": 0
+          },
+          "unknown": {
+            "backends": 1,
+            "gateways": 1,
+            "paths": 1,
+            "routes": 1
+          },
+          "warning": {
+            "backends": 0,
+            "gateways": 0,
+            "paths": 0,
+            "routes": 0
+          }
+        },
+        "facets": {
+          "gateways": [
+            {
+              "paths": 2,
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "edge",
+                "namespace": "infra"
+              }
+            }
+          ],
+          "namespaces": [
+            {
+              "name": "shop",
+              "paths": 2
+            }
+          ]
+        },
+        "gateways": 1,
+        "paths": 2,
+        "routes": 2
+      }
+    },
+    "install": "kgw.kgateway",
+    "kind": "Service",
+    "portChain": [
+      {
+        "refPort": 80,
+        "slicePorts": []
+      }
+    ],
+    "problem": {
+      "signals": [
+        {
+          "code": "KGWUI-014",
+          "kind": "finding",
+          "ref": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "denied",
+            "namespace": "shop"
+          },
+          "state": "error",
+          "title": "Reference not permitted (missing ReferenceGrant)"
+        },
+        {
+          "code": "missing",
+          "kind": "waiting",
+          "ref": {
+            "group": "",
+            "kind": "Service",
+            "link": "none",
+            "name": "cart",
+            "namespace": "store"
+          },
+          "state": "unknown"
+        }
+      ],
+      "state": "error"
+    },
+    "ref": {
+      "group": "",
+      "kind": "Service",
+      "link": "none",
+      "name": "cart",
+      "namespace": "store"
+    },
+    "sources": [
+      {
+        "complete": "unavailable",
+        "port": {
+          "port": 80
+        },
+        "readAt": "2026-10-17T12:00:00Z",
+        "source": "kubernetes"
+      }
+    ],
+    "status": [
+      {
+        "code": "missing",
+        "kind": "waiting",
+        "ref": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart",
+          "namespace": "store"
+        },
+        "state": "unknown"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

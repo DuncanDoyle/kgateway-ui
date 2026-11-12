@@ -80,6 +80,17 @@ The UI honours the controller's `discoveryNamespaceSelectors`. It only counts re
 
 [docs/findings.md](docs/findings.md) has one entry per finding code: its cause, its evidence and how to fix it. "Learn more" on a finding's page opens that entry. A `since` the UI derives resets when the UI restarts.
 
+## Traffic and backends
+
+These pages answer "where does this traffic go, and is it getting there?" They add views, not checks: every problem shown comes from an existing finding, condition or capability state.
+
+- **Traffic** (`/i/{id}/traffic`) lists every path of an install, one row per Gateway, listener, route, rule and backendRef. Problems sort first. Filter by Gateway, route, backend, namespace, state, kind or text; the summary counts the affected routes, Gateways and backends. API: `GET /api/v1/installs/{id}/paths`.
+- **Backends** (`/i/{id}/backends`) lists every kgateway Backend and every backend a route or GatewayExtension names, with ready endpoints per port. Backend detail shows how the backend is exposed, its endpoints read on request from that Service's EndpointSlices, the port chain, and why a reference to it fails.
+- **Route trace.** Route detail, for HTTPRoute, GRPCRoute, TCPRoute and TLSRoute, shows each rule's match and backends, with each backend's share of the rule and its state.
+- **Gateway map.** The Map tab on Gateway detail draws Gateway → listeners → routes → backends. Hover or select a node to light its paths, expand a route into its rules, collapse delegated routes, or show only one node's paths. A Gateway with more than 60 routes or backends opens on problems only.
+  - Keyboard: the map is one tab stop. Arrow keys move along the paths, Enter opens details, Escape closes them. The Table button shows the same paths as a table.
+  - Export: SVG or PNG of the whole drawn map, with the current filters, focus and collapse applied.
+
 ## Extending
 
 Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds and runs; the types it names are in [acme.go](examples/downstream/acme.go). It takes the stock binary's flags from `pkg/cli` and embeds its own web build: a build from the Go module cache embeds only a placeholder page.
@@ -169,6 +180,28 @@ Kinds added with `WithKinds`, and anything a collector reads, need matching rule
 
 A one-shot caller, such as a CLI or a test, builds its own configuration with `pkg/setup` and runs `cache.Start(ctx)` itself. Cancel `ctx` when done, then call `Cache.Wait()`: it returns once every goroutine `Start` launched has exited. Called before `Start` or a second time, it returns at once.
 
+A caller with `list` but not `watch` RBAC uses `cache.ListOnce` instead. It fills the same `Snapshot` from one LIST per input and never watches. A kind it cannot list shows in `Access` as denied or failed. The error return is only for a missing client or a cancelled `ctx`.
+
+```go
+sc, err := setup.Build(clients, setup.Options{MetricsInterval: 10 * time.Second}, extension.New())
+// One LIST per input, no WATCH; snap.Mode is cache.ModeList
+snap, err := cache.ListOnce(ctx, sc.Cache)
+for gvr, a := range snap.Access {
+	fmt.Println(gvr.Resource, a.OK, a.Denied) // a kind the caller cannot list
+}
+```
+
+A caller with namespace-scoped RBAC sets `cache.Config.Namespaces`. Namespaced inputs are then read per namespace; GatewayClass and Namespace stay cluster-wide. `Access` holds the worst state over the namespaces, and `NamespaceAccess` the state per namespace. Snellius itself leaves `Namespaces` empty, which means cluster-wide.
+
+```go
+// Read namespaced kinds only in team-a and team-b
+sc.Cache.Namespaces = []string{"team-a", "team-b"}
+snap, err := cache.ListOnce(ctx, sc.Cache) // the same Config you give cache.New
+for gvr, byNS := range snap.NamespaceAccess {
+	fmt.Println(gvr.Resource, byNS["team-b"].Denied) // denied in team-b only
+}
+```
+
 The frontend renders `Shell` from `@snellius/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
@@ -227,6 +260,19 @@ Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new n
 Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v1 and the finding anchors do not change.
 
 ## Upgrade notes
+
+### Traffic flow and backends (Phase 6)
+
+API v1 changes are additive. New endpoints: `…/paths`, `…/backends` and `…/backends/{group}/{kind}/{ns}/{name}`. Route detail serves GRPCRoute, TCPRoute and TLSRoute instead of 404, and `BackendRefDTO` gains optional `share`, `shareState`, `problem` and `endpoints`. The install nav gains Traffic and Backends.
+
+### Backend judgement in the kgateway pack (sub-phase 6.3)
+
+Nothing changes in the UI or API v1 for kgateway installs. Class-only installs no longer judge kgateway Backends: no KGWUI-002 on a Backend, and route details show its Accepted condition without a state.
+
+- The Backend status check (KGWUI-002 on Backends) moves from `health.Core()` to `health.Kgateway()`. `health.Upstream()` keeps its order.
+- `computed.BackendJudge` is a new optional rule set interface, read through `Selection.BackendJudge()`. The kgateway rule sets implement it with `kgwbackend.Judge`.
+- A wrapping rule set forwards `BackendJudge`, as it forwards `TargetStatusReporter`. One that only embeds `computed.Rules` shows Backends without a state.
+- `health.BackendState` keeps its signature and meaning; it calls the kgateway judgement directly.
 
 ### v0.6.0: generic Gateway API core (Phase 5)
 

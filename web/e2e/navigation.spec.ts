@@ -195,18 +195,26 @@ for (const p of CORE_PAGES) {
 // from 1600 px (conditions and related objects beside the structure) and one column below.
 const WIDTHS = [720, 1280, 1600, 3008];
 
-/** The page frame's width, the width its parent gives it, and whether the page scrolls sideways. */
+/** The page frame's width, the width its parent gives it, whether the page scrolls sideways, and where the
+ * header's content box ends against the right edge of its controls outside the scrolling install nav. */
 function frame(page: Page) {
-  return page.getByTestId("page-frame").evaluate((el) => ({
-    width: el.getBoundingClientRect().width,
-    room: el.parentElement?.clientWidth ?? 0,
-    scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
-    innerWidth: window.innerWidth,
-  }));
+  return page.getByTestId("page-frame").evaluate((el) => {
+    const bar = document.querySelector("header");
+    const controls = bar ? [...bar.querySelectorAll(":scope > :not(nav) :is(a, button), :scope > a")] : [];
+    return {
+      width: el.getBoundingClientRect().width,
+      room: el.parentElement?.clientWidth ?? 0,
+      scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
+      innerWidth: window.innerWidth,
+      headerEnd: bar ? bar.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(bar).paddingRight) : 0,
+      controlsEnd: Math.max(0, ...controls.map((c) => c.getBoundingClientRect().right)),
+    };
+  });
 }
 
-/** Fluid up to 2400 px, within 1 px for subpixel layout. */
+/** Fluid up to 2400 px, within 1 px for subpixel layout; the install nav gives way before any header control. */
 function expectFluid(f: Awaited<ReturnType<typeof frame>>) {
+  expect(f.controlsEnd, "header controls stay inside the header").toBeLessThanOrEqual(f.headerEnd + 1);
   expect(f.scrollWidth, "no horizontal page scroll").toBeLessThanOrEqual(f.innerWidth);
   expect(Math.abs(f.width - Math.min(2400, f.room)), `frame ${f.width} px in ${f.room} px`).toBeLessThanOrEqual(1);
 }

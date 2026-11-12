@@ -32,6 +32,14 @@ it("lists Processes after Findings", () => {
   ]);
 });
 
+it("lists Traffic after Routes", () => {
+  renderWithTheme(<InstallNav installId="kgw.kgateway" paths={["", "routes", "traffic", "listenersets"]} />, {
+    path: "/i/kgw.kgateway",
+  });
+  const links = within(nav()).getAllByRole("link");
+  expect(links.map((a) => a.textContent)).toEqual(["Overview", "Routes", "Traffic", "ListenerSets"]);
+});
+
 it("scrolls the active entry into view on route change", () => {
   const scroll = vi.fn();
   Element.prototype.scrollIntoView = scroll;

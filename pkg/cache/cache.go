@@ -86,12 +86,19 @@ type Snapshot struct {
 	Services       []ServiceFact
 	EndpointSlices []SliceFact
 	// Synced is true once every core informer (served kinds, Namespaces,
-	// Pods and Deployments) has synced or failed. Optional watches and
-	// list-only kinds never hold it back.
+	// Pods and Deployments) has synced or failed; from ListOnce, once each
+	// was listed or denied. Optional watches and list-only kinds never hold it back.
 	Synced  bool
 	TakenAt time.Time
 	// Source is the fingerprint of exactly the objects and access states copied.
 	Source Fingerprint
+	// Mode is ModeWatch for a Cache's snapshot and ModeList for ListOnce's.
+	Mode string
+	// RequestedNamespaces is Config.Namespaces deduplicated and sorted; nil when cluster-wide.
+	RequestedNamespaces []string
+	// NamespaceAccess holds, for each namespaced input, its Access per requested
+	// namespace; Access holds the aggregate. Nil when cluster-wide.
+	NamespaceAccess map[schema.GroupVersionResource]map[string]Access
 }
 
 // Snapshotter returns the current snapshot.
@@ -120,6 +127,9 @@ type Config struct {
 	// included), on access transitions and once after every informer has
 	// settled; nil means no notifications (D-019).
 	Changes *trigger.Signal
+	// Namespaces limits namespaced inputs to these namespaces, each read on its
+	// own; cluster-scoped kinds stay cluster-wide. Nil or empty means cluster-wide.
+	Namespaces []string
 }
 
 // progress tracks whether one informer's cache is current (D-014). A
@@ -138,6 +148,7 @@ type progress struct {
 	failures uint64          // failures so far; a watch-list stream remembers the count it was opened at
 	onChange func()          // called when err turns empty or non-empty; may be nil
 	loops    *sync.WaitGroup // joins the watch wrappers' goroutines; may be nil
+	listed   bool            // ListOnce filled the store from a successful LIST
 }
 
 func (p *progress) failure(err error) {
@@ -197,7 +208,7 @@ func (p *progress) access(synced bool) Access {
 	switch {
 	case p.err != "":
 		return Access{Err: p.err, Denied: p.denied}
-	case !synced:
+	case !synced && !p.listed:
 		return Access{}
 	}
 	return Access{OK: true}
@@ -275,18 +286,32 @@ func (w *observed) Stop() {
 
 // tracked is an informer with the progress of its own List and Watch calls.
 // reg is the change handler's registration; nil without Config.Changes or
-// when registration failed.
+// when registration failed. list and strip are the informer's instrumented
+// List and transform, which ListOnce calls without the informer.
 type tracked struct {
-	inf      toolscache.SharedIndexInformer
-	progress *progress
-	reg      toolscache.ResourceEventHandlerRegistration
+	// namespace is the namespace the informer reads; "" for all.
+	namespace string
+	inf       toolscache.SharedIndexInformer
+	progress  *progress
+	reg       toolscache.ResourceEventHandlerRegistration
+	list      toolscache.ListWithContextFunc
+	strip     toolscache.TransformFunc
+}
+
+// setTransform sets the informer's transform, which ListOnce applies too.
+func (t *tracked) setTransform(f toolscache.TransformFunc) {
+	t.strip = f
+	_ = t.inf.SetTransform(f) // fails only on a started informer
 }
 
 // Cache is a set of informers whose contents are read through Snapshot.
 type Cache struct {
 	now     func() time.Time
 	changes *trigger.Signal
-	dyn     map[schema.GroupVersionResource]tracked
+	// dyn holds each served kind's informers, one per requested namespace for a namespaced kind.
+	dyn map[schema.GroupVersionResource][]tracked
+	// namespaces is Config.Namespaces deduplicated and sorted; nil when cluster-wide.
+	namespaces []string
 	// listOnly are the dyn kinds that never hold back Synced or Settled (D-034).
 	listOnly map[schema.GroupVersionResource]bool
 	ns       tracked
@@ -295,8 +320,8 @@ type Cache struct {
 	// Optional watches; nil or empty when off.
 	proxyPods    []tracked
 	events, crds *tracked
-	services     *tracked
-	slices       *tracked
+	services     []tracked
+	slices       []tracked
 	evf          *eventFilter
 	uids         *podSet
 	uidRegs      []toolscache.ResourceEventHandlerRegistration
@@ -309,6 +334,8 @@ type Cache struct {
 	settled atomic.Bool
 	// handlerHook, if set, runs in each event handler before it notifies (tests).
 	handlerHook atomic.Pointer[func()]
+	// listed marks ListOnce's cache, where a failed required LIST holds back Synced.
+	listed bool
 }
 
 // handled is every event handler: the test hook, then the notification.
@@ -323,8 +350,9 @@ func (c *Cache) handled() {
 // the reflector whether the client supports watch-list semantics (fakes do not).
 func (c *Cache) informer(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
 	p := &progress{onChange: c.changes.Notify, loops: &c.running}
-	lw := toolscache.ToListWatcherWithWatchListSemantics(instrument(p, list, watchFn), client)
-	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
+	ilw := instrument(p, list, watchFn)
+	lw := toolscache.ToListWatcherWithWatchListSemantics(ilw, client)
+	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p, list: ilw.ListWithContextFunc}
 	if c.changes != nil {
 		notify := func(any) { c.handled() }
 		// Fails only on a stopped informer. Without a handler the kind still
@@ -337,24 +365,37 @@ func (c *Cache) informer(client any, example runtime.Object, list toolscache.Lis
 
 // New creates the informers. Nothing runs until Start.
 func New(cfg Config) *Cache {
-	c := &Cache{now: cfg.Now, changes: cfg.Changes, dyn: map[schema.GroupVersionResource]tracked{}, listOnly: map[schema.GroupVersionResource]bool{}}
+	c := &Cache{now: cfg.Now, changes: cfg.Changes, dyn: map[schema.GroupVersionResource][]tracked{}, listOnly: map[schema.GroupVersionResource]bool{},
+		namespaces: normalize(cfg.Namespaces)}
 	if c.now == nil {
 		c.now = time.Now
 	}
 	for _, s := range cfg.Served {
-		ri := cfg.Dynamic.Resource(s.GVR())
+		scopes := []string{metav1.NamespaceAll}
+		if s.Namespaced {
+			scopes = c.scopes()
+		}
 		c.listOnly[s.GVR()] = s.ListOnly
-		c.dyn[s.GVR()] = c.informer(cfg.Dynamic, &unstructured.Unstructured{},
-			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
-			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) })
+		nri := cfg.Dynamic.Resource(s.GVR())
+		for _, ns := range scopes {
+			var ri dynamic.ResourceInterface = nri
+			if ns != metav1.NamespaceAll {
+				ri = nri.Namespace(ns)
+			}
+			t := c.informer(cfg.Dynamic, &unstructured.Unstructured{},
+				func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
+				func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) })
+			t.namespace = ns
+			c.dyn[s.GVR()] = append(c.dyn[s.GVR()], t)
+		}
 	}
 	nss := cfg.Kube.CoreV1().Namespaces()
 	c.ns = c.informer(cfg.Kube, &corev1.Namespace{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return nss.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return nss.Watch(ctx, o) })
-	pods, deploys := cfg.Kube.CoreV1().Pods(""), cfg.Kube.AppsV1().Deployments("")
-	podInformer := func(sel labels.Selector) tracked {
-		return c.informer(cfg.Kube, &corev1.Pod{},
+	podInformer := func(ns string, sel labels.Selector) tracked {
+		pods := cfg.Kube.CoreV1().Pods(ns)
+		t := c.informer(cfg.Kube, &corev1.Pod{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 				o.LabelSelector = sel.String()
 				return pods.List(ctx, o)
@@ -363,23 +404,30 @@ func New(cfg Config) *Cache {
 				o.LabelSelector = sel.String()
 				return pods.Watch(ctx, o)
 			})
+		t.namespace = ns
+		return t
 	}
-	for _, sel := range cfg.PodSelectors {
-		c.pods = append(c.pods, podInformer(sel))
-	}
-	for _, sel := range cfg.ProxyPodSelectors {
-		c.proxyPods = append(c.proxyPods, podInformer(sel))
-	}
-	for _, sel := range cfg.DeploymentSelectors {
-		c.deploys = append(c.deploys, c.informer(cfg.Kube, &appsv1.Deployment{},
-			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-				o.LabelSelector = sel.String()
-				return deploys.List(ctx, o)
-			},
-			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-				o.LabelSelector = sel.String()
-				return deploys.Watch(ctx, o)
-			}))
+	for _, ns := range c.scopes() {
+		for _, sel := range cfg.PodSelectors {
+			c.pods = append(c.pods, podInformer(ns, sel))
+		}
+		for _, sel := range cfg.ProxyPodSelectors {
+			c.proxyPods = append(c.proxyPods, podInformer(ns, sel))
+		}
+		deploys := cfg.Kube.AppsV1().Deployments(ns)
+		for _, sel := range cfg.DeploymentSelectors {
+			t := c.informer(cfg.Kube, &appsv1.Deployment{},
+				func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+					o.LabelSelector = sel.String()
+					return deploys.List(ctx, o)
+				},
+				func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+					o.LabelSelector = sel.String()
+					return deploys.Watch(ctx, o)
+				})
+			t.namespace = ns
+			c.deploys = append(c.deploys, t)
+		}
 	}
 	if cfg.Events {
 		c.uids = &podSet{n: map[types.UID]int{}}
@@ -396,19 +444,39 @@ func New(cfg Config) *Cache {
 		c.crds = &t
 	}
 	if cfg.Endpoints {
-		svcs, es := c.serviceInformer(cfg.Kube), c.sliceInformer(cfg.Kube)
-		c.services, c.slices = &svcs, &es
+		for _, ns := range c.scopes() {
+			c.services = append(c.services, c.serviceInformer(cfg.Kube, ns))
+			c.slices = append(c.slices, c.sliceInformer(cfg.Kube, ns))
+		}
 	}
 	return c
+}
+
+// normalize deduplicates and sorts namespaces, dropping empty names; nil when none is left.
+func normalize(namespaces []string) []string {
+	out := slices.DeleteFunc(slices.Clone(namespaces), func(ns string) bool { return ns == "" })
+	slices.Sort(out)
+	if out = slices.Compact(out); len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// scopes returns the namespaces a namespaced input is read in: all of them when cluster-wide.
+func (c *Cache) scopes() []string {
+	if c.namespaces == nil {
+		return []string{metav1.NamespaceAll}
+	}
+	return c.namespaces
 }
 
 // all returns the core informers: Namespaces, served kinds other than
 // list-only ones, Pods and Deployments.
 func (c *Cache) all() []tracked {
 	out := []tracked{c.ns}
-	for gvr, t := range c.dyn {
+	for gvr, ts := range c.dyn {
 		if !c.listOnly[gvr] {
-			out = append(out, t)
+			out = append(out, ts...)
 		}
 	}
 	return append(append(out, c.pods...), c.deploys...)
@@ -426,9 +494,11 @@ func (c *Cache) Start(ctx context.Context) {
 	for _, t := range all {
 		c.run(false, func() { t.inf.RunWithContext(ctx) })
 	}
-	for gvr, t := range c.dyn {
+	for gvr, ts := range c.dyn {
 		if c.listOnly[gvr] {
-			c.run(false, func() { t.inf.RunWithContext(ctx) })
+			for _, t := range ts {
+				c.run(false, func() { t.inf.RunWithContext(ctx) })
+			}
 		}
 	}
 	octx, cancel := context.WithCancel(ctx)
@@ -442,10 +512,8 @@ func (c *Cache) Start(ctx context.Context) {
 	if c.events != nil {
 		c.run(true, func() { c.runEvents(octx) })
 	}
-	for _, t := range []*tracked{c.services, c.slices} {
-		if t != nil {
-			c.run(true, func() { t.inf.RunWithContext(octx) })
-		}
+	for _, t := range slices.Concat(c.services, c.slices) {
+		c.run(true, func() { t.inf.RunWithContext(octx) })
 	}
 	c.run(false, func() {
 		settled := func(context.Context) (bool, error) {
@@ -543,26 +611,82 @@ func accessAll(ts []tracked) Access {
 	return Access{OK: true}
 }
 
+// severity orders access states: ok, syncing, denied, failed.
+func severity(a Access) int {
+	switch {
+	case a.OK:
+		return 0
+	case a.Err == "":
+		return 1
+	case a.Denied:
+		return 2
+	}
+	return 3
+}
+
+// worst returns the most severe of as, the first on a tie; OK for none.
+func worst(as ...Access) Access {
+	out := Access{OK: true}
+	for _, a := range as {
+		if severity(a) > severity(out) {
+			out = a
+		}
+	}
+	return out
+}
+
+// accessSet is the access a walk reports: the aggregate per kind, and the
+// detail per requested namespace of each namespaced input (nil when cluster-wide).
+type accessSet struct {
+	all  map[schema.GroupVersionResource]Access
+	byNS map[schema.GroupVersionResource]map[string]Access
+}
+
+// put records ts, the informers of gvr. A cluster-wide cache merges them with
+// accessAll; a scoped one merges each namespace's that way and the namespaces to the worst.
+func (s *accessSet) put(c *Cache, gvr schema.GroupVersionResource, ts []tracked) {
+	if c.namespaces == nil || len(ts) == 0 || ts[0].namespace == metav1.NamespaceAll {
+		s.all[gvr] = accessAll(ts)
+		return
+	}
+	byNS := make(map[string]Access, len(c.namespaces))
+	for _, t := range ts {
+		if a, seen := byNS[t.namespace]; !seen || a.OK {
+			byNS[t.namespace] = access(t)
+		}
+	}
+	agg := Access{OK: true}
+	for _, ns := range c.namespaces {
+		agg = worst(agg, byNS[ns])
+	}
+	s.all[gvr] = agg
+	if s.byNS == nil {
+		s.byNS = map[schema.GroupVersionResource]map[string]Access{}
+	}
+	s.byNS[gvr] = byNS
+}
+
 // walk reads every store once and calls visit per object: each served kind,
 // then Namespaces, then Pods and Deployments deduplicated by UID across their
 // informers. It returns every kind's access and whether every informer has
 // synced or failed. Snapshot and Fingerprint share it so they always agree.
-func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[schema.GroupVersionResource]Access, bool) {
-	acc := make(map[schema.GroupVersionResource]Access, len(c.dyn)+6)
+func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (accessSet, bool) {
+	acc := accessSet{all: make(map[schema.GroupVersionResource]Access, len(c.dyn)+6)}
 	synced := true
-	settled := func(a Access) bool { return a.OK || a.Err != "" }
-	for gvr, t := range c.dyn {
-		a := access(t)
-		acc[gvr] = a
-		synced = synced && (c.listOnly[gvr] || settled(a))
-		for _, o := range t.inf.GetStore().List() {
-			visit(gvr, o)
+	settled := func(a Access) bool { return a.OK || a.Denied || (a.Err != "" && !c.listed) }
+	for gvr, ts := range c.dyn {
+		acc.put(c, gvr, ts)
+		for _, t := range ts {
+			synced = synced && (c.listOnly[gvr] || settled(access(t)))
+			for _, o := range t.inf.GetStore().List() {
+				visit(gvr, o)
+			}
 		}
 	}
-	acc[NamespacesGVR] = access(c.ns)
-	acc[PodsGVR] = accessAll(c.pods)
-	acc[DeploymentsGVR] = accessAll(c.deploys)
-	synced = synced && settled(acc[NamespacesGVR])
+	acc.all[NamespacesGVR] = access(c.ns)
+	acc.put(c, PodsGVR, c.pods)
+	acc.put(c, DeploymentsGVR, c.deploys)
+	synced = synced && settled(acc.all[NamespacesGVR])
 	for _, o := range c.ns.inf.GetStore().List() {
 		visit(NamespacesGVR, o)
 	}
@@ -581,14 +705,14 @@ func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[sc
 			}
 		}
 	}
-	c.walkOptional(acc, visit)
+	c.walkOptional(&acc, visit)
 	return acc, synced
 }
 
 // walkOptional adds each running optional watch's access and objects.
-func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit func(gvr schema.GroupVersionResource, o any)) {
+func (c *Cache) walkOptional(acc *accessSet, visit func(gvr schema.GroupVersionResource, o any)) {
 	if len(c.proxyPods) > 0 {
-		acc[ProxyPodsGVR] = accessAll(c.proxyPods)
+		acc.put(c, ProxyPodsGVR, c.proxyPods)
 		seen := map[types.UID]bool{}
 		for _, t := range c.proxyPods {
 			for _, o := range t.inf.GetStore().List() {
@@ -599,11 +723,11 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 			}
 		}
 	}
-	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds, ServicesGVR: c.services, EndpointSlicesGVR: c.slices} {
+	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds} {
 		if t == nil {
 			continue
 		}
-		acc[gvr] = access(*t)
+		acc.all[gvr] = access(*t)
 		for _, o := range t.inf.GetStore().List() {
 			// A vanished Pod's Events stay stored until they change; snapshots leave them out.
 			if ev, ok := o.(*corev1.Event); ok && !c.uids.has(ev.InvolvedObject.UID) {
@@ -612,16 +736,28 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 			visit(gvr, o)
 		}
 	}
+	for gvr, ts := range map[schema.GroupVersionResource][]tracked{ServicesGVR: c.services, EndpointSlicesGVR: c.slices} {
+		if len(ts) == 0 {
+			continue
+		}
+		acc.put(c, gvr, ts)
+		for _, t := range ts {
+			for _, o := range t.inf.GetStore().List() {
+				visit(gvr, o)
+			}
+		}
+	}
 }
 
 // Snapshot copies the current cache contents and fingerprints, in the same
 // pass, exactly what it copied.
 func (c *Cache) Snapshot() *Snapshot {
-	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now()}
+	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now(), Mode: ModeWatch,
+		RequestedNamespaces: slices.Clone(c.namespaces)}
 	var svcs []*serviceEntry
 	var eps []*sliceEntry
 	var p printer
-	s.Access, s.Synced = c.walk(func(gvr schema.GroupVersionResource, o any) {
+	acc, synced := c.walk(func(gvr schema.GroupVersionResource, o any) {
 		p.add(gvr, o)
 		if gvr == ProxyPodsGVR {
 			s.ProxyPods = append(s.ProxyPods, o.(*corev1.Pod))
@@ -646,6 +782,7 @@ func (c *Cache) Snapshot() *Snapshot {
 			eps = append(eps, v)
 		}
 	})
+	s.Access, s.NamespaceAccess, s.Synced = acc.all, acc.byNS, synced
 	for _, objs := range s.Objects {
 		sortByKey(objs)
 	}
@@ -671,7 +808,7 @@ func (c *Cache) Snapshot() *Snapshot {
 	if c.evf != nil {
 		s.EventDeltas, s.EventHistoryUnknown, s.EventsCapped = c.evf.view(s.TakenAt)
 	}
-	s.Source = p.finish(s.Access)
+	s.Source = p.finish(acc)
 	return s
 }
 

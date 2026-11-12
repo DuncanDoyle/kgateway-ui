@@ -380,7 +380,7 @@ func startCache(t *testing.T, objs ...runtime.Object) (*Cache, *dynamicfake.Fake
 // inStore reads an HTTPRoute straight from the informer store. Tests poll it
 // with waitFor: the store is what the fingerprint reads, so no handler is involved.
 func inStore(c *Cache, ns, name string) *unstructured.Unstructured {
-	o, ok, _ := c.dyn[httpRoutesGVR].inf.GetStore().GetByKey(ns + "/" + name)
+	o, ok, _ := c.dyn[httpRoutesGVR][0].inf.GetStore().GetByKey(ns + "/" + name)
 	if !ok {
 		return nil
 	}
@@ -576,9 +576,9 @@ func TestStartWithoutRegistrationNotifies(t *testing.T) {
 	sig := trigger.New()
 	dyn, kube := testutil.Clients(t)
 	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Changes: sig})
-	tr := c.dyn[httpRoutesGVR]
+	tr := c.dyn[httpRoutesGVR][0]
 	tr.reg = nil
-	c.dyn[httpRoutesGVR] = tr
+	c.dyn[httpRoutesGVR] = []tracked{tr}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.Start(ctx)

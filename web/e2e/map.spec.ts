@@ -1,0 +1,469 @@
+import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { PathsResponse } from "../packages/shell/src/api/types";
+import { mapCopy } from "../packages/shell/src/copy/map";
+
+// The Gateway map (Phase 6 sub-phase 6.5) over test/e2e/fixtures/traffic.yaml. Expected nodes and states come from
+// the /paths response the map draws.
+const install = "/i/kgw-a.kgateway";
+const api = "/api/v1/installs/kgw-a.kgateway";
+const gw = "traffic/traffic";
+const themes = [
+  { name: "Control room", mode: "dark" },
+  { name: "Control room light", mode: "light" },
+] as const;
+
+// NACK's Cluster reject reaches every proxy of the install, so traffic/traffic is an error there (KGWUI-001).
+test.skip(process.env.NACK === "1", "needs traffic/traffic's proxy to accept its config (no NACK fixture)");
+
+async function pickTheme(page: Page, theme: (typeof themes)[number]) {
+  await page.getByRole("button", { name: /^Theme:/ }).click();
+  await page.getByRole("menuitemradio", { name: theme.name, exact: true }).click();
+  await expect(page.locator("html")).toHaveCSS("color-scheme", theme.mode);
+  await expect(page.getByRole("menu")).toBeHidden();
+}
+
+async function paths(page: Page, query: string): Promise<PathsResponse> {
+  const res = await page.request.get(`${api}/paths?gateway=${gw}&limit=200${query}`);
+  expect(res.ok(), `GET paths${query}`).toBeTruthy();
+  return (await res.json()) as PathsResponse;
+}
+
+/** The distinct node names the map draws for a result: Gateway, listeners, routes and backends (or actions). */
+function nodeNames(d: PathsResponse): Set<string> {
+  const ref = (r: { namespace?: string; name: string }) => (r.namespace ? `${r.namespace}/${r.name}` : r.name);
+  return new Set(
+    d.rows.flatMap((r) => [
+      `gateway:${ref(r.gateway)}`,
+      `listener:${r.listener.name}`,
+      ...r.routes.map((x) => `route:${ref(x)}`),
+      ...(r.backend
+        ? [`backend:${ref(r.backend)}`]
+        : r.action !== "delegate"
+          ? [`action:${r.routes.at(-1)?.name}:${r.action}`]
+          : []),
+    ]),
+  );
+}
+
+/** Opens the traffic Gateway's Map tab and waits for its nodes. */
+async function openMap(page: Page): Promise<Locator> {
+  await page.goto(`${install}/gateways/${gw}`);
+  await page.getByRole("tab", { name: mapCopy.tab }).click();
+  await expect(page).toHaveURL(/tab=map/);
+  const map = page.getByTestId("gateway-map");
+  await expect(map.getByTestId("map-node").first()).toBeVisible();
+  return map;
+}
+
+/** The React Flow node whose card is named name. */
+const node = (map: Locator, name: string) =>
+  map.locator(".react-flow__node").filter({ has: map.page().locator(".name", { hasText: new RegExp(`^${name}$`) }) });
+
+function shot(page: Page, name: string) {
+  const dir = process.env.MAP_SHOTS ?? test.info().project.outputDir;
+  // Transitions finish first, so the shot never catches a fade half way.
+  return page.screenshot({ path: `${dir}/map-${name}.png`, animations: "disabled" });
+}
+
+test("hovering a route dims the nodes off its paths", async ({ page }) => {
+  const map = await openMap(page);
+  await node(map, "traffic/asleep").first().hover();
+  await expect(node(map, "traffic/weighted")).toHaveClass(/\bdim\b/);
+  await expect(node(map, "traffic/asleep").first()).toHaveClass(/\blit\b/);
+  // The backend and listener on its path stay lit.
+  await expect(node(map, "traffic/asleep").last()).toHaveClass(/\blit\b/);
+  await expect(node(map, "http")).toHaveClass(/\blit\b/);
+  await page.mouse.move(0, 0);
+  await expect(map.locator(".react-flow__node.dim")).toHaveCount(0);
+});
+
+test("a lit edge shows its state on the hovered node's paths, not the worst row on it", async ({ page }) => {
+  const map = await openMap(page);
+  // The Gateway → http trunk carries the failing cross path, so at rest it is drawn as an error.
+  const trunk = map.locator(
+    '[data-id="g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http"] path.react-flow__edge-path',
+  );
+  await expect(trunk).toHaveClass(/state-error/);
+  await expect(trunk).not.toHaveClass(/broken/);
+  // Partly failing: a hollow ring, not the broken edge's filled icon, so it differs from healthy without colour.
+  const ring = map.locator('.map-edge-mark[data-edge="g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http"]');
+  await expect(ring).toHaveClass(/\bpartial\b/);
+  await expect(ring.getByTestId("health-icon-error")).toHaveCount(0);
+  const cross = map.locator(
+    '.map-edge-mark[data-edge="r:gateway.networking.k8s.io/HTTPRoute/traffic/cross>b:/Service/shop/httpbin"]',
+  );
+  await expect(cross).toHaveClass(/\bbroken\b/);
+  await expect(cross.getByTestId("health-icon-error")).toHaveCount(1);
+  await node(map, "traffic/weighted").hover();
+  await expect(trunk).toHaveClass(/state-healthy/);
+  await node(map, "traffic/cross").hover();
+  await expect(trunk).toHaveClass(/state-error broken/);
+});
+
+test("the broken backend is drawn broken, and its panel links to backend detail", async ({ page }) => {
+  const d = await paths(page, "");
+  const cross = d.rows.find((r) => r.routes[0]?.name === "cross");
+  expect(cross?.problem.state, "the cross-namespace ref fails (014)").toBe("error");
+  const map = await openMap(page);
+  // Every row on cross → shop/httpbin fails, so the edge is dashed as broken; a healthy edge is solid.
+  const broken = map.locator(
+    '[data-id="r:gateway.networking.k8s.io/HTTPRoute/traffic/cross>b:/Service/shop/httpbin"] path.react-flow__edge-path',
+  );
+  await expect(broken).toHaveClass(/state-error broken/);
+  expect(await broken.evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe("none");
+  const healthy = map.locator(".react-flow__edge-path.state-healthy").first();
+  expect(await healthy.evaluate((el) => getComputedStyle(el).strokeDasharray)).toBe("none");
+
+  const before = await map.boundingBox();
+  await node(map, "shop/httpbin").click();
+  const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  // The panel takes its own column: the canvas narrows and nothing overlaps.
+  await expect(panel).toBeFocused();
+  const after = await map.boundingBox();
+  const side = await panel.boundingBox();
+  expect(after && before && after.width < before.width).toBe(true);
+  expect(after && side && after.x + after.width <= side.x).toBe(true);
+  // The selected node stays inside the narrowed canvas.
+  await expect
+    .poll(async () => {
+      const sel = await node(map, "shop/httpbin").boundingBox();
+      return !!sel && !!after && sel.x + sel.width <= after.x + after.width;
+    })
+    .toBe(true);
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("shop/httpbin");
+  await expect(panel.getByTestId("map-panel-counts")).toContainText(mapCopy.fail(1, 1));
+  // The minimap steps aside while the panel narrows the canvas.
+  await expect(map.locator(".react-flow__minimap")).toHaveCount(0);
+  const detail = panel.getByRole("link", { name: mapCopy.open });
+  await expect(detail).toHaveAttribute("href", `${install}/backends/-/Service/shop/httpbin`);
+  await expect(panel.getByRole("link", { name: mapCopy.traffic })).toHaveAttribute(
+    "href",
+    `${install}/traffic?${new URLSearchParams({ gateway: gw, backend: "core/Service/shop/httpbin" })}`,
+  );
+  await detail.click();
+  await expect(page).toHaveURL(new RegExp(`${install}/backends/-/Service/shop/httpbin`));
+});
+
+test("a poll keeps the view after the user pans a selected node away", async ({ page }) => {
+  const map = await openMap(page);
+  await node(map, "shop/httpbin").click();
+  await expect(page.getByRole("complementary", { name: mapCopy.panel })).toBeVisible();
+  // Drag the pane from its empty top-left corner far to the right: the backends column leaves the canvas.
+  const box = (await map.boundingBox()) as { x: number; y: number };
+  await page.mouse.move(box.x + 40, box.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 640, box.y + 40, { steps: 10 });
+  await page.mouse.up();
+  const viewport = map.locator(".react-flow__viewport");
+  const panned = await viewport.getAttribute("style");
+  // Two polls: the first redraws with fresh rows, the second proves the redraw has settled.
+  for (let i = 0; i < 2; i++) await page.waitForResponse((r) => r.url().includes("/paths?") && r.ok());
+  await expect(viewport).toHaveAttribute("style", panned as string);
+});
+
+test("the Problems chip reduces the map to the paths with problems, in the URL", async ({ page }) => {
+  const all = nodeNames(await paths(page, ""));
+  const problems = nodeNames(await paths(page, "&state=error&state=warning&state=unknown"));
+  expect(problems.size).toBeLessThan(all.size);
+  const map = await openMap(page);
+  await expect(map.getByTestId("map-node")).toHaveCount(all.size);
+  await page.getByRole("button", { name: mapCopy.problemsOnly }).click();
+  await expect(page).toHaveURL(/state=error%2Cwarning%2Cunknown/);
+  await expect(map.getByTestId("map-node")).toHaveCount(problems.size);
+  await page.reload();
+  await expect(page.getByRole("button", { name: mapCopy.problemsOnly })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(problems.size);
+});
+
+test("find centres and selects a node by name", async ({ page }) => {
+  await openMap(page);
+  await page.getByRole("searchbox", { name: mapCopy.find }).fill("asleep");
+  const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("traffic/asleep");
+  await expect(page.getByTestId("map-found")).toHaveText(mapCopy.found(1, 2));
+  await page.getByRole("searchbox", { name: mapCopy.find }).press("Enter");
+  await expect(page.getByTestId("map-found")).toHaveText(mapCopy.found(2, 2));
+  await panel.getByRole("button", { name: mapCopy.close }).click();
+  await expect(panel).toHaveCount(0);
+});
+
+for (const theme of themes) {
+  test(`map, hover and side panel in the ${theme.mode} theme, with hover and active styles`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const map = await openMap(page);
+    await pickTheme(page, theme);
+    await page.locator(".react-flow__controls-fitview").click();
+    await shot(page, `${theme.mode}-map`);
+
+    const card = node(map, "traffic/weighted").getByTestId("map-node");
+    const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rest = await bg(card);
+    await card.hover();
+    const hover = await bg(card);
+    expect(hover, "hover changes the card background").not.toBe(rest);
+    await expect(node(map, "traffic/cross")).toHaveClass(/\bdim\b/);
+    await shot(page, `${theme.mode}-hover`);
+    await page.mouse.down();
+    expect(await bg(card), "a press changes it again").not.toBe(hover);
+    await page.mouse.up();
+
+    await node(map, "traffic/cross").click();
+    const panel = page.getByRole("complementary", { name: mapCopy.panel });
+    await expect(panel).toBeVisible();
+    const close = panel.getByRole("button", { name: mapCopy.close });
+    const closeRest = await bg(close);
+    await close.hover();
+    expect(await bg(close), "hover changes the close button").not.toBe(closeRest);
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-panel`);
+  });
+}
+
+// region Task 46: keyboard navigation and table view
+
+/** The map node that has focus, read by its card name. */
+const focusedName = (page: Page) =>
+  page.evaluate(() => document.activeElement?.querySelector(".name")?.textContent ?? "");
+
+test("keyboard only: Tab into the map, arrow to a backend, Enter opens its panel and Escape returns", async ({
+  page,
+}) => {
+  const map = await openMap(page);
+  // Start in the toolbar and Tab forward until a map node has focus; the map is one tab stop.
+  await page.getByRole("button", { name: mapCopy.table }).focus();
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press("Tab");
+    if (await page.evaluate(() => document.activeElement?.classList.contains("react-flow__node"))) break;
+  }
+  const gateway = map.locator(".react-flow__node:focus");
+  await expect(gateway).toHaveAttribute("aria-label", /^Gateway traffic\/traffic, /);
+  // Right along the edges: listener, route, backend.
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  const backend = map.locator(".react-flow__node:focus");
+  await expect(backend).toHaveAttribute("aria-label", /^Service /);
+  const name = await focusedName(page);
+  // Keyboard focus lights the backend's paths and dims the rest, as hover does.
+  await expect(backend).toHaveClass(/\blit\b/);
+  await expect(map.locator(".react-flow__node.dim").first()).toBeAttached();
+  await page.keyboard.press("Enter");
+  const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  await expect(panel).toBeFocused();
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText(name);
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(node(map, name)).toBeFocused();
+});
+
+test("the table toggle shows the map's rows as a table and back, keeping the filters", async ({ page }) => {
+  const problems = await paths(page, "&state=error&state=warning&state=unknown");
+  const map = await openMap(page);
+  await page.getByRole("button", { name: mapCopy.problemsOnly }).click();
+  await expect(map.getByTestId("map-node")).toHaveCount(nodeNames(problems).size);
+  const toggle = page.getByRole("button", { name: mapCopy.table });
+  await toggle.click();
+  await expect(page).toHaveURL(/view=table/);
+  await expect(page).toHaveURL(/state=error%2Cwarning%2Cunknown/);
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const table = page.getByRole("table", { name: mapCopy.tableLabel });
+  // The same rows as the map's query; the header row is not a path.
+  await expect(table.getByRole("row")).toHaveCount(problems.rows.length + 1);
+  await page.reload();
+  await expect(page.getByRole("table", { name: mapCopy.tableLabel }).getByRole("row")).toHaveCount(
+    problems.rows.length + 1,
+  );
+  await page.getByRole("button", { name: mapCopy.table }).click();
+  await expect(page).not.toHaveURL(/view=table/);
+  await expect(page.getByRole("button", { name: mapCopy.problemsOnly })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(nodeNames(problems).size);
+});
+
+for (const theme of themes) {
+  test(`keyboard focus and the table view in the ${theme.mode} theme`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const map = await openMap(page);
+    await pickTheme(page, theme);
+    await page.locator(".react-flow__controls-fitview").click();
+    // Focus from the keyboard: the ring is neutral, not the accent selection border.
+    await page.getByRole("button", { name: mapCopy.table }).focus();
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press("Tab");
+      if (await page.evaluate(() => document.activeElement?.classList.contains("react-flow__node"))) break;
+    }
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    const focused = map.locator(".react-flow__node:focus");
+    // The ring takes the muted text colour, as the find status line does.
+    const ring = await focused.evaluate((el) => getComputedStyle(el).outlineColor);
+    const muted = await page.getByTestId("map-found").evaluate((el) => getComputedStyle(el).color);
+    expect(ring).toBe(muted);
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-keyboard-focus`);
+
+    const toggle = page.getByRole("button", { name: mapCopy.table });
+    const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rest = await bg(toggle);
+    await toggle.hover();
+    expect(await bg(toggle), "hover changes the toggle").not.toBe(rest);
+    await toggle.click();
+    await expect(page.getByRole("table", { name: mapCopy.tableLabel })).toBeVisible();
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-table`);
+  });
+}
+
+// region Task 48: expand, collapse and focus
+
+/** A node wrapper's canvas position, from React Flow's transform. */
+const position = (l: Locator) => l.evaluate((el) => (el as HTMLElement).style.transform);
+const WEIGHTED = "r:gateway.networking.k8s.io/HTTPRoute/traffic/weighted";
+
+test("expanding a route opens its rule between it and its backends, keeps the other columns, and survives a reload", async ({
+  page,
+}) => {
+  const map = await openMap(page);
+  // Every column keeps its place, backends included: the rule column's place is always kept.
+  const fixed = [
+    node(map, "traffic/traffic"),
+    node(map, "http"),
+    node(map, "traffic/asleep").first(),
+    node(map, "traffic/web-a"),
+    node(map, "traffic/web-b"),
+    node(map, "shop/httpbin"),
+  ];
+  const before = await Promise.all(fixed.map(position));
+  await node(map, "traffic/weighted")
+    .getByRole("button", { name: mapCopy.expandNode("traffic/weighted") })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`expand=${encodeURIComponent(WEIGHTED)}`));
+  const rule = node(map, "PathPrefix /weighted");
+  await expect(rule).toHaveCount(1);
+  await expect(rule.locator(".kind")).toHaveText(mapCopy.rule(1));
+  expect(await Promise.all(fixed.map(position))).toEqual(before);
+  // Each rule edge carries its rule's share: 90 % is drawn thicker than 10 %.
+  const rid = await rule.getAttribute("data-id");
+  const width = (b: string) =>
+    map
+      .locator(`[data-id="${rid}>b:/Service/traffic/${b}"] path.react-flow__edge-path`)
+      .evaluate((el) => Number.parseFloat(getComputedStyle(el).strokeWidth));
+  expect(await width("web-a")).toBeGreaterThan(await width("web-b"));
+  await page.reload();
+  await expect(node(page.getByTestId("gateway-map"), "PathPrefix /weighted")).toHaveCount(1);
+  // Collapse restores the map.
+  await node(page.getByTestId("gateway-map"), "traffic/weighted")
+    .getByRole("button", { name: mapCopy.collapseNode("traffic/weighted") })
+    .click();
+  await expect(node(page.getByTestId("gateway-map"), "PathPrefix /weighted")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/expand=/);
+});
+
+test("focus on a backend by keyboard keeps only its paths, survives a reload, and Show the whole map or Back leaves it", async ({
+  page,
+}) => {
+  const d = await paths(page, "");
+  const on = d.rows.filter((r) => r.backend?.name === "httpbin");
+  const want = nodeNames({ ...d, rows: on });
+  const all = nodeNames(d);
+  const map = await openMap(page);
+  await expect(map.getByTestId("map-node")).toHaveCount(all.size);
+  await node(map, "shop/httpbin").focus();
+  await page.keyboard.press("Enter");
+  const panel = page.getByRole("complementary", { name: mapCopy.panel });
+  await expect(panel).toBeFocused();
+  // Tab past Close to the panel's Focus action and press it.
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(panel.getByRole("button", { name: mapCopy.focus })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/focus=b%3A%2FService%2Fshop%2Fhttpbin/);
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(want.size);
+  await expect(page.getByTestId("map-focus")).toContainText(mapCopy.focused("Service", "shop/httpbin"));
+  await page.reload();
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(want.size);
+  await page.getByTestId("map-focus").getByRole("button", { name: mapCopy.clearFocus }).click();
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(all.size);
+  await expect(page).not.toHaveURL(/focus=/);
+  await page.goBack();
+  await expect(page).toHaveURL(/focus=/);
+  await expect(page.getByTestId("gateway-map").getByTestId("map-node")).toHaveCount(want.size);
+});
+
+test("under Problems only an edge whose loaded rows all fail is not drawn broken; it keeps the error stroke and mark", async ({
+  page,
+}) => {
+  await page.goto(`${install}/gateways/${gw}?tab=map&state=error`);
+  const map = page.getByTestId("gateway-map");
+  const id = "g:gateway.networking.k8s.io/Gateway/traffic/traffic>l:http";
+  const trunk = map.locator(`[data-id="${id}"] path.react-flow__edge-path`);
+  await expect(trunk).toHaveClass(/state-error/);
+  await expect(trunk).not.toHaveClass(/broken/);
+  await expect(map.locator(`.map-edge-mark[data-edge="${id}"]`)).toHaveClass(/\bpartial\b/);
+  await expect(map.locator(".react-flow__edge-path.broken")).toHaveCount(0);
+});
+
+test("healthy edges flow, other edges never do, and reduced motion stops the flow", async ({ page }) => {
+  const map = await openMap(page);
+  const flows = map.locator(".map-edge-flow");
+  await expect(flows.first()).toBeAttached();
+  expect(await flows.first().evaluate((el) => getComputedStyle(el).animationName)).not.toBe("none");
+  // Every flow overlay sits on a healthy edge.
+  const on = await flows.evaluateAll((els) =>
+    els.map((el) => el.parentElement?.querySelector(".react-flow__edge-path")?.classList.contains("state-healthy")),
+  );
+  expect(on.every(Boolean)).toBe(true);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(flows).toHaveCount(0);
+});
+
+test("Export SVG and Export PNG download the map, named for the Gateway and date", async ({ page }) => {
+  await openMap(page);
+  const date = new Date().toISOString().slice(0, 10);
+  for (const [name, ext] of [
+    [mapCopy.exportSvg, "svg"],
+    [mapCopy.exportPng, "png"],
+  ] as const) {
+    const wait = page.waitForEvent("download");
+    await page.getByRole("button", { name, exact: true }).click();
+    const file = await wait;
+    expect(file.suggestedFilename()).toBe(`gateway-map-traffic-traffic-${date}.${ext}`);
+    const chunks = (await (await file.createReadStream()).toArray()) as Uint8Array[];
+    const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let at = 0;
+    for (const c of chunks) {
+      bytes.set(c, at);
+      at += c.length;
+    }
+    expect(bytes.length, `${ext} size`).toBeGreaterThan(1000);
+    if (ext === "svg") expect(new TextDecoder().decode(bytes)).toContain("<svg");
+    // PNG signature.
+    else expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    const dir = process.env.MAP_SHOTS;
+    if (dir) await file.saveAs(`${dir}/map-export.${ext}`);
+  }
+});
+
+for (const theme of themes) {
+  test(`an expanded route and focus mode in the ${theme.mode} theme`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto(
+      `${install}/gateways/${gw}?tab=map&expand=${encodeURIComponent(WEIGHTED)}&expand=${encodeURIComponent("r:gateway.networking.k8s.io/HTTPRoute/traffic/split")}`,
+    );
+    const map = page.getByTestId("gateway-map");
+    await expect(node(map, "PathPrefix /weighted")).toHaveCount(1);
+    await pickTheme(page, theme);
+    const toggle = node(map, "traffic/weighted").getByTestId("map-toggle");
+    const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rest = await bg(toggle);
+    await toggle.hover();
+    expect(await bg(toggle), "hover changes the toggle").not.toBe(rest);
+    await page.mouse.move(5, 5);
+    await page.locator(".react-flow__controls-fitview").click();
+    await shot(page, `${theme.mode}-expanded`);
+
+    await node(map, "traffic/weighted").click();
+    await page.getByRole("complementary", { name: mapCopy.panel }).getByRole("button", { name: mapCopy.focus }).click();
+    await expect(page.getByTestId("map-focus")).toBeVisible();
+    await expect(node(page.getByTestId("gateway-map"), "traffic/cross")).toHaveCount(0);
+    await page.mouse.move(5, 5);
+    await shot(page, `${theme.mode}-focus`);
+  });
+}

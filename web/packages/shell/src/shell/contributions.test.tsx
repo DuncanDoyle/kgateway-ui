@@ -131,7 +131,7 @@ it("a Gateway detail tab renders and its ?tab= survives reload", async () => {
     within(list)
       .getAllByRole("tab")
       .map((t) => t.textContent),
-  ).toEqual(["Overview", "YAML", "Widgets"]);
+  ).toEqual(["Overview", "YAML", "Map", "Widgets"]);
   await user.click(screen.getByRole("tab", { name: "Widgets" }));
   await waitFor(() => expect(location()).toBe(`${GW_PATH}?tab=widgets`));
   expect(screen.getByRole("tabpanel")).toHaveTextContent("widgets of kgw.kgateway infra/edge");
@@ -174,7 +174,8 @@ it("a slot with no contribution renders nothing and takes no space", async () =>
   };
   const g = mountGateway(empty);
   await screen.findByRole("table", { name: "Listeners" });
-  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  // Only the core tabs: Overview, YAML and Map.
+  expect(screen.getAllByRole("tab")).toHaveLength(3);
   expect(document.querySelector("[data-slot]")).toBeNull();
   g.unmount();
   mountInstall(empty);

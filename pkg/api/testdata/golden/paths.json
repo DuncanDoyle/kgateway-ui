@@ -1,0 +1,772 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "revision": "2adyqerfymccn",
+    "rows": [
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "endpoints": {
+          "complete": "complete",
+          "port": {
+            "name": "http",
+            "port": 80
+          },
+          "readAt": "2026-10-17T12:00:00Z",
+          "ready": 1,
+          "source": "kubernetes",
+          "total": 1
+        },
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "1o6ouwowcn2yq",
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            }
+          ],
+          "state": "warning"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "on-other",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 25,
+        "shareState": "shown",
+        "weight": 1
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "other-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "3ou38103ftxf5",
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            },
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "other-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "warning"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "on-other",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 75,
+        "shareState": "shown",
+        "weight": 3
+      },
+      {
+        "action": "redirect",
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "other",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "xaovj0atvbvh",
+        "listener": {
+          "name": "web",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/old"
+            }
+          }
+        ],
+        "mirror": false,
+        "problem": {
+          "signals": [
+            {
+              "code": "KGWUI-006",
+              "kind": "finding",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "other",
+                "namespace": "infra"
+              },
+              "state": "warning",
+              "title": "Proxy deployment not found"
+            }
+          ],
+          "state": "warning"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "on-other",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 1,
+        "shareState": "not-shown",
+        "weight": 0
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "mirror-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "me6vckegwr8v",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": true,
+        "mirrorPercent": 100,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "mirror-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "unknown"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "backends",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "shareState": "mirror",
+        "weight": 0
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "other-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "2a0owv8oab2me",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "other-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "unknown"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "mirror-only",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 100,
+        "shareState": "shown",
+        "weight": 1
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "mirror-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "14kgh9nejolg6",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": true,
+        "mirrorPercent": 100,
+        "port": 80,
+        "problem": {
+          "signals": [
+            {
+              "code": "missing",
+              "kind": "waiting",
+              "ref": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "mirror-svc",
+                "namespace": "shop"
+              },
+              "state": "unknown"
+            }
+          ],
+          "state": "unknown"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "mirror-only",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "shareState": "mirror",
+        "weight": 0
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "endpoints": {
+          "complete": "complete",
+          "port": {
+            "name": "http",
+            "port": 80
+          },
+          "readAt": "2026-10-17T12:00:00Z",
+          "ready": 1,
+          "source": "kubernetes",
+          "total": 1
+        },
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [
+          "ls.example.com"
+        ],
+        "id": "1opxiqff8moh7",
+        "listener": {
+          "name": "extra",
+          "port": 8081,
+          "protocol": "HTTP"
+        },
+        "listenerSet": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "ListenerSet",
+          "link": "detail",
+          "name": "ls1",
+          "namespace": "infra"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "via-ls",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 100,
+        "shareState": "shown",
+        "weight": 1
+      },
+      {
+        "action": "delegate",
+        "delegated": false,
+        "delegation": {
+          "mode": "name",
+          "name": "child",
+          "namespace": "shop"
+        },
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "ikfxhv7eadki",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "api",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "shareState": "not-shown",
+        "weight": 1
+      },
+      {
+        "action": "none",
+        "delegated": true,
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "2kxxi31qlnz10",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/child"
+            }
+          }
+        ],
+        "mirror": false,
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "api",
+            "namespace": "shop"
+          },
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "child",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "shareState": "not-shown",
+        "weight": 0
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart-svc",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "endpoints": {
+          "complete": "complete",
+          "port": {
+            "name": "http",
+            "port": 80
+          },
+          "readAt": "2026-10-17T12:00:00Z",
+          "ready": 1,
+          "source": "kubernetes",
+          "total": 1
+        },
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "2jfx9tma4mr3j",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "port": 80,
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "backends",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 50,
+        "shareState": "shown",
+        "weight": 1
+      },
+      {
+        "action": "backend",
+        "backend": {
+          "group": "gateway.kgateway.dev",
+          "kind": "Backend",
+          "link": "yaml",
+          "name": "be1",
+          "namespace": "shop"
+        },
+        "delegated": false,
+        "endpoints": {
+          "complete": "not-applicable",
+          "readAt": "0001-01-01T00:00:00Z",
+          "source": "kubernetes"
+        },
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "id": "1h4d065o2v0f4",
+        "listener": {
+          "name": "http",
+          "port": 8080,
+          "protocol": "HTTP"
+        },
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ],
+        "mirror": false,
+        "problem": {
+          "signals": [],
+          "state": "healthy"
+        },
+        "routes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "backends",
+            "namespace": "shop"
+          }
+        ],
+        "rule": 0,
+        "share": 50,
+        "shareState": "shown",
+        "weight": 1
+      }
+    ],
+    "summary": {
+      "backends": 4,
+      "byState": {
+        "error": {
+          "backends": 0,
+          "gateways": 0,
+          "paths": 0,
+          "routes": 0
+        },
+        "healthy": {
+          "backends": 2,
+          "gateways": 1,
+          "paths": 5,
+          "routes": 4
+        },
+        "unknown": {
+          "backends": 2,
+          "gateways": 1,
+          "paths": 3,
+          "routes": 2
+        },
+        "warning": {
+          "backends": 2,
+          "gateways": 1,
+          "paths": 3,
+          "routes": 1
+        }
+      },
+      "facets": {
+        "gateways": [
+          {
+            "paths": 8,
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "paths": 3,
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "other",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "namespaces": [
+          {
+            "name": "shop",
+            "paths": 11
+          }
+        ]
+      },
+      "gateways": 2,
+      "paths": 11,
+      "routes": 6
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

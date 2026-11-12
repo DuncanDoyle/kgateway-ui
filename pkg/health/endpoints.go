@@ -3,8 +3,10 @@ package health
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +31,7 @@ const (
 	endpointsOffDetail  = "Services and EndpointSlices are not watched"
 	endpointsSyncDetail = "Services and EndpointSlices are not synced yet"
 	endpointsHoldReason = "Waiting for backends to get ready endpoints"
+	endpointsNSDetail   = "Services or EndpointSlices are not available in namespaces %s"
 )
 
 // endpointsCheck: KGWUI-023, one per Service port that a resolved core Service
@@ -53,17 +56,37 @@ type servicePort struct {
 func (p servicePort) key() string { return p.ns + "/" + p.name + ":" + strconv.Itoa(int(p.port)) }
 
 // Run implements Check. Endpoints off, denied, failing or syncing make it not
-// available (D-034); holds then restart.
+// available (D-034); holds then restart. In a scoped snapshot where only some
+// namespaces cannot be read, it judges the rest and stays not available.
 func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	at := takenAt(in)
-	if why, detail := endpointsAvailability(in.Snapshot); why != "" {
+	why, detail := endpointsAvailability(in.Snapshot)
+	scoped := len(in.Snapshot.RequestedNamespaces) > 0
+	if why != "" && (!scoped || !slices.ContainsFunc(in.Snapshot.RequestedNamespaces, func(ns string) bool { return endpointsReadable(in.Snapshot, ns) })) {
 		ctx.State.Set(endpointsStartsKey, nil)
 		return nil, NotAvailable(c.Name(), why, detail, at)
 	}
-	res := ok(c.Name(), false, at)
+	// unread are the namespaces a scoped snapshot cannot judge: requested ones not OK, and referenced ones not read.
+	unread := map[string]bool{}
+	if scoped {
+		for _, ns := range in.Snapshot.RequestedNamespaces {
+			if !endpointsReadable(in.Snapshot, ns) {
+				unread[ns] = true
+			}
+		}
+	}
+	result := func() CheckResult {
+		if len(unread) == 0 {
+			return ok(c.Name(), false, at)
+		}
+		if why == "" {
+			why = AvailNotObserved
+		}
+		return NotAvailable(c.Name(), why, fmt.Sprintf(endpointsNSDetail, strings.Join(slices.Sorted(maps.Keys(unread)), ", ")), at)
+	}
 	if in.Owned == nil {
-		return nil, res
+		return nil, result()
 	}
 	svcs := make(map[string]*cache.ServiceFact, len(in.Snapshot.Services))
 	for i := range in.Snapshot.Services {
@@ -85,18 +108,16 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		route := objects.RefOf(r.Obj)
 		for _, sp := range serviceRefs(r.Obj) {
-			svc := svcs[sp.ns+"/"+sp.name]
-			if svc == nil || svc.Type == "ExternalName" {
-				continue
-			}
-			i := servicePortIndex(svc.Ports, sp.port)
-			if i < 0 {
-				continue // a port the Service lacks is KGWUI-013's
+			if scoped && !endpointsReadable(in.Snapshot, sp.ns) {
+				unread[sp.ns] = true
+				continue // unknown, never ready
 			}
 			ev := evidence[sp]
 			if ev == nil {
-				ev, ready[sp] = sliceCounts(byService[sp.ns+"/"+sp.name], svc.Ports[i].Name)
-				ev.Service, ev.Port = sp.name, sp.port
+				// A port the Service lacks is KGWUI-013's.
+				if ev, ready[sp] = PortEndpoints(svcs[sp.ns+"/"+sp.name], byService[sp.ns+"/"+sp.name], sp.port); ev == nil {
+					continue
+				}
 				evidence[sp] = ev
 				order = append(order, sp)
 			}
@@ -133,7 +154,7 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	slices.SortFunc(fs, func(a, b Finding) int {
 		return cmp.Or(a.Resource.Compare(*b.Resource), cmp.Compare(a.Facts.(*EndpointsEvidence).Port, b.Facts.(*EndpointsEvidence).Port))
 	})
-	return fs, res
+	return fs, result()
 }
 
 // endpointsAvailability says why Services or EndpointSlices cannot feed 023:
@@ -158,6 +179,18 @@ func endpointsAvailability(snap *cache.Snapshot) (Availability, string) {
 		}
 	}
 	return why, detail
+}
+
+// endpointsReadable reports whether a scoped snapshot read both Services and
+// EndpointSlices in namespace ns; a namespace it did not request is not read.
+func endpointsReadable(snap *cache.Snapshot, ns string) bool {
+	return snap.NamespaceAccess[cache.ServicesGVR][ns].OK && snap.NamespaceAccess[cache.EndpointSlicesGVR][ns].OK
+}
+
+// EndpointsRead reports whether snap holds the Services and EndpointSlices of
+// namespace ns: always for a cluster-wide snapshot, else when it read both there.
+func EndpointsRead(snap *cache.Snapshot, ns string) bool {
+	return len(snap.RequestedNamespaces) == 0 || endpointsReadable(snap, ns)
 }
 
 // resolvedHere reports whether route u has, on one of parents, a current
@@ -198,6 +231,22 @@ func serviceRefs(u *unstructured.Unstructured) []servicePort {
 		}
 	}
 	return out
+}
+
+// PortEndpoints counts the ready and total endpoints of svc's port numbered
+// port in slices, the Service's slices, as KGWUI-023 does. It returns nil for
+// a nil or ExternalName Service, or a port the Service lacks.
+func PortEndpoints(svc *cache.ServiceFact, slices []*cache.SliceFact, port int32) (ev *EndpointsEvidence, anyReady bool) {
+	if svc == nil || svc.Type == "ExternalName" {
+		return nil, false
+	}
+	i := servicePortIndex(svc.Ports, port)
+	if i < 0 {
+		return nil, false
+	}
+	ev, anyReady = sliceCounts(slices, svc.Ports[i].Name)
+	ev.Service, ev.Port = svc.Name, port
+	return ev, anyReady
 }
 
 // servicePortIndex is the index of the TCP Service port numbered port (route

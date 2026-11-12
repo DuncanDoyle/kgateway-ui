@@ -92,6 +92,9 @@ func TestNewIsTheBaseRegistry(t *testing.T) {
 	if im.Settings == nil || !reflect.DeepEqual(im.Settings(inst), install.ReadSettings(inst)) {
 		t.Fatal("the kgateway pack's settings must be ReadSettings")
 	}
+	if im.BackendConsumers == nil {
+		t.Fatal("the kgateway pack must list GatewayExtension backend consumers")
+	}
 	tcp := kinds.Served{Descriptor: kinds.Descriptor{Group: "gateway.networking.k8s.io", Kind: "TCPRoute"}, Version: "v1alpha2"}
 	if im.ExperimentalOnly == nil || !im.ExperimentalOnly(tcp, inst) {
 		t.Fatal("the kgateway pack must classify a pre-v1 TCPRoute as experimental-only")
@@ -115,7 +118,7 @@ func TestNewCoreIsGatewayAPIOnly(t *testing.T) {
 		t.Fatalf("checks %v, want %v", got, want)
 	}
 	im := r.ImplFor(install.Install{})
-	if im.Scope != nil || im.Settings != nil || im.RulesFor != nil || im.Version != nil || im.ExperimentalOnly != nil || im.Verifier != nil {
+	if im.Scope != nil || im.Settings != nil || im.RulesFor != nil || im.Version != nil || im.ExperimentalOnly != nil || im.Verifier != nil || im.BackendConsumers != nil {
 		t.Fatalf("the core has no pack hooks, got %+v", im)
 	}
 	if r.Err() != nil {

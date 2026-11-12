@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -21,6 +21,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
 
@@ -57,6 +58,12 @@ func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer, mut ...func(*c
 
 // snapshotHandler is tierHandler over snap, which is already sorted.
 func snapshotHandler(snap *cache.Snapshot, tier scale.Tier, authz Authorizer) (http.Handler, *engine.Model) {
+	e, m := snapshotEngine(snap, tier)
+	return pathsHandler(e, m, authz), m
+}
+
+// snapshotEngine is snapshotHandler's engine and its model.
+func snapshotEngine(snap *cache.Snapshot, tier scale.Tier) (*engine.Engine, *engine.Model) {
 	now := testutil.Now
 	cfg := engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
@@ -69,7 +76,7 @@ func snapshotHandler(snap *cache.Snapshot, tier scale.Tier, authz Authorizer) (h
 		e.Compute()
 		now = now.Add(max(engine.Window, health.Grace) + time.Second) // past every window and grace end
 	}
-	return NewHandler(e, fstest.MapFS{}, authz), e.Compute()
+	return e, e.Compute()
 }
 
 // serve benchmarks one GET per case.
@@ -160,4 +167,34 @@ func deepestChild(ix *explore.Index, can func(objects.Ref) bool) (objects.Ref, i
 		}
 	}
 	return deepest, depthOf(deepest)
+}
+
+// BenchmarkPathsLarge measures one paths request at the Large paths world
+// under AllowAll: the first page cold (a fresh memo) and warm per query.
+func BenchmarkPathsLarge(b *testing.B) { benchPaths(b, nil) }
+
+// BenchmarkPathsLargeRestricted is BenchmarkPathsLarge under a restricting Authorizer.
+func BenchmarkPathsLargeRestricted(b *testing.B) { benchPaths(b, restricting) }
+
+func benchPaths(b *testing.B, authz Authorizer) {
+	tier := scale.Large.Paths()
+	e, m := snapshotEngine(scale.Snapshot(tier, 1), tier)
+	base := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/paths"
+	b.Run("cold", func(b *testing.B) {
+		req := httptest.NewRequest(http.MethodGet, base, nil)
+		b.ReportAllocs()
+		for b.Loop() {
+			w := httptest.NewRecorder()
+			pathsHandler(e, m, authz).ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				b.Fatalf("GET %s: %d %s", base, w.Code, w.Body)
+			}
+		}
+	})
+	serve(b, pathsHandler(e, m, authz), []struct{ name, path string }{
+		{"warm", base},
+		{"warm-error", base + "?state=error"},
+		{"warm-q", base + "?q=ns-01"},
+		{"warm-limit-max", base + "?limit=" + strconv.Itoa(paths.MaxLimit)},
+	})
 }

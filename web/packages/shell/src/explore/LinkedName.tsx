@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import type { LinkedRef } from "../api/types";
 import { ResourceName } from "../resource/ResourceName";
 import { useLinkVia } from "../shell/trail";
-import { linkTarget } from "./objectPath";
+import { linkTarget, withVia } from "./objectPath";
 
 // region Styles
 const oneLine = css`
@@ -37,6 +37,8 @@ interface LinkedNameProps {
   installId: string;
   /** One line with an ellipsis; text names become focusable so a Tooltip around them is keyboard-reachable. */
   truncate?: boolean;
+  /** Opens here instead of where the ref's link says, e.g. a backend's detail page. */
+  to?: string;
   /** Set by a wrapping Tooltip. */
   "aria-describedby"?: string;
   stylesOverride?: SerializedStyles;
@@ -47,10 +49,12 @@ export function LinkedName({
   refValue,
   installId,
   truncate,
+  to: own,
   "aria-describedby": describedBy,
   stylesOverride,
 }: LinkedNameProps) {
-  const to = linkTarget(installId, refValue, useLinkVia(installId));
+  const via = useLinkVia(installId);
+  const to = own ? withVia(own, via) : linkTarget(installId, refValue, via);
   const style = truncate ? css`${oneLine}${stylesOverride}` : stylesOverride;
   const name = (
     <ResourceName

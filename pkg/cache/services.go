@@ -34,12 +34,13 @@ type ServiceFact struct {
 }
 
 // ServicePort is one Service port. Target is the numeric target port, the
-// port itself when unset, and 0 when the target port is a name. Protocol
-// is "TCP" when unset.
+// port itself when unset, and 0 when the target port is a name; TargetName
+// is that name. Protocol is "TCP" when unset.
 type ServicePort struct {
 	Name         string
 	Port, Target int32
 	Protocol     string
+	TargetName   string
 }
 
 // SlicePort is one EndpointSlice port; an unnamed port has the name "".
@@ -113,9 +114,10 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 		Type: known(string(svc.Spec.Type), "ClusterIP", "NodePort", "LoadBalancer", "ExternalName"), Ports: make([]ServicePort, 0, len(svc.Spec.Ports))}
 	for _, p := range svc.Spec.Ports {
 		var target int32
+		var targetName string
 		switch tp := p.TargetPort; {
 		case tp.Type == intstr.String:
-			// A named target port has no number here.
+			targetName = tp.StrVal
 		case tp.IntVal == 0:
 			target = p.Port
 		default:
@@ -125,7 +127,7 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 		if proto == "" {
 			proto = string(corev1.ProtocolTCP)
 		}
-		f.Ports = append(f.Ports, ServicePort{Name: p.Name, Port: p.Port, Target: target, Protocol: proto})
+		f.Ports = append(f.Ports, ServicePort{Name: p.Name, Port: p.Port, Target: target, Protocol: proto, TargetName: targetName})
 	}
 	return f
 }
@@ -161,22 +163,24 @@ func sliceFact(es *discoveryv1.EndpointSlice) SliceFact {
 	return f
 }
 
-// serviceInformer watches every Service, cut down to a ServiceFact's fields.
-func (c *Cache) serviceInformer(kube kubernetes.Interface) tracked {
-	svcs := kube.CoreV1().Services("")
+// serviceInformer watches the Services of namespace ns ("" for all), cut down to a ServiceFact's fields.
+func (c *Cache) serviceInformer(kube kubernetes.Interface, ns string) tracked {
+	svcs := kube.CoreV1().Services(ns)
 	t := c.informer(kube, &corev1.Service{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return svcs.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return svcs.Watch(ctx, o) })
-	_ = t.inf.SetTransform(stripService) // fails only on a started informer
+	t.namespace = ns
+	t.setTransform(stripService)
 	return t
 }
 
-// sliceInformer watches every EndpointSlice, cut down to a SliceFact's fields.
-func (c *Cache) sliceInformer(kube kubernetes.Interface) tracked {
-	es := kube.DiscoveryV1().EndpointSlices("")
+// sliceInformer watches the EndpointSlices of namespace ns ("" for all), cut down to a SliceFact's fields.
+func (c *Cache) sliceInformer(kube kubernetes.Interface, ns string) tracked {
+	es := kube.DiscoveryV1().EndpointSlices(ns)
 	t := c.informer(kube, &discoveryv1.EndpointSlice{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return es.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return es.Watch(ctx, o) })
-	_ = t.inf.SetTransform(stripSlice) // fails only on a started informer
+	t.namespace = ns
+	t.setTransform(stripSlice)
 	return t
 }

@@ -1,6 +1,7 @@
 import styled from "@emotion/styled";
-import type { Match } from "../../../api/types";
+import type { GRPCMethod, KeyMatch, Match } from "../../../api/types";
 import { routeCopy } from "../../../copy/explorer";
+import { cellCopy } from "../../../copy/traffic";
 
 // region Styles
 const Line = styled.span`
@@ -14,11 +15,19 @@ const Line = styled.span`
 `;
 
 // region Helpers
-/** One match as its written parts: path, headers, query parameters and method. */
+const headerText = (h: KeyMatch) => `${routeCopy.header} ${h.name} ${h.type} ${h.value}`;
+
+/** A GRPCRoute match as its parts: service/method, or any method, then headers; Traffic shows the same text. */
+export function grpcParts(method?: GRPCMethod, headers?: KeyMatch[]): string[] {
+  const m = method?.service || method?.method ? `${method.service ?? "*"}/${method.method ?? "*"}` : cellCopy.anyMethod;
+  return [m, ...(headers ?? []).map(headerText)];
+}
+
+/** One HTTPRoute match as its written parts: path, headers, query parameters and method. */
 function parts(m: Match): string[] {
   return [
     ...(m.path ? [`${m.path.type} ${m.path.value}`] : []),
-    ...(m.headers ?? []).map((h) => `${routeCopy.header} ${h.name} ${h.type} ${h.value}`),
+    ...(m.headers ?? []).map(headerText),
     ...(m.queryParams ?? []).map((q) => `${routeCopy.query} ${q.name} ${q.type} ${q.value}`),
     ...(m.method ? [`${routeCopy.method} ${m.method}`] : []),
   ];
@@ -28,11 +37,11 @@ function parts(m: Match): string[] {
 export const matchText = (m: Match) => parts(m).join(" ");
 
 // region Component
-/** A route match as written, its parts side by side. */
-export function MatchLine({ m, className }: { m: Match; className?: string }) {
+/** A route match as written, its parts side by side; grpc renders a GRPCRoute match. */
+export function MatchLine({ m, grpc, className }: { m: Match; grpc?: boolean; className?: string }) {
   return (
     <Line className={className}>
-      {parts(m).map((p, i) => (
+      {(grpc ? grpcParts(m.grpcMethod, m.headers) : parts(m)).map((p, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: parts keep written order and may repeat
         <span key={i}>{p}</span>
       ))}

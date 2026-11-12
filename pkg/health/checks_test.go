@@ -772,7 +772,7 @@ func TestCoreAndKgatewaySplitUpstream(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, want := range []string{"xDS rejects", "scope matches controller", "computed views", "withheld config", skewCheckName} {
+	for _, want := range []string{"xDS rejects", "scope matches controller", "backend status", "computed views", "withheld config", skewCheckName} {
 		if !names(kgw)[want] {
 			t.Errorf("%q must be a kgateway check", want)
 		}

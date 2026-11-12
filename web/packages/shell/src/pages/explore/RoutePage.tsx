@@ -5,16 +5,20 @@ import { useParams } from "react-router-dom";
 import { useRouteDetail } from "../../api/exploreHooks";
 import { useInstallFeature } from "../../api/hooks";
 import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
-import { detailCopy, routeCopy } from "../../copy/explorer";
+import { detailCopy, routeCopy, traceCopy } from "../../copy/explorer";
+import { trafficCopy } from "../../copy/traffic";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
-import { DetailFrame, Facts, Section } from "./detailParts";
+import { installPath } from "../../shell/paths";
+import { InlineLink } from "../../states/controls";
+import { DetailFrame, Facts, refParam, Section } from "./detailParts";
 import { Muted } from "./listParts";
 import { ChildRoutes } from "./route/ChildRoutes";
 import { EffectiveMatches } from "./route/EffectiveMatches";
 import { ParentCard } from "./route/ParentCard";
 import { RuleList } from "./route/RuleList";
 import { isRouteRef, sameParentRef } from "./route/refs";
+import { Serves } from "./route/Serves";
 import { UpChain } from "./route/UpChain";
 
 // region Styles
@@ -65,15 +69,15 @@ function linkedRefs(d: RouteDetail): LinkedRef[] {
   return out;
 }
 
-/** One HTTPRoute: up-chain, parents, rules as written and its child routes (design §8.5). */
+/** One route of any kind: up-chain, parents, the route trace and, for an HTTPRoute, its child routes (design §8.5, Phase 6 §7). */
 export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
   const id = useInstallId();
   const { group = "", kind = "", ns = "", name = "" } = useParams();
   const ref = useMemo<LinkedRef>(() => ({ group, kind, namespace: ns, name, link: "detail" }), [group, kind, ns, name]);
   const { data, error } = useRouteDetail(id, ref);
   const hasDelegation = !!data?.rules.some((r) => r.backendRefs.some((b) => b.delegation));
-  // Delegation copy and blocks need a rule set that computes it; the tab is the kgateway web pack's.
-  const delegation = useInstallFeature(id, "delegation") !== false;
+  // Delegation copy and blocks need a rule set that computes it and an HTTPRoute; the tab is the kgateway web pack's.
+  const delegation = useInstallFeature(id, "delegation") !== false && kind === "HTTPRoute";
   const unlisted = useMemo(() => (data ? unlistedRefs(data) : []), [data]);
   // The parents and up-chain this page links decide the links of the same objects in the trail.
   const trailRefs = useMemo(() => (data ? linkedRefs(data) : undefined), [data]);
@@ -121,7 +125,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
     <DetailFrame
       installId={id}
       refValue={ref}
-      noun="HTTPRoute"
+      noun={kind}
       side={
         wide ? (
           <>
@@ -141,22 +145,41 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
           {wide ? null : upChain}
           <Section aria-label={detailCopy.summary}>
             <Facts>
-              <dt>{routeCopy.hostnames}</dt>
-              <dd>{hostnameText(data)}</dd>
+              {/* A TCPRoute has no hostnames. */}
+              {kind === "TCPRoute" ? null : (
+                <>
+                  <dt>{routeCopy.hostnames}</dt>
+                  <dd>{hostnameText(data)}</dd>
+                </>
+              )}
               {delegation ? (
                 <>
                   <dt>{routeCopy.parentRoutes}</dt>
                   <dd>{permissionText(data)}</dd>
                 </>
               ) : null}
+              <dt>{trafficCopy.title}</dt>
+              <dd>
+                <InlineLink to={`${installPath(id, "traffic")}?${new URLSearchParams({ route: refParam(ref) })}`}>
+                  {trafficCopy.routeEntry}
+                </InlineLink>
+              </dd>
             </Facts>
           </Section>
           {wide ? null : parentsBlock}
+          {data.serves ? (
+            <Section aria-labelledby="route-serves">
+              <h2 id="route-serves">
+                {traceCopy.serves} <span className="note">{data.serves.length}</span>
+              </h2>
+              <Serves installId={id} serves={data.serves} hostnames={kind !== "TCPRoute"} />
+            </Section>
+          ) : null}
           <Section aria-labelledby="route-rules">
             <h2 id="route-rules">
               {routeCopy.rules} <span className="note">{data.rules.length}</span>
             </h2>
-            <RuleList installId={id} rules={data.rules} />
+            <RuleList installId={id} kind={kind} rules={data.rules} serves={data.serves} />
           </Section>
           {delegation && data.effective?.length ? (
             <EffectiveMatches installId={id} edges={data.effective} truncated={data.effectiveTruncated} />

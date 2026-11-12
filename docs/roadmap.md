@@ -1,6 +1,6 @@
 # Snellius — Roadmap
 
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-12
 
 **Program:** [kgateway-tooling program.md](https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md)
 
@@ -103,7 +103,7 @@ Rough sub-phases:
 Why now: about 60% of the code is already generic, and the refactor is cheaper before the Policies phase adds kgateway policy semantics. Hooks run per install or per stage, so there is no measurable performance cost. Memory is the tight budget (+39.3 of 48 MiB retained heap), so the core owns the shared cache.
 
 ### Phase 6 — Traffic Flow & Backends
-**Status:** Not started
+**Status:** Complete (2026-11-12, local branch) — `docs/phases/phase-6/phase-6-complete.md`
 **Docs:** `docs/phases/phase-6/`
 
 - Where a route actually sends traffic: Services and Backends, weights, endpoint health and endpoint discovery status.
@@ -145,6 +145,12 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - Routes without authentication or authorization.
 - An opt-in certificate inventory with expiry dates (opt-in because it needs Secret access, see principle 8).
 - Certificates may come from files, not Secrets (D-016).
+
+**Requirement to design (user, 2026-11-12): updates and CVEs.** Supply-chain pressure makes "am I on a patched version?" a core posture question.
+1. Show when a newer release, patch releases first, exists for Snellius itself and for each observed platform (kgateway, and any distribution a downstream adds through an extension seam).
+2. Later: list the CVEs the running versions are affected by (critical, high and maybe medium), and whether an upgrade fixes them.
+
+**Design questions:** this is the UI's first outbound call, so it is opt-in and must work air-gapped (an offline feed or a mirror URL); which sources to trust (release feeds, OSV or GitHub advisories) and how to show their freshness; image digests versus version tags; how a downstream plugs in its own release and advisory feed.
 
 ### Phase 10 — Metrics & Insights
 **Status:** Not started

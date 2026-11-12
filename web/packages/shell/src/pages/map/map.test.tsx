@@ -1,0 +1,1108 @@
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { SWRConfig, useSWRConfig } from "swr";
+import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
+import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
+import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
+import type { GatewayDetail, LinkedRef, PathRow, PathSummary, PathsResponse } from "../../api/types";
+import { renderWithTheme, testSWR } from "../../test/render";
+import { defaultThemes } from "../../theme/themes";
+import { GatewayPage } from "../explore/GatewayPage";
+import { dedupeRows, useMapPaths } from "./mapData";
+
+const ID = "kgw.kgateway";
+const API = `/api/v1/installs/${ID}`;
+const GW_PATH = `/i/${ID}/gateways/infra/edge`;
+const now = () => new Date().toISOString();
+const edgePaths = (collectedAt = now()): PathsResponse => {
+  const b = pathsGolden.body as unknown as PathsResponse;
+  return { ...b, rows: b.rows.filter((r) => r.gateway.name === "edge"), collectedAt };
+};
+
+/** Stubs fetch by path; paths answers with paths(url). */
+function serve(paths: (u: URL) => PathsResponse | Promise<PathsResponse>) {
+  const byPath: Record<string, (u: URL) => unknown> = {
+    "/api/v1/meta": () => metaGolden.body,
+    [`${API}/gateways/infra/edge`]: () => ({ ...(gatewayGolden.body as GatewayDetail), collectedAt: now() }),
+    [`${API}/paths`]: paths,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const u = new URL(url, "http://ui");
+      const body = byPath[u.pathname];
+      return body === undefined
+        ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
+        : new Response(JSON.stringify(await body(u)), { status: 200 });
+    }),
+  );
+}
+const pathCalls = () =>
+  vi
+    .mocked(fetch)
+    .mock.calls.map((c) => new URL(String(c[0]), "http://ui"))
+    .filter((u) => u.pathname.endsWith("/paths"));
+
+function Where() {
+  return <output data-testid="location">{useLocation().search}</output>;
+}
+
+function mount(query = "", themeId?: string) {
+  return renderWithTheme(
+    <>
+      <Routes>
+        <Route path="/i/:id/gateways/:ns/:name" element={<GatewayPage />} />
+      </Routes>
+      <Where />
+    </>,
+    { path: `${GW_PATH}${query}`, themeId },
+  );
+}
+
+// React Flow measures its container and nodes; jsdom has no layout, so these report zero sizes.
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal(
+    "DOMMatrixReadOnly",
+    class {
+      m22 = 1;
+    },
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+it("the Map tab opens from the tab strip and renders a fallback while the map loads", async () => {
+  serve(() => edgePaths());
+  mount();
+  await screen.findByRole("table", { name: "Listeners" });
+  await userEvent.setup().click(screen.getByRole("tab", { name: "Map" }));
+  expect(screen.getByTestId("location")).toHaveTextContent("?tab=map");
+  // The fallback holds the map's place until the first page and the lazy chunk have both arrived.
+  expect(screen.getByTestId("map-fallback")).toHaveAttribute("aria-busy", "true");
+  const map = await screen.findByTestId("gateway-map");
+  expect(screen.queryByTestId("map-fallback")).toBeNull();
+  // One node per distinct listener, route and backend, plus the Gateway.
+  const names = within(map)
+    .getAllByTestId("map-node")
+    .map((n) => n.querySelector(".name")?.textContent);
+  expect(names).toEqual(
+    expect.arrayContaining(["infra/edge", "http", "extra", "shop/backends", "shop/api", "shop/cart-svc", "shop/be1"]),
+  );
+  expect(new Set(names).size).toBe(names.length);
+});
+
+it("the map reads /paths with gateway=ns/name and the tab's filters, page one of 200 rows", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map&state=error,warning&kind=HTTPRoute&namespace=shop&q=cart&listener=http&sort=gateway.asc&cursor=c1");
+  await screen.findByTestId("gateway-map");
+  // The Overview's listener selector and the path list's sort and cursor are not the map's filters.
+  expect([...(pathCalls()[0]?.searchParams.entries() ?? [])]).toEqual([
+    ["gateway", "infra/edge"],
+    ["namespace", "shop"],
+    ["state", "error"],
+    ["state", "warning"],
+    ["kind", "HTTPRoute"],
+    ["q", "cart"],
+    ["limit", "200"],
+  ]);
+});
+
+it("stale data turns every node state unknown", async () => {
+  serve(() => edgePaths(new Date(Date.now() - 10 * 60_000).toISOString()));
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const states = within(map)
+    .getAllByTestId("map-node")
+    .map((n) => n.textContent ?? "");
+  expect(states.length).toBeGreaterThan(1);
+  for (const s of states) expect(s).toMatch(/Unknown$/);
+});
+
+it.each(defaultThemes.map((t) => [t.id, t] as const))(
+  "React Flow's colours come from the %s theme's tokens",
+  async (_, theme) => {
+    serve(() => edgePaths());
+    mount("?tab=map", theme.id);
+    await screen.findByTestId("gateway-map");
+    const css = [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("");
+    await waitFor(() => expect(css).toContain(`--xy-background-color:${theme.color.bg}`));
+    expect(css).toContain(`--xy-minimap-background-color:${theme.color.surface}`);
+    expect(css).toContain(`--xy-edge-stroke:${theme.color.textMuted}`);
+  },
+);
+
+/** Page n (from 0) of a result of total paths, 200 rows each, collected at collectedAt(n). */
+function page(n: number, total: number, collectedAt = (_: number) => now()): PathsResponse {
+  const b = edgePaths();
+  const base = b.rows[0] as PathsResponse["rows"][number];
+  const count = Math.max(0, Math.min(200, total - n * 200));
+  const rows = Array.from({ length: count }, (_, k) => ({
+    ...base,
+    id: `id${n * 200 + k}`,
+    routes: [{ ...(base.routes[0] as LinkedRef), name: `r${n * 200 + k}` }],
+  }));
+  const next = (n + 1) * 200 < total ? `p${n + 1}` : undefined;
+  return { ...b, rows, next, summary: { ...b.summary, paths: total }, collectedAt: collectedAt(n) };
+}
+const pageOf = (u: URL) => Number(u.searchParams.get("cursor")?.slice(1) ?? 0);
+
+it("the map loads its pages in sequence by cursor and dates them by the oldest page", async () => {
+  const t0 = Date.now();
+  // Page 1 was collected earliest.
+  const at = (n: number) => new Date(t0 - (n === 1 ? 3000 : 1000)).toISOString();
+  serve((u) => page(pageOf(u), 450, at));
+  const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={testSWR()}>{children}</SWRConfig>;
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
+  expect(result.current).toMatchObject({ loading: true, partial: false, done: false });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current).toMatchObject({ loading: false, partial: false, truncated: false, collectedAt: at(1) });
+  expect(result.current.rows.map((r) => r.routes[0]?.name)).toEqual(Array.from({ length: 450 }, (_, k) => `r${k}`));
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", "p2"]);
+  expect(pathCalls().every((u) => u.searchParams.get("limit") === "200")).toBe(true);
+});
+
+it("a first load shows its rows as pages arrive", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const n = pageOf(new URL(url, "http://ui"));
+      if (n > 0) await gate;
+      return new Response(JSON.stringify(page(n, 300)), { status: 200 });
+    }),
+  );
+  const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={testSWR()}>{children}</SWRConfig>;
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper });
+  await waitFor(() => expect(result.current).toMatchObject({ loading: false, partial: true, done: false }));
+  expect(result.current.rows).toHaveLength(200);
+  release();
+  await waitFor(() => expect(result.current).toMatchObject({ partial: false, done: true }));
+  expect(result.current.rows).toHaveLength(300);
+});
+
+/** Serves rows() as a /paths result of 200-row pages with summary(); the path count is rows().length. */
+function serveResult(rows: () => PathRow[], summary: () => PathSummary, onPage?: (n: number) => void) {
+  serve((u) => {
+    const n = pageOf(u);
+    onPage?.(n);
+    const all = rows();
+    const next = (n + 1) * 200 < all.length ? `p${n + 1}` : undefined;
+    return { ...edgePaths(), rows: all.slice(n * 200, n * 200 + 200), next, summary: summary() };
+  });
+}
+const named = (k: number, state: PathRow["problem"]["state"] = "healthy"): PathRow => {
+  const base = edgePaths().rows[0] as PathRow;
+  return {
+    ...base,
+    id: `id${k}`,
+    routes: [{ ...(base.routes[0] as LinkedRef), name: `r${k}` }],
+    problem: { state, signals: [] },
+  };
+};
+const hookWrapper = ({ children }: { children: React.ReactNode }) => (
+  <SWRConfig value={testSWR()}>{children}</SWRConfig>
+);
+
+it("a row that turns bad between pages is not lost: the walk restarts when the result's counts change", async () => {
+  // Problem-first order moves r250 ahead of the page-one anchor once it fails, so a plain walk would skip it.
+  const healthy = Array.from({ length: 300 }, (_, k) => named(k));
+  const failed = [named(250, "error"), ...healthy.filter((_, k) => k !== 250)];
+  const base = edgePaths().summary;
+  const counts = (errors: number): PathSummary => ({
+    ...base,
+    paths: 300,
+    byState: { ...base.byState, error: { ...base.byState.error, paths: errors } },
+  });
+  let flipped = false;
+  serveResult(
+    () => (flipped ? failed : healthy),
+    () => counts(flipped ? 1 : 0),
+    (n) => {
+      if (n === 1) flipped = true;
+    },
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  const names = result.current.rows.map((r) => r.routes[0]?.name);
+  expect(names).toHaveLength(300);
+  expect(new Set(names).size).toBe(300);
+  expect(result.current.rows.find((r) => r.routes[0]?.name === "r250")?.problem.state).toBe("error");
+  expect(result.current.inconsistent).toBe(false);
+  // Page one, a page two whose counts differ, then a full second walk.
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", null, "p1"]);
+});
+
+it("a walk restarts when the revision changes between pages, even with the same counts", async () => {
+  // r100 recovers and r250 fails: the error count holds, but r250 moves ahead of the page-one anchor.
+  const before = Array.from({ length: 300 }, (_, k) => named(k, k === 100 ? "error" : "healthy"));
+  const after = [named(250, "error"), ...Array.from({ length: 300 }, (_, k) => named(k)).filter((_, k) => k !== 250)];
+  const base = edgePaths().summary;
+  const summary: PathSummary = {
+    ...base,
+    paths: 300,
+    byState: { ...base.byState, error: { ...base.byState.error, paths: 1 } },
+  };
+  let flipped = false;
+  serve((u) => {
+    const n = pageOf(u);
+    if (n === 1) flipped = true;
+    const all = flipped ? after : before;
+    const next = (n + 1) * 200 < all.length ? `p${n + 1}` : undefined;
+    const revision = flipped ? "after" : "before";
+    return { ...edgePaths(), rows: all.slice(n * 200, n * 200 + 200), next, summary, revision };
+  });
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current.rows.find((r) => r.routes[0]?.name === "r250")?.problem.state).toBe("error");
+  expect(result.current.rows.find((r) => r.routes[0]?.name === "r100")?.problem.state).toBe("healthy");
+  expect(result.current.inconsistent).toBe(false);
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", null, "p1"]);
+});
+
+it("a walk completes while other publications land between its pages, since its result's revision holds", async () => {
+  // Each page is cut from a newer publication; nothing in this Gateway's result changed.
+  const t0 = Date.now();
+  serve((u) => ({ ...page(pageOf(u), 450, (n) => new Date(t0 + n * 1000).toISOString()), revision: "same" }));
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current).toMatchObject({ inconsistent: false, partial: false });
+  expect(result.current.rows).toHaveLength(450);
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", "p2"]);
+});
+
+it("a walk whose cursor an upgraded server rejects restarts from page one and completes", async () => {
+  // The old server cuts page one with an old-format cursor; the upgraded server rejects it with 400.
+  let upgraded = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const u = new URL(url, "http://ui");
+      if (u.searchParams.get("cursor") === "old1") {
+        return new Response(JSON.stringify({ error: "bad cursor" }), { status: 400 });
+      }
+      const p = page(pageOf(u), 450);
+      const next = !upgraded && p.next ? "old1" : p.next;
+      upgraded = true;
+      return new Response(JSON.stringify({ ...p, next, revision: "same" }), { status: 200 });
+    }),
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current).toMatchObject({ error: undefined, inconsistent: false, partial: false });
+  expect(result.current.rows).toHaveLength(450);
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "old1", null, "p1", "p2"]);
+});
+
+it("a loaded map outlives a walk that keeps changing, with its own counts, until a steady walk replaces it", async () => {
+  // tag names the result's content; churn gives every page its own revision.
+  let tag = "first";
+  let churn = false;
+  let calls = 0;
+  serve((u) => {
+    const p = page(pageOf(u), 2500);
+    const rows = p.rows.map((r) => ({ ...r, id: `${tag}-${r.id}` }));
+    return { ...p, rows, revision: churn ? `r${calls++}` : tag };
+  });
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => ({ paths: useMapPaths(ID, "infra/edge", params), swr: useSWRConfig() }), {
+    wrapper: hookWrapper,
+  });
+  const settled = async (requests: number) => {
+    await waitFor(() => expect(pathCalls()).toHaveLength(requests));
+    await waitFor(() => expect(result.current.paths.walking).toBe(false));
+  };
+  const poll = () => act(() => void result.current.swr.mutate((k) => typeof k === "string" && k.includes("/paths")));
+  await settled(10);
+  expect(result.current.paths).toMatchObject({ truncated: true, inconsistent: false });
+  expect(result.current.paths.rows).toHaveLength(2000);
+  // Three walks each stop after page one: the loaded 2,000 rows stay, marked, never a 200-row prefix.
+  [tag, churn] = ["churned", true];
+  vi.mocked(fetch).mockClear();
+  await poll();
+  await settled(6);
+  expect(result.current.paths.inconsistent).toBe(true);
+  expect(result.current.paths.rows).toHaveLength(2000);
+  expect(result.current.paths.rows.every((r) => r.id?.startsWith("first-"))).toBe(true);
+  // The churn stops: the next poll walks once and shows the new result.
+  [tag, churn] = ["steady", false];
+  vi.mocked(fetch).mockClear();
+  await poll();
+  await settled(10);
+  expect(result.current.paths.inconsistent).toBe(false);
+  expect(result.current.paths.rows).toHaveLength(2000);
+  expect(result.current.paths.rows.every((r) => r.id?.startsWith("steady-"))).toBe(true);
+});
+
+it("the same path on two pages collapses to one row with the worse state", () => {
+  const rows = dedupeRows([named(1), named(2), named(1, "error"), named(1, "warning")]);
+  expect(rows.map((r) => [r.routes[0]?.name, r.problem.state])).toEqual([
+    ["r1", "error"],
+    ["r2", "healthy"],
+  ]);
+});
+
+it("two distinct rows that look alike both reach the map and its table", async () => {
+  // Two delegation refs in one rule and two inherited contexts through one chain: only the server id tells them apart.
+  const base = named(1);
+  const delegate = (id: string, child: string): PathRow => ({
+    ...base,
+    id,
+    action: "delegate",
+    backend: undefined,
+    delegation: { mode: "name", namespace: "shop", name: child },
+  });
+  const inherited = (id: string): PathRow => ({ ...base, id, delegated: true, matches: null });
+  const rows = [delegate("d1", "child-a"), delegate("d2", "child-b"), inherited("c1"), inherited("c2")];
+  serveResult(
+    () => rows,
+    () => ({ ...edgePaths().summary, paths: rows.length }),
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current.rows.map((r) => r.id)).toEqual(["d1", "d2", "c1", "c2"]);
+});
+
+// Drawing 2,003 nodes in jsdom takes ~2 s on a laptop and over 5 s on a busy CI runner.
+const drawLimit = { timeout: 15_000 };
+
+it(
+  "2,500 matching paths load 2,000 in ten requests and say so",
+  async () => {
+    serve((u) => page(pageOf(u), 2500));
+    mount("?tab=map");
+    await screen.findByTestId("gateway-map", {}, drawLimit);
+    expect(await screen.findByTestId("map-truncated", {}, drawLimit)).toHaveTextContent(
+      "Showing 2,000 of 2,500 paths. Narrow the filters to see the rest.",
+    );
+    await waitFor(() => expect(pathCalls()).toHaveLength(10), drawLimit);
+    expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([
+      null,
+      ...Array.from({ length: 9 }, (_, k) => `p${k + 1}`),
+    ]);
+    // One route node per loaded row, plus the Gateway, listener and backend.
+    await waitFor(
+      () => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(2003),
+      drawLimit,
+    );
+  },
+  2 * drawLimit.timeout,
+);
+
+// region Task 45: hover, side panel, find, chips, large Gateways
+
+/** The map's node cards by name. */
+const nodeNames = (map: HTMLElement) =>
+  within(map)
+    .getAllByTestId("map-node")
+    .map((n) => n.querySelector(".name")?.textContent ?? "");
+/** The React Flow wrapper of the node card named name. */
+const flowNode = (map: HTMLElement, name: string) =>
+  within(map)
+    .getAllByTestId("map-node")
+    .find((n) => n.querySelector(".name")?.textContent === name)
+    ?.closest(".react-flow__node") as HTMLElement;
+const refName = (r: { namespace?: string; name: string }) => (r.namespace ? `${r.namespace}/${r.name}` : r.name);
+
+it("hovering a route lights every node on the rows through it and dims the rest", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  await user.hover(flowNode(map, "shop/mirror-only"));
+  // The oracle: every Gateway, listener, route and backend named by a row that passes through the route.
+  const through = edgePaths().rows.filter((r) => r.routes.some((x) => x.name === "mirror-only"));
+  const want = new Set(
+    through.flatMap((r) => [
+      refName(r.gateway),
+      r.listener.name,
+      ...r.routes.map(refName),
+      ...(r.backend ? [refName(r.backend)] : []),
+    ]),
+  );
+  const lit = nodeNames(map).filter((n) => !flowNode(map, n).classList.contains("dim"));
+  expect(new Set(lit)).toEqual(want);
+  // shop/backends shares no row with it, although it shares a backend.
+  expect(flowNode(map, "shop/backends")).toHaveClass("dim");
+  await user.unhover(flowNode(map, "shop/mirror-only"));
+  await waitFor(() => expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0));
+});
+
+it("a Gateway with more than 60 routes opens on problems only after its first page, with a prompt to narrow", async () => {
+  // 61 routes over 450 paths: three pages unfiltered, but only the first is read.
+  serve((u) => {
+    const p = page(pageOf(u), u.searchParams.has("state") ? 3 : 450);
+    return { ...p, summary: { ...p.summary, routes: u.searchParams.has("state") ? 3 : 61 } };
+  });
+  mount("?tab=map");
+  await waitFor(
+    () =>
+      expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe(
+        "error,warning,unknown",
+      ),
+    drawLimit,
+  );
+  expect(await screen.findByTestId("map-large")).toHaveTextContent(
+    "This Gateway has 61 routes and 4 backends, so the map shows problems only. Narrow by kind or namespace, or clear Problems only to load every path.",
+  );
+  await screen.findByTestId("gateway-map");
+  const unfiltered = pathCalls().filter((u) => !u.searchParams.has("state"));
+  expect(unfiltered.map((u) => u.searchParams.get("cursor"))).toEqual([null]);
+  expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]);
+  expect(screen.getByRole("button", { name: "Problems only" })).toHaveAttribute("aria-pressed", "true");
+  // Releasing the chip shows every path and drops the prompt. The stopped first walk is not the whole result:
+  // it shows as partial and is walked again in full.
+  await userEvent.setup().click(screen.getByRole("button", { name: "Problems only" }));
+  await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("state="));
+  expect(screen.queryByTestId("map-large")).toBeNull();
+  // SWR's own revalidation may add a second full walk; the test SWR config does not dedupe.
+  await waitFor(() =>
+    expect(
+      pathCalls()
+        .filter((u) => !u.searchParams.has("state"))
+        .map((u) => u.searchParams.get("cursor"))
+        .slice(0, 4),
+    ).toEqual([null, null, "p1", "p2"]),
+  );
+  await waitFor(() => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(453));
+  expect(screen.queryByTestId("map-partial")).toBeNull();
+});
+
+it("a walk still loading says how many paths it shows so far", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  serve((u) => page(pageOf(u), 300));
+  const base = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const u = new URL(String(input), "http://ui");
+    if (u.pathname.endsWith("/paths") && pageOf(u) > 0) await gate;
+    return base(input);
+  });
+  mount("?tab=map");
+  expect(await screen.findByTestId("map-partial")).toHaveTextContent("Showing 200 of 300 paths. Loading the rest.");
+  release();
+  await waitFor(() => expect(screen.queryByTestId("map-partial")).toBeNull());
+});
+
+it("a Gateway at the threshold opens unfiltered, and a state in the URL is kept", async () => {
+  serve((u) => {
+    const p = page(pageOf(u), 60);
+    return { ...p, summary: { ...p.summary, routes: 60, backends: 60 } };
+  });
+  mount("?tab=map&state=error");
+  await screen.findByTestId("gateway-map");
+  expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe("error");
+  expect(screen.queryByTestId("map-large")).toBeNull();
+});
+
+it("the side panel of a backend with no ready endpoints says what fails through it and links to detail and Traffic", async () => {
+  const cart = (edgePaths().rows.find((r) => r.backend?.name === "cart-svc") as PathRow).backend as LinkedRef;
+  const signal = {
+    kind: "finding" as const,
+    code: "KGWUI-023",
+    title: "No ready endpoints",
+    ref: cart,
+    state: "warning" as const,
+  };
+  serve(() => {
+    const b = edgePaths();
+    const rows = b.rows.map((r) =>
+      r.backend?.name === "cart-svc"
+        ? {
+            ...r,
+            endpoints: { source: "slices", readAt: now(), complete: "complete" as const, ready: 0, total: 2 },
+            problem: { state: "warning" as const, signals: [signal] },
+          }
+        : r,
+    );
+    return { ...b, rows };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  // d3-zoom's mousedown handler needs a real window; a click alone selects.
+  fireEvent.click(within(flowNode(map, "shop/cart-svc")).getByTestId("map-node"));
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(panel).getByRole("heading", { name: "shop/cart-svc" })).toBeVisible();
+  expect(panel).toHaveTextContent("Warning");
+  const n = edgePaths().rows.filter((r) => r.backend?.name === "cart-svc").length;
+  expect(within(panel).getByTestId("map-panel-counts")).toHaveTextContent(
+    `0 of ${n} paths through this node fail${n} of ${n} paths through this node have a warning`,
+  );
+  expect(within(panel).getByTestId("map-panel-problems")).toHaveTextContent(
+    "No ready endpoints (Service shop/cart-svc)",
+  );
+  const port = edgePaths().rows.find((r) => r.backend?.name === "cart-svc")?.port;
+  expect(within(panel).getByTestId("map-panel-endpoints")).toHaveTextContent(`Port ${port}: 0/2 ready`);
+  expect(within(panel).getByRole("link", { name: "Open details" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/backends/-/Service/shop/cart-svc`,
+  );
+  expect(within(panel).getByRole("link", { name: "Show these paths in Traffic" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/traffic?${new URLSearchParams({ gateway: "infra/edge", backend: "core/Service/shop/cart-svc" })}`,
+  );
+  // The panel takes focus, in its own column beside the canvas.
+  expect(panel).toHaveFocus();
+  expect(panel.parentElement).toBe(map.parentElement);
+  // The selected node keeps its paths lit; closing the panel clears both.
+  expect(flowNode(map, "shop/backends")).not.toHaveClass("dim");
+  expect(flowNode(map, "shop/api")).toHaveClass("dim");
+  await user.click(within(panel).getByRole("button", { name: "Close details" }));
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  // Focus goes back to the node.
+  await waitFor(() => expect(flowNode(map, "shop/cart-svc")).toHaveFocus());
+  expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0);
+});
+
+it("a route whose backend fails reads healthy itself, and its panel counts the failing paths through it", async () => {
+  const be1 = edgePaths().rows.find((r) => r.backend?.name === "be1") as PathRow;
+  const signal = {
+    kind: "finding" as const,
+    code: "KGWUI-002",
+    title: "Backend not accepted",
+    ref: be1.backend,
+    state: "error" as const,
+  };
+  serve(() => {
+    const b = edgePaths();
+    return {
+      ...b,
+      rows: b.rows.map((r) =>
+        r.backend?.name === "be1" ? { ...r, problem: { state: "error" as const, signals: [signal] } } : r,
+      ),
+    };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  fireEvent.click(within(flowNode(map, "shop/backends")).getByTestId("map-node"));
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  const through = edgePaths().rows.filter((r) => r.routes[0]?.name === "backends").length;
+  expect(panel).toHaveTextContent("Healthy");
+  expect(within(panel).getByTestId("map-panel-counts")).toHaveTextContent(
+    `1 of ${through} paths through this node fail`,
+  );
+  expect(within(panel).getByText("Nothing on this node itself.")).toBeVisible();
+});
+
+it("chips update the server query live and live in the URL", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Problems only" }));
+  await waitFor(() =>
+    expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]),
+  );
+  await user.click(
+    within(screen.getByRole("group", { name: "Route kind" })).getByRole("button", { name: "GRPCRoute" }),
+  );
+  await waitFor(() => expect(pathCalls().at(-1)?.searchParams.get("kind")).toBe("GRPCRoute"));
+  // Namespace chips come from the summary's facets.
+  await user.click(
+    within(screen.getByRole("group", { name: "Route namespaces" })).getByRole("button", { name: "shop" }),
+  );
+  await waitFor(() => expect(pathCalls().at(-1)?.searchParams.get("namespace")).toBe("shop"));
+  const url = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect([url.get("tab"), url.get("state"), url.get("kind"), url.get("namespace")]).toEqual([
+    "map",
+    "error,warning,unknown",
+    "GRPCRoute",
+    "shop",
+  ]);
+});
+
+it("find selects the first node whose name matches, and Enter moves to the next", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  const box = screen.getByRole("searchbox", { name: "Find a node" });
+  await user.type(box, "SVC");
+  const svc = nodeNames(screen.getByTestId("gateway-map")).filter((n) => n.toLowerCase().includes("svc"));
+  expect(svc.length).toBeGreaterThan(1);
+  const heading = async () =>
+    within(await screen.findByRole("complementary", { name: "Node details" })).getByRole("heading", { level: 2 });
+  expect(await heading()).toHaveTextContent(svc[0] as string);
+  // A find keeps focus in the box, so typing goes on.
+  expect(box).toHaveFocus();
+  expect(screen.getByTestId("map-found")).toHaveTextContent(`1 of ${svc.length}`);
+  await user.type(box, "{Enter}");
+  expect(await heading()).toHaveTextContent(svc[1] as string);
+  expect(screen.getByTestId("map-found")).toHaveTextContent(`2 of ${svc.length}`);
+  await user.clear(box);
+  await user.type(box, "nothing-here");
+  expect(screen.getByTestId("map-found")).toHaveTextContent("No match");
+});
+
+it("a result that kept changing shows a quiet notice", async () => {
+  let calls = 0;
+  serve((u) => {
+    const n = pageOf(u);
+    const p = page(n, 300);
+    return { ...p, summary: { ...p.summary, paths: 300 + calls++ } };
+  });
+  mount("?tab=map");
+  expect(await screen.findByTestId("map-inconsistent")).toHaveTextContent(
+    "The paths changed while loading. The map may be out of date.",
+  );
+  // The kept walk ended on a page with more after it, but no walk runs now: no "Loading the rest".
+  await waitFor(() => expect(screen.getByTestId("map-partial")).toHaveTextContent(/^Showing 200 of [\d,]+ paths\.$/));
+});
+
+it("a large result that kept changing counts only the rows it loaded", async () => {
+  let calls = 0;
+  serve((u) => ({ ...page(pageOf(u), 2500), revision: `r${calls++}` }));
+  mount("?tab=map");
+  expect(await screen.findByTestId("map-inconsistent")).toBeInTheDocument();
+  // Every walk stopped after page one, so 200 rows are shown, never MAP_MAX_ROWS.
+  await waitFor(() =>
+    expect(screen.getByTestId("map-truncated")).toHaveTextContent(
+      "Showing 200 of 2,500 paths. Narrow the filters to see the rest.",
+    ),
+  );
+  expect(pathCalls()).toHaveLength(6);
+});
+
+it("a node with one healthy path says so in the singular", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  expect(edgePaths().rows.filter((r) => r.routes[0]?.name === "via-ls")).toHaveLength(1);
+  fireEvent.click(within(flowNode(map, "shop/via-ls")).getByTestId("map-node"));
+  expect(await screen.findByTestId("map-panel-counts")).toHaveTextContent(
+    /^The one path through this node is healthy$/,
+  );
+});
+
+it("Escape closes the panel from the map and from the panel", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  fireEvent.click(within(flowNode(map, "shop/api")).getByTestId("map-node"));
+  expect(await screen.findByTestId("map-panel")).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  await waitFor(() => expect(flowNode(map, "shop/api")).toHaveFocus());
+  // Again, with focus on a map node.
+  fireEvent.click(within(flowNode(map, "shop/api")).getByTestId("map-node"));
+  await screen.findByTestId("map-panel");
+  flowNode(map, "shop/backends").focus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+});
+
+// region Task 46: keyboard navigation and table view
+
+/** The name on a React Flow node wrapper's card. */
+const nameOf = (el: Element | null) => el?.querySelector(".name")?.textContent ?? "";
+
+it("arrow keys move focus along connections, focus lights the paths, Enter or Space opens the panel and Escape returns", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  // One tab stop: the Gateway, until another node takes focus.
+  const stops = [...map.querySelectorAll<HTMLElement>(".react-flow__node")].filter((n) => n.tabIndex === 0);
+  expect(stops.map(nameOf)).toEqual(["infra/edge"]);
+  stops[0]?.focus();
+  await user.keyboard("{ArrowRight}");
+  const rows = edgePaths().rows;
+  const listener = nameOf(document.activeElement);
+  expect(rows.map((r) => r.listener.name)).toContain(listener);
+  // Up and down stay in the listeners column.
+  await user.keyboard("{ArrowDown}{ArrowUp}");
+  expect(new Set(rows.map((r) => r.listener.name))).toContain(nameOf(document.activeElement));
+  const back = nameOf(document.activeElement);
+  await user.keyboard("{ArrowRight}");
+  const route = nameOf(document.activeElement);
+  // The route is a root route attached to the focused listener.
+  expect(rows.some((r) => r.listener.name === back && refName(r.routes[0] as LinkedRef) === route)).toBe(true);
+  expect((document.activeElement as HTMLElement).tabIndex).toBe(0);
+  // Keyboard focus lights the paths through the node, as hover does.
+  const want = new Set(
+    rows
+      .filter((r) => r.routes.some((x) => refName(x) === route))
+      .flatMap((r) => [
+        refName(r.gateway),
+        r.listener.name,
+        ...r.routes.map(refName),
+        ...(r.backend ? [refName(r.backend)] : []),
+      ]),
+  );
+  const lit = nodeNames(map).filter((n) => !flowNode(map, n).classList.contains("dim"));
+  // Action nodes (a rule with no backend) carry no ref name, so they are left out of the comparison.
+  expect(new Set(lit.filter((n) => n.includes("/") || rows.some((r) => r.listener.name === n)))).toEqual(want);
+  await user.keyboard("{Enter}");
+  const panel = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(route);
+  expect(panel).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  await waitFor(() => expect(nameOf(document.activeElement)).toBe(route));
+  // Space selects too.
+  await user.keyboard(" ");
+  const again = await screen.findByRole("complementary", { name: "Node details" });
+  expect(within(again).getByRole("heading", { level: 2 })).toHaveTextContent(route);
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(nameOf(document.activeElement)).toBe(route));
+});
+
+it("each node's accessible name gives its kind, name, state and failing paths", async () => {
+  serve(() => {
+    const b = edgePaths();
+    const rows = b.rows.map((r) =>
+      r.backend?.name === "cart-svc" && r.routes[0]?.name === "backends"
+        ? { ...r, problem: { state: "error" as const, signals: [] } }
+        : r,
+    );
+    return { ...b, rows };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  // The failing row's state lands on its backend; the Gateway itself stays healthy but counts the failing path.
+  expect(flowNode(map, "shop/cart-svc")).toHaveAttribute(
+    "aria-label",
+    "Service shop/cart-svc, Error, 1 of 2 paths through this node fail",
+  );
+  expect(flowNode(map, "infra/edge")).toHaveAttribute(
+    "aria-label",
+    "Gateway infra/edge, Healthy, 1 of 8 paths through this node fail",
+  );
+  expect(flowNode(map, "shop/via-ls")).toHaveAttribute("aria-label", "HTTPRoute shop/via-ls, Healthy");
+  // The map's own key help replaces React Flow's default description, which offers to delete nodes.
+  expect(map).toHaveTextContent("Arrow keys move along the paths. Enter opens details. Escape closes them.");
+  expect(map).not.toHaveTextContent(/delete/i);
+});
+
+it("a listener whose Programmed condition is missing waits on its own node; the healthy Gateway is not blamed", async () => {
+  serve(() => {
+    const b = edgePaths();
+    const rows = b.rows.map((r) => {
+      if (r.listenerSet || r.listener.name !== "http") return r;
+      // The server names the listener on a waiting signal whose ref is the Gateway.
+      const signal = {
+        kind: "waiting" as const,
+        code: "Programmed",
+        ref: r.gateway,
+        listener: "http",
+        state: "unknown" as const,
+      };
+      return { ...r, problem: { state: "unknown" as const, signals: [signal] } };
+    });
+    return { ...b, rows };
+  });
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  expect(flowNode(map, "http").getAttribute("aria-label")).toMatch(/^Listener http, Unknown/);
+  expect(flowNode(map, "infra/edge").getAttribute("aria-label")).toMatch(/^Gateway infra\/edge, Healthy/);
+});
+
+it("the table toggle shows the map's rows as a path table, keeps the filters and lives in the URL", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map&kind=HTTPRoute");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  const toggle = screen.getByRole("button", { name: "Table" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  const calls = pathCalls().length;
+  await user.click(toggle);
+  const table = await screen.findByRole("table", { name: "Paths through this Gateway" });
+  // The same rows as the map's query: one per distinct path.
+  const want = dedupeRows(edgePaths().rows);
+  const body = within(table).getAllByRole("row").slice(1);
+  expect(body).toHaveLength(want.length);
+  // Each row names its listener and port beside the Gateway, so http and extra rows differ.
+  const listeners = body.map((tr) => tr.querySelector('[data-col="gateway"] .second')?.textContent);
+  expect(listeners.sort()).toEqual(
+    want.map((r) => (r.listener.port ? `${r.listener.name} :${r.listener.port}` : r.listener.name)).sort(),
+  );
+  expect(new Set(listeners).size).toBeGreaterThan(1);
+  // The find box keeps its space, hidden, so the chips do not move.
+  expect(screen.getByTestId("map-find")).toHaveClass("off");
+  expect(screen.queryByTestId("gateway-map")).toBeNull();
+  expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
+  // The toggle refetches nothing: the table draws the rows the map loaded.
+  expect(pathCalls()).toHaveLength(calls);
+  let url = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect([url.get("tab"), url.get("kind"), url.get("view")]).toEqual(["map", "HTTPRoute", "table"]);
+  await user.click(screen.getByRole("button", { name: "Table" }));
+  await screen.findByTestId("gateway-map");
+  url = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect([url.get("tab"), url.get("kind"), url.get("view")]).toEqual(["map", "HTTPRoute", null]);
+});
+
+// region Task 48: expand, collapse and focus
+
+const BACKENDS = "r:gateway.networking.k8s.io/HTTPRoute/shop/backends";
+const BE1 = "b:gateway.kgateway.dev/Backend/shop/be1";
+
+/** Steps the router's history back or forward. */
+function History() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate(-1)}>
+        test-back
+      </button>
+      <button type="button" onClick={() => navigate(1)}>
+        test-forward
+      </button>
+    </>
+  );
+}
+
+function mountWithHistory(query: string) {
+  return renderWithTheme(
+    <>
+      <Routes>
+        <Route path="/i/:id/gateways/:ns/:name" element={<GatewayPage />} />
+      </Routes>
+      <Where />
+      <History />
+    </>,
+    { path: `${GW_PATH}${query}` },
+  );
+}
+
+const search = () => new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+
+it("expand and focus live in the URL: a reload restores both, and back and forward step through them", async () => {
+  serve(() => edgePaths());
+  const first = mountWithHistory("?tab=map");
+  let map = await screen.findByTestId("gateway-map");
+  const all = nodeNames(map);
+  // The route card's toggle opens it into its one rule, between it and its backends.
+  fireEvent.click(within(flowNode(map, "shop/backends")).getByRole("button", { name: "Expand shop/backends" }));
+  await waitFor(() => expect(search().getAll("expand")).toEqual([BACKENDS]));
+  const rule = await waitFor(() => {
+    const n = within(map)
+      .getAllByTestId("map-node")
+      .find((c) => c.querySelector(".kind")?.textContent === "Rule 1");
+    expect(n).toBeDefined();
+    return n as HTMLElement;
+  });
+  expect(rule.querySelector(".name")).toHaveTextContent("PathPrefix /");
+  // The toggle press neither selected the route nor opened its panel.
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+
+  // Focus on a backend from its side panel.
+  fireEvent.click(within(flowNode(map, "shop/be1")).getByTestId("map-node"));
+  const panel = await screen.findByTestId("map-panel");
+  fireEvent.click(within(panel).getByRole("button", { name: "Show only its paths" }));
+  await waitFor(() => expect(search().get("focus")).toBe(BE1));
+  const focused = ["infra/edge", "http", "shop/backends", "PathPrefix /", "shop/be1"];
+  await waitFor(() => expect(new Set(nodeNames(screen.getByTestId("gateway-map")))).toEqual(new Set(focused)));
+  expect(screen.getByTestId("map-focus")).toHaveTextContent("Showing only the paths through Backend shop/be1.");
+  expect(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Show the whole map" })).toBeVisible();
+
+  // A reload of the same URL restores both.
+  const url = screen.getByTestId("location").textContent ?? "";
+  first.unmount();
+  const second = mountWithHistory(url);
+  map = await screen.findByTestId("gateway-map");
+  await waitFor(() => expect(new Set(nodeNames(map))).toEqual(new Set(focused)));
+
+  // Back leaves focus mode with the route still expanded; forward returns to it.
+  const user = userEvent.setup();
+  second.unmount();
+  const nav = mountWithHistory("?tab=map");
+  await screen.findByTestId("gateway-map");
+  fireEvent.click(
+    within(flowNode(screen.getByTestId("gateway-map"), "shop/backends")).getByRole("button", {
+      name: "Expand shop/backends",
+    }),
+  );
+  await waitFor(() => expect(search().getAll("expand")).toEqual([BACKENDS]));
+  fireEvent.click(within(flowNode(screen.getByTestId("gateway-map"), "shop/be1")).getByTestId("map-node"));
+  fireEvent.click(within(await screen.findByTestId("map-panel")).getByRole("button", { name: "Show only its paths" }));
+  await waitFor(() => expect(search().get("focus")).toBe(BE1));
+  await user.click(screen.getByRole("button", { name: "test-back" }));
+  await waitFor(() => expect(search().get("focus")).toBeNull());
+  expect(search().getAll("expand")).toEqual([BACKENDS]);
+  await waitFor(() => expect(nodeNames(screen.getByTestId("gateway-map"))).toHaveLength(all.length + 1));
+  await user.click(screen.getByRole("button", { name: "test-forward" }));
+  await waitFor(() => expect(new Set(nodeNames(screen.getByTestId("gateway-map")))).toEqual(new Set(focused)));
+  // Show the whole map is the way out, and collapse restores the map.
+  await user.click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Show the whole map" }));
+  await waitFor(() => expect(search().get("focus")).toBeNull());
+  fireEvent.click(
+    within(flowNode(screen.getByTestId("gateway-map"), "shop/backends")).getByRole("button", {
+      name: "Collapse shop/backends",
+    }),
+  );
+  await waitFor(() => expect(new Set(nodeNames(screen.getByTestId("gateway-map")))).toEqual(new Set(all)));
+  nav.unmount();
+});
+
+const API_ROUTE = "r:gateway.networking.k8s.io/HTTPRoute/shop/api";
+
+it("a delegating route shows its delegated route at rest and can be collapsed; Escape leaves focus mode", async () => {
+  serve(() => edgePaths());
+  mount("?tab=map");
+  const map = await screen.findByTestId("gateway-map");
+  expect(within(flowNode(map, "shop/child")).getByTestId("map-node")).toHaveTextContent(/Delegated/);
+  fireEvent.click(within(flowNode(map, "shop/api")).getByTestId("map-node"));
+  const panel = await screen.findByTestId("map-panel");
+  // The panel's button is the keyboard path to the card's toggle.
+  await userEvent.setup().click(within(panel).getByRole("button", { name: "Hide delegated routes" }));
+  await waitFor(() => expect(nodeNames(map)).not.toContain("shop/child"));
+  expect(search().getAll("collapse")).toEqual([API_ROUTE]);
+  expect(within(flowNode(map, "shop/api")).getByTestId("map-node")).toHaveTextContent("+1 delegated");
+  fireEvent.click(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Show only its paths" }));
+  await waitFor(() => expect(screen.getByTestId("map-focus")).toBeInTheDocument());
+  const user = userEvent.setup();
+  // The first Escape closes the panel, the second leaves focus mode.
+  screen.getByTestId("map-panel").focus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByTestId("map-panel")).toBeNull();
+  await waitFor(() => expect(flowNode(screen.getByTestId("gateway-map"), "shop/api")).toHaveFocus());
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByTestId("map-focus")).toBeNull());
+  expect(screen.getByTestId("location")).not.toHaveTextContent("focus=");
+});
+
+it("find locates a route its collapsed parent hides: the parent opens and the route is selected", async () => {
+  serve(() => edgePaths());
+  mount(`?tab=map&collapse=${encodeURIComponent(API_ROUTE)}`);
+  const map = await screen.findByTestId("gateway-map");
+  expect(nodeNames(map)).not.toContain("shop/child");
+  await userEvent.setup().type(screen.getByRole("searchbox", { name: "Find a node" }), "child");
+  await waitFor(() => expect(nodeNames(screen.getByTestId("gateway-map"))).toContain("shop/child"));
+  expect(search().getAll("collapse")).toEqual([]);
+  expect(within(await screen.findByTestId("map-panel")).getByRole("heading", { level: 2 })).toHaveTextContent(
+    "shop/child",
+  );
+});
+
+it("a focus on a node not on the map says so and offers Show the whole map; stale expand ids are dropped", async () => {
+  serve(() => edgePaths());
+  mount(`?tab=map&focus=r%3Agone&expand=${encodeURIComponent("r:gateway.networking.k8s.io/HTTPRoute/shop/gone")}`);
+  const map = await screen.findByTestId("gateway-map");
+  expect(await screen.findByTestId("map-focus")).toHaveTextContent("The focused node is not on the map.");
+  // The whole map shows.
+  expect(nodeNames(map)).toContain("shop/backends");
+  await waitFor(() => expect(search().getAll("expand")).toEqual([]));
+  await userEvent
+    .setup()
+    .click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Show the whole map" }));
+  await waitFor(() => expect(search().get("focus")).toBeNull());
+});
+
+// region Task 48 fix round 2
+
+const VIA_LS = "r:gateway.networking.k8s.io/HTTPRoute/shop/via-ls";
+
+it("clearing Problems only keeps a healthy route's expand id while the unfiltered rows load", async () => {
+  // The unfiltered result is held back, so the map still shows the Problems-only rows after the chip clears.
+  let release = () => {};
+  const hold = new Promise<void>((r) => {
+    release = r;
+  });
+  serve(async (u) => {
+    const d = edgePaths();
+    const states = u.searchParams.getAll("state").flatMap((x) => x.split(","));
+    if (states.length) return { ...d, rows: d.rows.filter((r) => states.includes(r.problem.state)) };
+    await hold;
+    return d;
+  });
+  mount(`?tab=map&state=error,warning,unknown&expand=${encodeURIComponent(VIA_LS)}`);
+  const map = await screen.findByTestId("gateway-map");
+  expect(nodeNames(map)).not.toContain("shop/via-ls");
+  const chip = screen.getByRole("button", { name: "Problems only" });
+  await userEvent.setup().click(chip);
+  await waitFor(() => expect(chip).toHaveAttribute("aria-pressed", "false"));
+  // The rows still answer the Problems-only query, which lacks via-ls: its id stays.
+  expect(nodeNames(screen.getByTestId("gateway-map"))).not.toContain("shop/via-ls");
+  expect(search().getAll("expand")).toEqual([VIA_LS]);
+  release();
+  await waitFor(() => expect(nodeNames(screen.getByTestId("gateway-map"))).toContain("shop/via-ls"));
+  expect(nodeNames(screen.getByTestId("gateway-map"))).toContain("PathPrefix /");
+  expect(search().getAll("expand")).toEqual([VIA_LS]);
+});
+
+it("collapsing the parent of the focused route moves the focus to the parent", async () => {
+  serve(() => edgePaths());
+  const child = `${API_ROUTE}~gateway.networking.k8s.io/HTTPRoute/shop/child`;
+  mount(`?tab=map&focus=${encodeURIComponent(child)}`);
+  const map = await screen.findByTestId("gateway-map");
+  await waitFor(() => expect(nodeNames(map)).toContain("shop/child"));
+  fireEvent.click(within(flowNode(map, "shop/api")).getByRole("button", { name: "Collapse shop/api" }));
+  await waitFor(() => expect(search().get("focus")).toBe(API_ROUTE));
+  expect(search().getAll("collapse")).toEqual([API_ROUTE]);
+  expect(screen.getByTestId("map-focus")).toHaveTextContent("Showing only the paths through HTTPRoute shop/api.");
+});
+
+// region Task 49: export
+it("the export buttons are inert, and say why, until the map is drawn", async () => {
+  // The first page never arrives, so the map stays on its fallback.
+  serve(() => new Promise<PathsResponse>(() => {}));
+  mount("?tab=map");
+  await screen.findByTestId("map-fallback");
+  const user = userEvent.setup();
+  for (const name of ["Export SVG", "Export PNG"]) {
+    const b = screen.getByRole("button", { name });
+    expect(b).toHaveAttribute("aria-disabled", "true");
+    await user.hover(b);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Export needs a loaded map");
+    await user.unhover(b);
+  }
+});
+
+it("Export SVG downloads the map; a failed PNG export shows a note until dismissed", async () => {
+  serve(() => edgePaths());
+  const names: string[] = [];
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    names.push(this.download);
+  });
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  const svg = screen.getByRole("button", { name: "Export SVG" });
+  await waitFor(() => expect(svg).toHaveAttribute("aria-disabled", "false"));
+  await user.click(svg);
+  await waitFor(() => expect(names).toEqual([expect.stringMatching(/^gateway-map-infra-edge-\d{4}-\d\d-\d\d\.svg$/)]));
+  expect(screen.queryByTestId("map-export-error")).toBeNull();
+  // The image cannot be decoded, so the PNG export rejects.
+  Object.defineProperty(HTMLImageElement.prototype, "decode", {
+    configurable: true,
+    value: () => Promise.reject(new Error("decode")),
+  });
+  try {
+    await user.click(screen.getByRole("button", { name: "Export PNG" }));
+    const note = await screen.findByTestId("map-export-error");
+    expect(note).toHaveTextContent("Could not export the map as PNG.");
+    expect(within(screen.getByTestId("map-notes")).getByTestId("map-export-error")).toBe(note);
+    expect(names).toHaveLength(1);
+    await user.click(within(note).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("map-export-error")).toBeNull();
+  } finally {
+    Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+  }
+});

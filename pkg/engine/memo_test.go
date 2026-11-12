@@ -690,6 +690,23 @@ func TestEndpointsChangeRerunsCheck(t *testing.T) {
 	if e.Compute(); runs != 3 {
 		t.Fatalf("a changed Service must run the check: %d runs, want 3", runs)
 	}
+	// The same aggregate access with a different namespace denied reruns it too.
+	denied := cache.Access{Err: "forbidden", Denied: true}
+	byNS := func(deny string) func(s *cache.Snapshot) {
+		return func(s *cache.Snapshot) {
+			s.Access[cache.ServicesGVR] = denied
+			s.NamespaceAccess = map[schema.GroupVersionResource]map[string]cache.Access{cache.ServicesGVR: {"shop": {OK: true}, "other": {OK: true}}}
+			s.NamespaceAccess[cache.ServicesGVR][deny] = denied
+		}
+	}
+	set(byNS("other"))
+	if e.Compute(); runs != 4 {
+		t.Fatalf("a denied namespace must run the check: %d runs, want 4", runs)
+	}
+	set(byNS("shop"))
+	if e.Compute(); runs != 5 {
+		t.Fatalf("a namespace access change must run the check: %d runs, want 5", runs)
+	}
 }
 
 // Review 5.2 #2: without a max age the xDS check sets no wake time; a scrape

@@ -649,3 +649,21 @@ export const dataPlaneCopy = {
   withheldSpan: (first: string, last: string) => `First logged ${first}, last ${last}`, // S559
   controllerLog: "Controller log", // S552
 };
+
+// region Route trace (Phase 6.4, ids in docs/phases/phase-6/phase-6.4-wording.md)
+/** The route trace on route detail (Phase 6 design §7); failure wording follows the protocol (§4.4). */
+export const traceCopy = {
+  serves: "Reached through", // S753
+  servesNone: "No visible path reaches this route.", // S754
+  listener: (name: string, port?: number) => `Listener ${name}${port ? ` on :${port}` : ""}`, // S755
+  noFilters: "No filters.", // S757
+  failShare: (pct: string, tcp: boolean) => `${pct} of ${tcp ? "connections" : "requests"} fail`, // S758
+  mayFailShare: (pct: string) => `${pct} may fail`, // S759
+  noTraffic: "No traffic: every weight is 0", // S760
+  barLabel: (parts: string[], tcp: boolean) =>
+    tcp
+      ? `Share of this rule's connections: ${parts.join(", ")}` // S765
+      : `Share of this rule's requests: ${parts.join(", ")}`, // S761
+  connectionsHint: "% of this rule's connections", // S764
+  onAttachment: (gateway: string, listener: string) => `On ${gateway}, listener ${listener}:`, // S762
+};

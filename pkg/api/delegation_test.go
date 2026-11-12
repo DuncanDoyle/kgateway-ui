@@ -922,7 +922,7 @@ func TestHiddenRouteUnderWildcard(t *testing.T) {
 
 // twoRootWorld: shop/r1 (edge, visible) and shop/r2 (edge2's Selector
 // listener over shop's zone label) both delegate /x to shop/mid, which
-// delegates /x/m to shop/kid.
+// delegates /x/m to shop/kid, which sends to Service shop/kid-svc.
 func twoRootWorld(zone string) []runtime.Object {
 	sel := lst("sel", 8080, "")
 	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
@@ -934,7 +934,10 @@ func twoRootWorld(zone string) []runtime.Object {
 		delegRule([]string{"/x"}, testutil.DelegateTo("shop", "mid")))
 	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", nil, testutil.AcceptedBy(r1Ref, testutil.Controller), testutil.AcceptedBy(r2Ref, testutil.Controller)),
 		delegRule([]string{"/x/m"}, testutil.DelegateTo("shop", "kid")))
-	objs := isolated(edge2, r1, r2, mid, leaf("shop", "kid", nil, "/x/m/k", testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "mid"), testutil.Controller)))
+	kidRule := testutil.Rule(matchPath("/x/m/k"))
+	kidRule["backendRefs"] = []any{svcRef("kid-svc")}
+	kid := testutil.WithRules(testutil.HTTPRoute("shop", "kid", nil, testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "mid"), testutil.Controller)), kidRule)
+	objs := isolated(edge2, r1, r2, mid, kid)
 	for i, o := range objs {
 		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
 			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": zone})
@@ -953,7 +956,8 @@ func TestRootEligibilityOnEveryRow(t *testing.T) {
 		for _, p := range []string{delegURL("shop", "mid", ""), delegURL("shop", "mid", "?outcome=attached"), delegURL("shop", "r1", ""), delegURL("shop", "r2", "")} {
 			b = append(b, wire(t, srv, p)...)
 		}
-		for _, p := range []string{routeDetail + "shop/mid", routeDetail + "shop/kid", routeDetail + "shop/r1", routeDetail + "shop/r2", listBase + "/routes?state=dropped"} {
+		for _, p := range []string{routeDetail + "shop/mid", routeDetail + "shop/kid", routeDetail + "shop/r1", routeDetail + "shop/r2", listBase + "/routes?state=dropped",
+			pathsURL + "?route=gateway.networking.k8s.io/HTTPRoute/shop/kid", pathsURL, listBase + "/backends", listBase + "/backends/-/Service/shop/kid-svc"} {
 			b = append(b, withoutHealth(t, srv, p)...)
 		}
 		bodies = append(bodies, b)

@@ -90,6 +90,6 @@ func (c *Cache) crdInformer(md metadata.Interface) tracked {
 				return []watch.Event{e}
 			}), nil
 		})
-	_ = t.inf.SetTransform(stripCRD) // fails only on a started informer
+	t.setTransform(stripCRD)
 	return t
 }

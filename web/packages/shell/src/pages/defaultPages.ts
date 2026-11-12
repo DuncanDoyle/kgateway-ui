@@ -1,4 +1,6 @@
 import type { CorePages } from "../shell/extension";
+import { BackendPage } from "./backends/BackendPage";
+import { BackendsPage } from "./backends/BackendsPage";
 import { ClusterLanding } from "./ClusterLanding";
 import { GatewayPage } from "./explore/GatewayPage";
 import { GatewaysPage } from "./explore/GatewaysPage";
@@ -11,6 +13,7 @@ import { FindingsPage } from "./findings/FindingsPage";
 import { DiagnosticsSection, InstallPage } from "./install/InstallPage";
 import { ProcessesPage } from "./processes/ProcessesPage";
 import { ResourcePage } from "./ResourcePage";
+import { TrafficPage } from "./traffic/TrafficPage";
 
 /** The upstream page implementations. */
 export const defaultPages: Required<CorePages> = {
@@ -27,4 +30,7 @@ export const defaultPages: Required<CorePages> = {
   RoutePage,
   DiagnosticsSection,
   ProcessesPage,
+  TrafficPage,
+  BackendsPage,
+  BackendPage,
 };

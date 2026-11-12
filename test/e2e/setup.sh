@@ -3,7 +3,7 @@
 # port-forwards the UI to 127.0.0.1:18080. Usage:
 #   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] [NACK=1] [CONTROLLER_LOGS=1] [UI_EXTRA_ARGS=...] [KGW_HELM_ARGS=...] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
-# EXPLORER=0 skips fixtures/explorer.yaml, analyzer.yaml and backends.yaml (the D-021 observations need a cluster without them).
+# EXPLORER=0 skips fixtures/explorer.yaml, analyzer.yaml, backends.yaml and traffic.yaml (the D-021 observations need a cluster without them).
 # NACK=1 applies fixtures/nack.yaml: Gateway infra/nack, whose proxies reject a route config and a cluster.
 # CONTROLLER_LOGS=1 installs the UI with diagnostics.controllerLogs on and its pods/log Role in kgw-a.
 # UI_EXTRA_ARGS are space-separated UI flags for the chart's extraArgs, e.g. --poll-interval=10m;
@@ -90,6 +90,7 @@ if [[ "${EXPLORER:-1}" == 1 ]]; then
   kubectl apply -f "test/e2e/fixtures/explorer-tcproute-$tcp.yaml"
   kubectl apply -f test/e2e/fixtures/analyzer.yaml
   kubectl apply -f test/e2e/fixtures/backends.yaml
+  sed "s|/TCPROUTE_VERSION$|/$tcp|" test/e2e/fixtures/traffic.yaml | kubectl apply -f -
 fi
 if [[ "${NACK:-}" == 1 ]]; then
   kubectl apply -f test/e2e/fixtures/nack.yaml
@@ -108,6 +109,9 @@ if [[ "${NACK:-}" == 1 ]]; then
   kubectl -n infra rollout status deploy/nack --timeout=180s
 fi
 kubectl -n shop rollout status deploy/httpbin --timeout=180s
+if [[ "${EXPLORER:-1}" == 1 ]]; then
+  kubectl -n traffic rollout status deploy/echo --timeout=180s
+fi
 
 docker build -t snellius:e2e --build-arg VERSION=e2e .
 kind load docker-image snellius:e2e --name "$CLUSTER"

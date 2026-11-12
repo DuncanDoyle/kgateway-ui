@@ -6,6 +6,7 @@ import (
 
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 )
 
 // view is what the caller of one request may see (design §7.4). Every
@@ -22,6 +23,9 @@ type view struct {
 	pooled bool
 	// deps memoises allowDeps per index of the request's dependency table: 1 visible, -1 hidden.
 	deps []int8
+	// table and tableDeps are allowTable's topology and its memo, as deps.
+	table     *paths.Topology
+	tableDeps []int8
 }
 
 // view returns the view of the caller of r.
@@ -102,6 +106,31 @@ func (v *view) allowDeps(ix *explore.Index, d explore.DepSet) bool {
 				return false
 			}
 			v.deps[i] = 1
+		}
+	}
+	return true
+}
+
+// allowTable reports whether the caller may view every dependency in d, an
+// index set into t.Refs (design §13). Answers are memoised per topology; under
+// AllowAll it is true without calls.
+func (v *view) allowTable(t *paths.Topology, d explore.DepSet) bool {
+	if v.all {
+		return true
+	}
+	if v.table != t {
+		v.table, v.tableDeps = t, make([]int8, len(t.Refs))
+	}
+	for _, i := range d {
+		switch v.tableDeps[i] {
+		case -1:
+			return false
+		case 0:
+			if !v.can(t.Refs[i]) {
+				v.tableDeps[i] = -1
+				return false
+			}
+			v.tableDeps[i] = 1
 		}
 	}
 	return true

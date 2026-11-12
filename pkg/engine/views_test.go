@@ -173,7 +173,9 @@ func TestComputedWithoutPodsOrUIDs(t *testing.T) {
 		u.SetUID("")
 		u.SetResourceVersion("")
 	}
-	if got := views(withPod, bareObjs, newDecodeCache()); !reflect.DeepEqual(got, known) {
+	got := views(withPod, bareObjs, newDecodeCache())
+	got.Generation = known.Generation // each computation numbers its own
+	if !reflect.DeepEqual(got, known) {
 		t.Fatalf("views without uids differ:\n%+v\n%+v", got, known)
 	}
 }

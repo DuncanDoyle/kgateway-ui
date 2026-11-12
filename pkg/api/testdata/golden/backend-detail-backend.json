@@ -1,0 +1,189 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "Accepted",
+        "stale": false,
+        "status": "True",
+        "type": "Accepted"
+      }
+    ],
+    "consumers": [],
+    "explanations": [],
+    "exposure": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "revision": "2fafeoa3wnz5q",
+      "rows": [
+        {
+          "action": "backend",
+          "backend": {
+            "group": "gateway.kgateway.dev",
+            "kind": "Backend",
+            "link": "yaml",
+            "name": "be-used",
+            "namespace": "shop"
+          },
+          "delegated": false,
+          "endpoints": {
+            "complete": "not-applicable",
+            "readAt": "0001-01-01T00:00:00Z",
+            "source": "kubernetes"
+          },
+          "gateway": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "back",
+            "namespace": "infra"
+          },
+          "hostnames": [],
+          "id": "3l8pkna7z4abj",
+          "listener": {
+            "name": "web",
+            "port": 8080,
+            "protocol": "HTTP"
+          },
+          "matches": [
+            {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/"
+              }
+            }
+          ],
+          "mirror": false,
+          "problem": {
+            "signals": [
+              {
+                "code": "KGWUI-006",
+                "kind": "finding",
+                "ref": {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "Gateway",
+                  "link": "detail",
+                  "name": "back",
+                  "namespace": "infra"
+                },
+                "state": "warning",
+                "title": "Proxy deployment not found"
+              }
+            ],
+            "state": "warning"
+          },
+          "routes": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "to-back",
+              "namespace": "shop"
+            }
+          ],
+          "rule": 2,
+          "share": 100,
+          "shareState": "shown",
+          "weight": 1
+        }
+      ],
+      "summary": {
+        "backends": 1,
+        "byState": {
+          "error": {
+            "backends": 0,
+            "gateways": 0,
+            "paths": 0,
+            "routes": 0
+          },
+          "healthy": {
+            "backends": 0,
+            "gateways": 0,
+            "paths": 0,
+            "routes": 0
+          },
+          "unknown": {
+            "backends": 0,
+            "gateways": 0,
+            "paths": 0,
+            "routes": 0
+          },
+          "warning": {
+            "backends": 1,
+            "gateways": 1,
+            "paths": 1,
+            "routes": 1
+          }
+        },
+        "facets": {
+          "gateways": [
+            {
+              "paths": 1,
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "back",
+                "namespace": "infra"
+              }
+            }
+          ],
+          "namespaces": [
+            {
+              "name": "shop",
+              "paths": 1
+            }
+          ]
+        },
+        "gateways": 1,
+        "paths": 1,
+        "routes": 1
+      }
+    },
+    "install": "kgw.kgateway",
+    "kind": "Backend · Static",
+    "portChain": [],
+    "problem": {
+      "signals": [
+        {
+          "code": "KGWUI-006",
+          "kind": "finding",
+          "ref": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "back",
+            "namespace": "infra"
+          },
+          "state": "warning",
+          "title": "Proxy deployment not found"
+        }
+      ],
+      "state": "warning"
+    },
+    "ref": {
+      "group": "gateway.kgateway.dev",
+      "kind": "Backend",
+      "link": "yaml",
+      "name": "be-used",
+      "namespace": "shop"
+    },
+    "sources": [
+      {
+        "complete": "not-applicable",
+        "readAt": "0001-01-01T00:00:00Z",
+        "source": "kubernetes"
+      }
+    ],
+    "status": [],
+    "type": "Static"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

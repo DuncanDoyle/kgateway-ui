@@ -5,7 +5,7 @@ import { useInstallId } from "../shell/extension";
 import { type ParamChanges, useUrlParams } from "../shell/urlParams";
 
 // region Helpers
-export type ListName = "routes" | "gateways" | "listenersets" | "findings" | "processes";
+export type ListName = "routes" | "gateways" | "listenersets" | "findings" | "processes" | "paths" | "backends";
 
 /** The params each list's server documents (design §7.2), in the order they are sent. listener is 2.3 and never sent. */
 const API_PARAMS: Record<ListName, string[]> = {
@@ -14,6 +14,8 @@ const API_PARAMS: Record<ListName, string[]> = {
   listenersets: ["namespace", "parent", "health", "q", "sort", "cursor"],
   findings: ["severity", "code", "kind", "namespace", "group", "q", "sort", "cursor"],
   processes: ["health", "q", "skew", "restarts", "cursor"],
+  paths: ["gateway", "listener", "route", "backend", "namespace", "state", "kind", "mirror", "q", "sort", "cursor"],
+  backends: ["kind", "namespace", "state", "used", "gateway", "q", "sort", "cursor"],
 };
 /** The server's default sort per list, as the URL writes it. */
 const DEFAULT_SORT: Record<ListName, string> = {
@@ -22,13 +24,25 @@ const DEFAULT_SORT: Record<ListName, string> = {
   listenersets: "name.asc",
   findings: "rank.asc",
   processes: "name.asc",
+  paths: "problem.asc",
+  backends: "problem.asc",
 };
 /** Repeatable params; the page URL holds them comma-joined (no value of theirs can contain a comma). */
-const REPEATED = new Set(["namespace", "kind", "state", "health", "backend", "severity", "code"]);
+const REPEATED = new Set(["namespace", "kind", "state", "health", "backend", "severity", "code", "gateway"]);
+/** Params a list takes once although other lists repeat them; only the first URL value is sent. */
+const SINGLE: Partial<Record<ListName, Set<string>>> = {
+  paths: new Set(["namespace", "kind"]),
+  backends: new Set(["namespace", "kind"]),
+};
 /** Params that filter rows; Clear filters removes these and keeps the sort. */
 export const FILTER_PARAMS = [
   "namespace",
   "kind",
+  "gateway",
+  "listener",
+  "route",
+  "mirror",
+  "used",
   "parent",
   "attachment",
   "state",
@@ -60,7 +74,10 @@ export function apiQuery(list: ListName, params: URLSearchParams, q: string, ski
     }
     // attachment without parent is a 400.
     if (key === "attachment" && !params.get("parent")) continue;
-    if (REPEATED.has(key)) for (const v of listValues(params, key)) out.append(key, v);
+    if (SINGLE[list]?.has(key)) {
+      const v = listValues(params, key)[0];
+      if (v) out.set(key, v);
+    } else if (REPEATED.has(key)) for (const v of listValues(params, key)) out.append(key, v);
     else if (params.get(key)) out.set(key, params.get(key) as string);
   }
   return out;
@@ -92,7 +109,11 @@ type ListHook<P> = (
  * URL state and data of one list page: filters, sort and cursor live in the query string (design §8.1).
  * skip names params the server does not advertise (/meta filters); they stay in the URL but are never sent.
  */
-export function useListPage<T, P extends Page<T> = Page<T>>(list: ListName, useList: ListHook<P>, skip: string[] = []) {
+export function useListPage<T, P extends { install: string } = Page<T>>(
+  list: ListName,
+  useList: ListHook<P>,
+  skip: string[] = [],
+) {
   const id = useInstallId();
   const [params, update] = useUrlParams();
   const text = params.get("q") ?? "";

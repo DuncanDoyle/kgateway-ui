@@ -11,8 +11,10 @@ import (
 	"strings"
 
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 )
 
 // ExtMount is one extension endpoint (design §4.1 gap 1). Pattern is
@@ -38,6 +40,12 @@ type handlerConfig struct {
 	// packs are the server's pack names; kindFor, if set, filters overview counts per install.
 	packs   []string
 	kindFor func(install.Install, objects.GroupKind) bool
+	// pathMemo replaces the handler's path memo; nil is a fresh one.
+	pathMemo *paths.Memo
+	// scoped is the scoped endpoints reader; nil is endpoints.NoReader.
+	scoped endpoints.ScopedReader
+	// consumersFor, if set, gives an install's non-route backend consumers.
+	consumersFor func(install.Install, *install.Owned) []objects.Consumer
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

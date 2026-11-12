@@ -32,14 +32,14 @@ func Upstream() []Check {
 // Core returns the checks that read only Gateway API status, the cluster and
 // process data, in Upstream's order (Phase 5 design §6).
 func Core() []Check {
-	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, unwatchedCheck{}, ambiguityCheck{}, backendCheck{},
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, unwatchedCheck{}, ambiguityCheck{},
 		restartsCheck{}, probesCheck{}, rolloutsCheck{}, progressCheck{}, endpointsCheck{}}
 }
 
 // Kgateway returns the checks that read kgateway metrics, proxy stats, version
-// tables or computed views, in Upstream's order (Phase 5 design §6).
+// tables, computed views or kgateway Backends, in Upstream's order (Phase 5 design §6).
 func Kgateway() []Check {
-	return []Check{xdsCheck{}, verifyCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, withheldCheck{}}
+	return []Check{xdsCheck{}, verifyCheck{}, backendCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, withheldCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }

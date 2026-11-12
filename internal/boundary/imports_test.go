@@ -31,6 +31,8 @@ var allowed = map[string]string{
 	"pkg/cache/cache.go":            "the Kubernetes informers",
 	"pkg/cache/crds.go":             "Gateway API CRD metadata through the metadata client",
 	"pkg/cache/events.go":           "Warning Events on controller and proxy Pods",
+	"pkg/cache/listonce.go":         "the list-only Kubernetes provider",
+	"pkg/cache/scoped.go":           "the scoped EndpointSlice reader",
 	"pkg/cache/services.go":         "Services and EndpointSlices, cut down at the informer",
 	"pkg/ctrllogs/stream.go":        "follows controller Pod logs",
 	"pkg/ctrlmetrics/scrape.go":     "scrapes controller Pods",
@@ -205,6 +207,7 @@ var packAllowed = map[string]string{
 	"pkg/extension/extension.go": "wiring: the Registry hook fields and options (§11)",
 	"pkg/extension/kgateway.go":  "wiring: builds the kgateway pack's collectors",
 	"pkg/extension/pack.go":      "wiring: assembles the kgateway pack",
+	"pkg/health/backend.go":      "compatibility surface (§11): health.BackendState; KGWUI-002 is a pack check housed in pkg/health",
 	"pkg/health/checks.go":       "the proxy check's self-managed KGWUI-010 and its optional deployer-error enrichment",
 	"pkg/health/finding.go":      "compatibility surface (§11): health.Input's proxy mode and scope verification",
 	"pkg/health/process.go":      "the restart and rollout checks' optional controller-log enrichment (§6)",
@@ -227,6 +230,19 @@ func packImports(rel string, f *ast.File) []string {
 		}
 	}
 	return out
+}
+
+// The path model is core (Phase 6 design §4): no pack package and no
+// packAllowed entry, so the check below covers all of pkg/paths.
+func TestPathsIsCore(t *testing.T) {
+	if inPack("pkg/paths") {
+		t.Fatal("pkg/paths is a pack package")
+	}
+	for f := range packAllowed {
+		if strings.HasPrefix(f, "pkg/paths/") {
+			t.Fatalf("%s may import a pack package", f)
+		}
+	}
 }
 
 // Core code names no kgateway-pack package unless its file is listed with a

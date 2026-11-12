@@ -204,7 +204,7 @@ func partialLS() *unstructured.Unstructured {
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t), pathsCases(t), backendsCases(t), traceCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
 		if !ok { // meta and installs: no install segment, and no links
 			continue
@@ -234,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 374
+	const want = 557
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -245,7 +245,7 @@ func detailPath(r objects.Ref) (string, bool) {
 	switch r.Kind {
 	case "Gateway":
 		return "/gateways/" + r.Namespace + "/" + r.Name, true
-	case "HTTPRoute":
+	case "HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute":
 		return "/routes/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name, true
 	case "ListenerSet", "XListenerSet":
 		return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name, true
@@ -256,7 +256,7 @@ func detailPath(r objects.Ref) (string, bool) {
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
 func TestGoldenFilesHaveCases(t *testing.T) {
 	cased := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t), pathsCases(t), backendsCases(t), traceCases(t)) {
 		cased[tc.golden+".json"] = true
 	}
 	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
@@ -397,6 +397,7 @@ func findingsCases(t *testing.T) []goldenCase {
 	_, some := findingsWorld(t, hideBroken)
 	_, groups := groupsWorld(t, nil)
 	_, groupsHidden := groupsWorld(t, hideCart)
+	backends, backendID := backendFindingsWorld(t)
 	id := func(name string) string {
 		for _, f := range e.Current().Model.Installs[0].Health.Findings {
 			if f.Resource != nil && f.Resource.Name == name {
@@ -413,7 +414,30 @@ func findingsCases(t *testing.T) []goldenCase {
 		{"finding-detail-restricted", some, findingsBase + "/" + id("broken")},
 		{"findings-groups", groups, findingsBase + "?view=groups"},
 		{"findings-groups-restricted", groupsHidden, findingsBase + "?view=groups&severity=error"},
+		{"findings-backends", backends, findingsBase + "?limit=200"},
+		{"finding-detail-backend", backends, findingsBase + "/" + backendID},
 	}
+}
+
+// backendFindingsWorld routes shop/be-route to three Backends: be-bad
+// rejected with current evidence, be-old rejected without evidence and be-ok
+// accepted. It returns the server and be-bad's finding ID.
+func backendFindingsWorld(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	noEvidence := testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")
+	noEvidence.ObservedGeneration = 0
+	rt := testutil.WithRules(testutil.HTTPRoute("shop", "be-route", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		backendRule([]any{beRef("be-bad"), beRef("be-old"), beRef("be-ok")}))
+	e, srv, _ := startWith(t, setup{}, world(rt,
+		testutil.Backend("shop", "be-bad", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}),
+		testutil.Backend("shop", "be-old", []metav1.Condition{noEvidence}), testutil.Backend("shop", "be-ok", nil))...)
+	for _, f := range e.Current().Model.Installs[0].Health.Findings {
+		if f.Resource != nil && f.Resource.Name == "be-bad" {
+			return srv, f.ID
+		}
+	}
+	t.Fatal("no finding on be-bad")
+	return nil, ""
 }
 
 // TestGoldenDelegation pins the 2.4 bodies (design §7.6): the delegation
@@ -569,7 +593,7 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 // bytes, and 013/014 replace 002's code and slug (D-030). It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t), pathsCases(t), backendsCases(t), traceCases(t)) {
 		want, err := os.ReadFile(filepath.Join("testdata", "golden", tc.golden+".json"))
 		if err != nil {
 			t.Fatal(err)

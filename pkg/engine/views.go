@@ -3,6 +3,7 @@ package engine
 import (
 	"reflect"
 	"slices"
+	"sync/atomic"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -31,7 +32,7 @@ func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, ow
 	if !same || !reflect.DeepEqual(m.in, in) {
 		m.att = sel.Rules.Attachment(in)
 		m.a = computed.CheckAttachment(res.ID(), sel, in, m.att)
-		same = false
+		m.gen, same = viewsGen.Add(1), false
 	}
 	m.in = in
 	if dg == nil {
@@ -43,10 +44,11 @@ func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, ow
 			m.del = dg.Delegation(din)
 			// CheckDelegation also marks unconfirmable rows in m.del.
 			m.d = computed.CheckDelegation(res.ID(), sel, din, &m.del)
+			m.gen = viewsGen.Add(1)
 		}
 		m.din = din
 	}
-	v := &computed.Views{RuleSet: sel.Rules.Version(), Label: sel.Label(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
+	v := &computed.Views{RuleSet: sel.Rules.Version(), Label: sel.Label(), Note: sel.Note, Attachment: m.att, Delegation: m.del, Generation: m.gen}
 	v.Checks = append(append(make([]computed.CheckResult, 0, len(m.a)+len(m.d)), m.a...), m.d...)
 	return v
 }
@@ -63,7 +65,13 @@ type viewsMemo struct {
 	din            computed.DelegationInput
 	del            computed.DelegationResult
 	d              []computed.CheckResult
+	// gen is the Views.Generation of att and del.
+	gen uint64
 }
+
+// viewsGen numbers view recomputations process-wide, so a generation never
+// repeats across installs or engines.
+var viewsGen atomic.Uint64
 
 // httpRoutes maps the snapshot's HTTPRoutes by ref.
 func httpRoutes(snap *cache.Snapshot, served []kinds.Served) map[objects.Ref]*unstructured.Unstructured {

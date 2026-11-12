@@ -96,4 +96,7 @@ type Views struct {
 	// Delegation is views B and C (rules §5, §6).
 	Delegation DelegationResult
 	Checks     []CheckResult
+	// Generation changes only when Attachment or Delegation is recomputed;
+	// equal generations from one process hold the same results.
+	Generation uint64
 }

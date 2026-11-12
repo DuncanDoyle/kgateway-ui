@@ -331,18 +331,22 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 		r.Flags |= FlagGatewayRejecting
 	}
 	// The deciding condition: the first False among Accepted, ResolvedRefs and the optional types.
-	for _, t := range [2]string{"Accepted", "ResolvedRefs"} {
-		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
-			l.Cond = c
-			return l
-		}
-	}
+	var optional *metav1.Condition
 	for _, t := range b.conds.RouteOptional {
 		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
-			l.Cond = c
+			optional = c
 			break
 		}
 	}
+	if c := objects.FindCondition(cs, "Accepted"); c != nil && c.Status == metav1.ConditionFalse {
+		l.Cond, l.Programming = c, optional
+		return l
+	}
+	if c := objects.FindCondition(cs, "ResolvedRefs"); c != nil && c.Status == metav1.ConditionFalse {
+		l.Cond, l.Programming = c, optional
+		return l
+	}
+	l.Cond = optional
 	return l
 }
 

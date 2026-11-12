@@ -1,0 +1,34 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "finding": {
+      "code": "KGWUI-002",
+      "detail": "Accepted=False, reason Invalid",
+      "group": "f1-4e3tz2a25wh4jkjlllt42mlhtb",
+      "id": "f1-c7vw432l6imb5qyzj4ia2by3fh",
+      "message": "Invalid configuration",
+      "resource": {
+        "group": "gateway.kgateway.dev",
+        "kind": "Backend",
+        "link": "yaml",
+        "name": "be-bad",
+        "namespace": "shop"
+      },
+      "severity": "error",
+      "since": "2026-10-17T11:00:00Z",
+      "slug": "condition-false"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

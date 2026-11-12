@@ -415,6 +415,9 @@ func TestDownstreamRuleSet(t *testing.T) {
 	if pt := acmeRuleSet("2.4.7").PolicyTargeter(); pt != nil {
 		t.Fatalf("acme's rule set must not offer PolicyTargeter, got %T", pt)
 	}
+	if acmeRuleSet("2.4.7").BackendJudge() == nil {
+		t.Fatal("acme's rule set must forward BackendJudge")
+	}
 	if set, has := missingTarget016(t, acmeRuleSet); set != "acme-2.4" || has {
 		t.Fatalf("acme: ruleSet %q, KGWUI-016 %v; want acme-2.4 and none", set, has)
 	}

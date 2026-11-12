@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/internal/testutil/benchgate"
@@ -40,11 +42,14 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
@@ -382,10 +387,16 @@ func TestBudgetDiagnosticsRequests(t *testing.T) {
 // measuredHandler is the handler over the matured 3.2 measurement world under
 // authz: rejects on every Gateway, process data and stub proxy stats, as the engine's gates use it.
 func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Model) {
-	tier := scale.Large.Contradicting().Worst()
 	fc := testutil.FakeClock()
-	w := measure.New(t, tier, fc)
-	e := engine.New(engine.Config{Snapshots: staticSnap{w.Live.Cache.Snapshot()}, Served: testutil.ServedUpstream(),
+	w := measure.New(t, scale.Large.Contradicting().Worst(), fc)
+	e, m := measuredEngine(t, w, fc, w.Live.Cache.Snapshot())
+	return NewHandler(e, fstest.MapFS{}, authz), m
+}
+
+// measuredEngine is the engine over snap of the measurement world w, matured
+// as measuredHandler's, and its model.
+func measuredEngine(t *testing.T, w *measure.World, fc *clocktesting.FakeClock, snap *cache.Snapshot) (*engine.Engine, *engine.Model) {
+	e := engine.New(engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(),
 		Detectors: []install.Detector{install.UpstreamDetector{}}, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Collected: w.Store.Snapshot,
 		Checks: health.Upstream(), Now: fc.Now})
@@ -405,7 +416,7 @@ func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Mode
 	if f, c := matured(m); f != c || c == 0 || !hasCodes(m, measuredCodes) || !hasCodes(m, analyzerCodes) {
 		t.Fatalf("measurement world did not mature: %d KGWUI-012 of %d checks", f, c)
 	}
-	return NewHandler(e, fstest.MapFS{}, authz), m
+	return e, m
 }
 
 // current is e's published model, nil before the first.
@@ -1089,4 +1100,522 @@ func TestBudgetMatcherMaterialization(t *testing.T) {
 			t.Errorf("a page of %+v allocates %.1f MiB, want at most 32", s, float64(alloc)/mib)
 		}
 	}
+}
+
+// The path list's request and heap budgets of design §14 (6.2).
+
+// pathsTiers are the worlds the paths budgets run on: the most path rows, and
+// the measurement world, whose Services make the endpoints projection work.
+var pathsTiers = []scale.Tier{scale.Large.Paths(), scale.Large.Contradicting().Worst()}
+
+// pathsEngine is tier's engine and model, and the measurement world it keeps
+// using (nil outside it); that world matures as measuredHandler's.
+func pathsEngine(t *testing.T, tier scale.Tier) (*engine.Engine, *engine.Model, *measure.World) {
+	if !tier.IsWorst {
+		e, m := snapshotEngine(scale.Snapshot(tier, 1), tier)
+		return e, m, nil
+	}
+	fc := testutil.FakeClock()
+	w, snap := stoppedWorld(t, tier, fc)
+	e, m := measuredEngine(t, w, fc, snap)
+	return e, m, w
+}
+
+// stoppedWorld is tier's measurement world and its cache's snapshot, once the
+// cache and every goroutine it started have stopped. No GC runs while it builds:
+// when the informers' collections run decides which spans the snapshot shares
+// with garbage, so HeapInuse would vary by up to 9 MB per process.
+func stoppedWorld(t *testing.T, tier scale.Tier, fc *clocktesting.FakeClock) (*measure.World, *cache.Snapshot) {
+	gc := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(gc)
+	g := runtime.NumGoroutine()
+	w := measure.New(t, tier, fc)
+	snap := w.Live.Cache.Snapshot()
+	w.Live.Stop()
+	w.Live = nil
+	for deadline := time.Now().Add(time.Minute); runtime.NumGoroutine() > g; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
+		}
+	}
+	return w, snap
+}
+
+// pathsHandler is a handler over e under authz with an empty path memo whose
+// projections expire by m's clock, as the app's do by the real one.
+func pathsHandler(e *engine.Engine, m *engine.Model, authz Authorizer) http.Handler {
+	return NewHandler(e, fstest.MapFS{}, authz, withPathMemo(paths.NewMemo(clocktesting.NewFakeClock(m.ComputedAt))))
+}
+
+// allocated is the process's total heap allocation so far, in bytes.
+func allocated() uint64 {
+	s := []metrics.Sample{{Name: "/gc/heap/allocs:bytes"}}
+	metrics.Read(s)
+	return s[0].Value.Uint64()
+}
+
+// pathsGet serves one GET of path through h and returns its duration, bytes
+// allocated and decoded body. Any status but 200 fails tb.
+func pathsGet(tb testing.TB, h http.Handler, path string) (time.Duration, uint64, PathsResponse) {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	a, start := allocated(), time.Now()
+	h.ServeHTTP(w, req)
+	d, n := time.Since(start), allocated()-a
+	if w.Code != http.StatusOK {
+		tb.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	var out PathsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		tb.Fatal(err)
+	}
+	return d, n, out
+}
+
+// The paths request gates (design §14, tuned in 6.2 from 31 ms, 28.4 MiB cold
+// and 1.2 ms, 1.7 MiB warm). Times gate on the reference machine; allocation everywhere.
+const (
+	pathsColdTime  = 100 * time.Millisecond
+	pathsColdAlloc = 32 << 20
+	pathsWarmTime  = 5 * time.Millisecond
+	pathsWarmAlloc = 2 << 20
+)
+
+// TestBudgetPathsRequests: at Large, the first page of …/paths cold (a fresh
+// path memo) and warm (memo hit), under AllowAll and a restricting Authorizer:
+// median time and bytes allocated per request within the §14 gates.
+func TestBudgetPathsRequests(t *testing.T) {
+	const (
+		mib      = 1 << 20
+		coldRuns = 11
+		warmRuns = 201
+	)
+	for _, tier := range pathsTiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e, m, w := pathsEngine(t, tier)
+			defer runtime.KeepAlive(w)
+			url := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/paths"
+			for _, a := range []struct {
+				name  string
+				authz Authorizer
+			}{{"allow-all", nil}, {"restricted", restricting}} {
+				var coldT, warmT []time.Duration
+				var coldB, warmB []uint64
+				var sum PathSummaryDTO
+				for range coldRuns {
+					d, n, out := pathsGet(t, pathsHandler(e, m, a.authz), url)
+					coldT, coldB, sum = append(coldT, d), append(coldB, n), out.Summary
+				}
+				h := pathsHandler(e, m, a.authz)
+				pathsGet(t, h, url)
+				for range warmRuns {
+					d, n, _ := pathsGet(t, h, url)
+					warmT, warmB = append(warmT, d), append(warmB, n)
+				}
+				slices.Sort(coldT)
+				slices.Sort(warmT)
+				slices.Sort(coldB)
+				slices.Sort(warmB)
+				ct, cb := coldT[len(coldT)/2], coldB[len(coldB)/2]
+				wt, wb := warmT[len(warmT)/2], warmB[len(warmB)/2]
+				t.Logf("%s %s: %d paths (hidden %v, unmemoised %v); cold median %v max %v, %.2f MiB allocated (budget < %v, < %d MiB); warm median %v p95 %v, %.3f MiB allocated (budget < %v, < %d MiB)",
+					tier.Name, a.name, sum.Paths, sum.Hidden, sum.Unmemoised, rd(ct), rd(coldT[len(coldT)-1]), float64(cb)/mib, pathsColdTime, pathsColdAlloc/mib,
+					rd(wt), rd(percentile(warmT, 95)), float64(wb)/mib, pathsWarmTime, pathsWarmAlloc/mib)
+				if sum.Unmemoised {
+					t.Errorf("%s %s: the topology is over the memo cap, so warm requests derive it", tier.Name, a.name)
+				}
+				if ct >= pathsColdTime {
+					benchgate.Timing(t, "%s %s: cold median %v, budget < %v", tier.Name, a.name, ct, pathsColdTime)
+				}
+				if wt >= pathsWarmTime {
+					benchgate.Timing(t, "%s %s: warm median %v, budget < %v", tier.Name, a.name, wt, pathsWarmTime)
+				}
+				if cb >= pathsColdAlloc {
+					t.Errorf("%s %s: cold allocates %d B, budget < %d B", tier.Name, a.name, cb, pathsColdAlloc)
+				}
+				if wb >= pathsWarmAlloc {
+					t.Errorf("%s %s: warm allocates %d B, budget < %d B", tier.Name, a.name, wb, pathsWarmAlloc)
+				}
+			}
+		})
+	}
+}
+
+// TestBudgetRouteDetail holds route detail, with its trace, to the paths
+// request gates (design §14, 6.4): the root with the widest delegation tree,
+// cold on a fresh path memo and warm on a kept one.
+func TestBudgetRouteDetail(t *testing.T) {
+	const (
+		mib      = 1 << 20
+		coldRuns = 11
+		warmRuns = 201
+	)
+	for _, tier := range pathsTiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e, m, w := routeEngine(t, tier)
+			defer runtime.KeepAlive(w)
+			ix := m.Installs[0].Index
+			var root objects.Ref
+			for _, r := range ix.Routes {
+				ref := r.Ref
+				if r.Owned && len(r.Computed) > 0 && restricting.Authorize(nil, ref) && ref.Kind == "HTTPRoute" &&
+					(root == (objects.Ref{}) || len(ix.Delegation[ref]) > len(ix.Delegation[root])) {
+					root = ref
+				}
+			}
+			url := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/routes/" + root.Group + "/" + root.Kind + "/" + root.Namespace + "/" + root.Name
+			for _, a := range []struct {
+				name  string
+				authz Authorizer
+			}{{"allow-all", nil}, {"restricted", restricting}} {
+				var coldT, warmT []time.Duration
+				var coldB, warmB []uint64
+				var out RouteDetail
+				for range coldRuns {
+					d, n := routeGet(t, pathsHandler(e, m, a.authz), url, &out)
+					coldT, coldB = append(coldT, d), append(coldB, n)
+				}
+				h := pathsHandler(e, m, a.authz)
+				routeGet(t, h, url, &out)
+				for range warmRuns {
+					d, n := routeGet(t, h, url, &out)
+					warmT, warmB = append(warmT, d), append(warmB, n)
+				}
+				slices.Sort(coldT)
+				slices.Sort(warmT)
+				slices.Sort(coldB)
+				slices.Sort(warmB)
+				ct, cb := coldT[len(coldT)/2], coldB[len(coldB)/2]
+				wt, wb := warmT[len(warmT)/2], warmB[len(warmB)/2]
+				var refs, traced int
+				for _, r := range out.Rules {
+					for _, b := range r.BackendRefs {
+						refs++
+						if b.Problem != nil {
+							traced++
+						}
+					}
+				}
+				t.Logf("%s %s: %s with %d view B rows, %d serves, %d of %d refs traced; cold median %v max %v, %.2f MiB allocated (budget < %v, < %d MiB); warm median %v p95 %v, %.3f MiB allocated (budget < %v, < %d MiB)",
+					tier.Name, a.name, root.Namespace+"/"+root.Name, len(ix.Delegation[root]), len(out.Serves), traced, refs, rd(ct), rd(coldT[len(coldT)-1]), float64(cb)/mib,
+					pathsColdTime, pathsColdAlloc/mib, rd(wt), rd(percentile(warmT, 95)), float64(wb)/mib, pathsWarmTime, pathsWarmAlloc/mib)
+				if ct >= pathsColdTime {
+					benchgate.Timing(t, "%s %s: cold median %v, budget < %v", tier.Name, a.name, ct, pathsColdTime)
+				}
+				if wt >= pathsWarmTime {
+					benchgate.Timing(t, "%s %s: warm median %v, budget < %v", tier.Name, a.name, wt, pathsWarmTime)
+				}
+				if cb >= pathsColdAlloc {
+					t.Errorf("%s %s: cold allocates %d B, budget < %d B", tier.Name, a.name, cb, pathsColdAlloc)
+				}
+				if wb >= pathsWarmAlloc {
+					t.Errorf("%s %s: warm allocates %d B, budget < %d B", tier.Name, a.name, wb, pathsWarmAlloc)
+				}
+			}
+		})
+	}
+}
+
+// routeEngine is pathsEngine with a snapshot sorted as the cache sorts it,
+// so a detail page finds its object.
+func routeEngine(t *testing.T, tier scale.Tier) (*engine.Engine, *engine.Model, *measure.World) {
+	if tier.IsWorst {
+		return pathsEngine(t, tier)
+	}
+	snap := scale.Snapshot(tier, 1)
+	for _, objs := range snap.Objects {
+		slices.SortFunc(objs, func(x, y *unstructured.Unstructured) int {
+			return strings.Compare(x.GetNamespace()+"/"+x.GetName(), y.GetNamespace()+"/"+y.GetName())
+		})
+	}
+	e, m := snapshotEngine(snap, tier)
+	return e, m, nil
+}
+
+// routeGet serves one GET of path through h into out and returns its
+// duration and bytes allocated. Any status but 200 fails tb.
+func routeGet(tb testing.TB, h http.Handler, path string, out *RouteDetail) (time.Duration, uint64) {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	a, start := allocated(), time.Now()
+	h.ServeHTTP(w, req)
+	d, n := time.Since(start), allocated()-a
+	if w.Code != http.StatusOK {
+		tb.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
+		tb.Fatal(err)
+	}
+	return d, n
+}
+
+// The backend detail budget of design §14 (6.3): one detail under 4 MiB
+// allocated, the scoped read included.
+const backendDetailAlloc = 4 << 20
+
+// synthReader serves n IPv4 endpoints for every Service, on the name of the
+// Service's first port: the most the scoped memo holds per Service.
+type synthReader struct {
+	snap *cache.Snapshot
+	n    int
+}
+
+func (s synthReader) Endpoints(_ context.Context, _ string, svc objects.Ref) (endpoints.Result, error) {
+	var name string
+	if f, _ := serviceFacts(s.snap, svc); f != nil && len(f.Ports) > 0 {
+		name = f.Ports[0].Name
+	}
+	items := make([]endpoints.Endpoint, s.n)
+	for i := range items {
+		items[i] = endpoints.Endpoint{Address: netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}).String(), Port: 8080, PortName: name,
+			Ready: i%2 == 0, Serving: i%2 == 0, Pod: svc.Name + "-7d4b9c6f5-" + strconv.Itoa(i)}
+	}
+	return endpoints.Result{Complete: endpoints.Complete, Items: items, ReadAt: testutil.Now}, nil
+}
+
+// backendHandler is pathsHandler with the kgateway pack's consumers and a
+// bounded scoped reader over synthReader whose memo never expires: entries
+// leave it by its Service and byte caps only.
+func backendHandler(e *engine.Engine, m *engine.Model, authz Authorizer) http.Handler {
+	r := endpoints.Bounded(synthReader{snap: m.Snapshot, n: endpoints.DefaultBounds.MaxEndpoints}, endpoints.DefaultBounds, testutil.FakeClock())
+	return NewHandler(e, fstest.MapFS{}, authz, withPathMemo(paths.NewMemo(clocktesting.NewFakeClock(m.ComputedAt))), WithScopedReader(r),
+		WithBackendConsumers(kgateway.BackendConsumers))
+}
+
+// serviceDetails are the detail paths of up to n listed Services of install id, by name.
+func serviceDetails(t *testing.T, h http.Handler, id string, n int) []string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/installs/"+id+"/backends?kind=Service&sort=name&limit=200", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	var out BackendsResponse
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Fatalf("backends: %d %s", w.Code, w.Body)
+	}
+	var urls []string
+	for _, r := range out.Rows {
+		if len(urls) < n {
+			urls = append(urls, "/api/v1/installs/"+id+"/backends/-/Service/"+r.Ref.Namespace+"/"+r.Ref.Name)
+		}
+	}
+	return urls
+}
+
+// detailGet serves one backend detail through h; any status but 200 fails t.
+func detailGet(t *testing.T, h http.Handler, path string) BackendDetail {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	var out BackendDetail
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Errorf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	return out
+}
+
+// TestBudgetBackendDetail: at Large, with paths warm, rounds of concurrent
+// cold backend details (distinct Services, each read afresh with 1,000
+// endpoints, shown where the world has Service facts) allocate under 4 MiB per detail at the median, under AllowAll and
+// a restricting Authorizer (design §14).
+func TestBudgetBackendDetail(t *testing.T) {
+	const (
+		mib    = 1 << 20
+		rounds = 9
+	)
+	conc := endpoints.DefaultBounds.InFlight
+	for _, tier := range pathsTiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e, m, w := pathsEngine(t, tier)
+			defer runtime.KeepAlive(w)
+			id := m.Installs[0].Resolved.ID()
+			for _, a := range []struct {
+				name  string
+				authz Authorizer
+			}{{"allow-all", nil}, {"restricted", restricting}} {
+				h := backendHandler(e, m, a.authz)
+				pathsGet(t, h, "/api/v1/installs/"+id+"/paths")
+				urls := serviceDetails(t, h, id, rounds*conc)
+				if len(urls) < rounds*conc {
+					t.Fatalf("%s: %d Services listed, want %d", a.name, len(urls), rounds*conc)
+				}
+				var per []uint64
+				var times []time.Duration
+				var items int
+				for k := range rounds {
+					var wg sync.WaitGroup
+					var got atomic.Int64
+					before, start := allocated(), time.Now()
+					for _, u := range urls[k*conc : (k+1)*conc] {
+						wg.Go(func() {
+							d := detailGet(t, h, u)
+							for _, s := range d.Sources {
+								got.Add(int64(len(s.Items)))
+							}
+						})
+					}
+					wg.Wait()
+					times = append(times, time.Since(start))
+					per = append(per, (allocated()-before)/uint64(conc)) //nolint:gosec // conc is positive
+					items += int(got.Load())
+				}
+				slices.Sort(per)
+				slices.Sort(times)
+				med := per[len(per)/2]
+				t.Logf("%s %s: %d rounds of %d concurrent cold details, %d endpoints shown; median %.2f MiB allocated per detail, max %.2f (budget < %d MiB); median round %v",
+					tier.Name, a.name, rounds, conc, items, float64(med)/mib, float64(per[len(per)-1])/mib, backendDetailAlloc/mib, rd(times[len(times)/2]))
+				// Without Service facts the read is made but cannot be split by port name.
+				if items == 0 && len(m.Snapshot.Services) > 0 {
+					t.Errorf("%s %s: no endpoint was shown", tier.Name, a.name)
+				}
+				if med >= backendDetailAlloc {
+					t.Errorf("%s %s: a cold detail allocates %d B, budget < %d B", tier.Name, a.name, med, backendDetailAlloc)
+				}
+			}
+		})
+	}
+}
+
+// heapBaseline is the median "retained" HeapInuse of the 2.1 engine at Large
+// (docs/phases/phase-2/bench/2.2-baseline-heap.txt), as pkg/engine's TestBudgetHeap holds it.
+const heapBaseline = 25411584
+
+// apiHeapChildEnv makes TestBudgetHeapAPIWarm measure in this process and print one line.
+const apiHeapChildEnv = "SNELLIUS_API_HEAP_CHILD"
+
+// apiHeapOneGenEnv makes the heap children read every Service detail in one
+// publication, with no second compute: the attribution run, never gated.
+const apiHeapOneGenEnv = "SNELLIUS_API_HEAP_ONE_GENERATION"
+
+// apiHeapRun is one child's measurement: HeapInuse once the engine has computed
+// (the engine figure), once a new publication settles after warm requests with
+// none since (the gated figure), and once requests warm it again, and HeapAlloc
+// freed by dropping the handler and its memos.
+type apiHeapRun struct {
+	Engine, Settled, Warm uint64
+	// Alloc is the HeapAlloc warming added; Freed what dropping the handler and its memo freed.
+	Alloc, Freed int64
+	Paths        int
+	Unmemoised   bool
+	// Backends are listed over every install; Details the distinct Services read.
+	Backends, Details int
+}
+
+// TestBudgetHeapAPIWarm: as TestBudgetHeap, one fresh process per run and five
+// runs. Paths and backends are warmed for every install and 24 Service details
+// read, then the engine publishes again. The median heap retained right then,
+// with no request since, as in production, stays ≤ 48 MiB over the 2.1 baseline
+// (D-057). The figure after 36 more details on the new publication is reported.
+// Extreme is reported: D-057 is a Large budget.
+func TestBudgetHeapAPIWarm(t *testing.T) {
+	cases := append(slices.Clone(pathsTiers), scale.Extreme)
+	if name := os.Getenv(apiHeapChildEnv); name != "" {
+		i := slices.IndexFunc(cases, func(x scale.Tier) bool { return x.Name == name })
+		apiHeapChild(t, cases[i])
+		return
+	}
+	for _, tier := range cases {
+		t.Run(tier.Name, func(t *testing.T) { apiHeapBudget(t, tier, tier.Name != scale.Extreme.Name) })
+	}
+}
+
+// apiHeapBudget runs five heap children for tier and checks their medians if gated.
+func apiHeapBudget(t *testing.T, tier scale.Tier, gated bool) {
+	const mib = 1 << 20
+	var runs []apiHeapRun
+	for range 5 {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestBudgetHeapAPIWarm$", "-test.count=1", "-test.timeout=0")
+		cmd.Env = append(os.Environ(), apiHeapChildEnv+"="+tier.Name)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("heap child: %v\n%s", err, out)
+		}
+		var r apiHeapRun
+		for line := range strings.Lines(string(out)) {
+			if j, ok := strings.CutPrefix(line, "apiheap: "); ok {
+				if err := json.Unmarshal([]byte(j), &r); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if r.Engine == 0 {
+			t.Fatalf("heap child printed no result:\n%s", out)
+		}
+		runs = append(runs, r)
+	}
+	t.Logf("run  engine (B)  settled (B)  warm (B)  API memos warm (B)  HeapAlloc added (B)  freed by dropping them (B)")
+	n := len(runs)
+	eng, api, freed, warm, settled := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
+	for i, r := range runs {
+		eng[i], api[i], freed[i] = int64(r.Engine)-heapBaseline, int64(r.Warm)-int64(r.Engine), r.Freed //nolint:gosec // heap sizes fit
+		warm[i], settled[i] = int64(r.Warm)-heapBaseline, int64(r.Settled)-heapBaseline                 //nolint:gosec // heap sizes fit
+		t.Logf("%d    %d    %d    %d    %d    %d    %d", i+1, r.Engine, r.Settled, r.Warm, api[i], r.Alloc, r.Freed)
+	}
+	med := func(v []int64) int64 { v = slices.Clone(v); slices.Sort(v); return v[len(v)/2] }
+	// The gate is one child's settled figure; the warm figure and the engine and API medians are its breakdown.
+	em, am, fm, wm, total := med(eng), med(api), med(freed), med(warm), med(settled)
+	note := "budget ≤ 48 MiB"
+	if !gated {
+		note = "reported: D-057 is a Large budget"
+	}
+	t.Logf("%s: %d paths (unmemoised %v), %d listed Services, %d Service details; settled retained median %+.1f MiB over the 2.1 baseline %d B (%s); reported: warm again %+.1f MiB, engine figure %+.1f MiB, API memos warm %+.2f MiB (freed by dropping them %.2f MiB)",
+		tier.Name, runs[0].Paths, runs[0].Unmemoised, runs[0].Backends, runs[0].Details, float64(total)/mib, heapBaseline, note, float64(wm)/mib, float64(em)/mib, float64(am)/mib, float64(fm)/mib)
+	if gated && total > 48*mib {
+		t.Errorf("%s: settled retained heap %.1f MiB above the baseline, budget ≤ 48 MiB", tier.Name, float64(total)/mib)
+	}
+}
+
+// apiHeapChild measures one apiHeapRun of tier and prints it.
+func apiHeapChild(t *testing.T, tier scale.Tier) {
+	stats := func() runtime.MemStats {
+		runtime.GC()
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		return m
+	}
+	e, m, w := pathsEngine(t, tier)
+	var r apiHeapRun
+	st := stats()
+	r.Engine = st.HeapInuse
+	h := backendHandler(e, m, nil)
+	for _, i := range m.Installs {
+		_, _, out := pathsGet(t, h, "/api/v1/installs/"+i.Resolved.ID()+"/paths")
+		r.Paths += out.Summary.Paths
+		r.Unmemoised = r.Unmemoised || out.Summary.Unmemoised
+		r.Backends += len(serviceDetails(t, h, i.Resolved.ID(), 200))
+	}
+	// 48 distinct Services over two publications, the second's overlapping the
+	// first's, leave the scoped memo full across generations.
+	urls := serviceDetails(t, h, m.Installs[0].Resolved.ID(), 48)
+	if len(urls) < 48 {
+		t.Fatalf("%d Services listed, want 48", len(urls))
+	}
+	if os.Getenv(apiHeapOneGenEnv) != "" {
+		for _, u := range urls {
+			detailGet(t, h, u)
+		}
+		r.Settled = stats().HeapInuse
+	} else {
+		for _, u := range urls[:24] {
+			detailGet(t, h, u)
+		}
+		// The engine and the path memo then hold the new model only; m must not keep the old one.
+		m = e.Compute()
+		r.Settled = stats().HeapInuse
+		for _, u := range urls[12:] {
+			detailGet(t, h, u)
+		}
+	}
+	r.Details = len(urls)
+	warm := stats()
+	r.Warm, r.Alloc = warm.HeapInuse, int64(warm.HeapAlloc)-int64(st.HeapAlloc) //nolint:gosec // heap sizes fit
+	runtime.KeepAlive(h)                                                        // the handler and its memo go here
+	r.Freed = int64(warm.HeapAlloc) - int64(stats().HeapAlloc)                  //nolint:gosec // heap sizes fit
+	runtime.KeepAlive(e)
+	runtime.KeepAlive(m)
+	runtime.KeepAlive(w)
+	j, _ := json.Marshal(r)
+	fmt.Println("apiheap: " + string(j))
 }

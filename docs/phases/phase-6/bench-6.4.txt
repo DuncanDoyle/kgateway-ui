@@ -1,0 +1,910 @@
+go version go1.27.3 darwin/arm64
+machine: Darwin arm64, 18 CPUs
+load: 13:36  up 1 day,  5:59, 8 users, load averages: 1.14 2.26 2.28
+timing budgets: reference (D-044)
+go test -tags bench -v -short -run 'Budget' -count 1 ./pkg/engine ./pkg/cache
+=== RUN   TestBudgetBurst
+    budget_test.go:181: burst 999ms; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 544ms p95 994ms p99 1.034s max 1.044s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.08s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:215: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (0.75s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:244: confirm tick large: median 216µs, max 292.792µs (budget at Large ≤ 5 ms)
+2026/11/11 13:36:14 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+    budget_test.go:244: confirm tick extreme: median 790.292µs, max 1.517333ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (0.47s)
+=== RUN   TestBudgetWarmRecompute
+=== RUN   TestBudgetWarmRecompute/large
+    budget_test.go:358: large: 3551 checks, 0 KGWUI-012 findings, 0 persistence entries
+    budget_test.go:363: large: cold median 49ms max 50ms (budget median ≤ 1 s); warm median 34.3ms p95 35.6ms max 35.9ms (budget median ≤ 150 ms); warm alloc median 36.8 MiB max 36.9 MiB (reported, D-022); persistence step median 7µs max 29µs
+    budget_test.go:368: large: warm median with unchanged views input 21.3ms (reported)
+=== RUN   TestBudgetWarmRecompute/large-contradicting
+    budget_test.go:358: large-contradicting: 3551 checks, 3391 KGWUI-012 findings, 3511 persistence entries
+    budget_test.go:363: large-contradicting: cold median 54ms max 58ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 45.9ms p95 47.1ms max 47.1ms (budget median ≤ 150 ms); warm alloc median 49.2 MiB max 49.2 MiB (reported, D-022); persistence step median 222µs max 256µs
+    budget_test.go:368: large-contradicting: warm median with unchanged views input 33.1ms (reported)
+=== RUN   TestBudgetWarmRecompute/large-contradicting-worst
+    budget_test.go:307: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+    budget_test.go:358: large-contradicting-worst: 3554 checks, 3338 KGWUI-012 findings, 3458 persistence entries
+    budget_test.go:363: large-contradicting-worst: cold median 67ms max 68ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 50.9ms p95 52.8ms max 52.9ms (budget median ≤ 150 ms); warm alloc median 54.3 MiB max 54.4 MiB (reported, D-022); persistence step median 211µs max 262µs
+    budget_test.go:368: large-contradicting-worst: warm median with unchanged views input 36.9ms (reported)
+--- PASS: TestBudgetWarmRecompute (6.38s)
+    --- PASS: TestBudgetWarmRecompute/large (1.41s)
+    --- PASS: TestBudgetWarmRecompute/large-contradicting (1.95s)
+    --- PASS: TestBudgetWarmRecompute/large-contradicting-worst (3.02s)
+=== RUN   TestBudgetAnalyzerStage
+=== RUN   TestBudgetAnalyzerStage/large
+    budget_test.go:464: large: warm, §16.3 scope median 90µs p95 110µs max 190µs (budget median ≤ 20ms)
+    budget_test.go:476: large: warm, §16.3 scope allocates median 147896 B in 616 allocations per run (budget ≤ 192000 B, ≤ 710 allocations)
+    budget_test.go:464: large: memoized, §16.3 scope median 10µs p95 20µs max 20µs (budget median ≤ 2ms)
+    budget_test.go:476: large: memoized, §16.3 scope allocates median 20680 B in 173 allocations per run (budget ≤ 32000 B, ≤ 540 allocations)
+    budget_test.go:464: large: memoized, §16.3 scope, new scrape each run median 30µs p95 110µs max 180µs (budget median ≤ 2ms)
+    budget_test.go:476: large: memoized, §16.3 scope, new scrape each run allocates median 21688 B in 186 allocations per run (budget ≤ 35000 B, ≤ 555 allocations)
+    budget_test.go:464: large: warm, §16.3 scope and 018 median 80µs p95 90µs max 110µs (reported)
+    budget_test.go:471: large: warm, §16.3 scope and 018 allocates median 153312 B in 643 allocations per run (reported)
+    budget_test.go:464: large: memoized, §16.3 scope and 018 median 60µs p95 70µs max 70µs (reported)
+    budget_test.go:471: large: memoized, §16.3 scope and 018 allocates median 96072 B in 220 allocations per run (reported)
+    budget_test.go:464: large: warm, whole stage median 2.02ms p95 2.12ms max 2.26ms (reported)
+    budget_test.go:464: large: memoized, whole stage median 2.06ms p95 2.4ms max 3.26ms (reported)
+=== RUN   TestBudgetAnalyzerStage/large-contradicting-worst
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+    budget_test.go:464: large-contradicting-worst: warm, §16.3 scope median 5.67ms p95 7.54ms max 8.13ms (budget median ≤ 20ms)
+    budget_test.go:476: large-contradicting-worst: warm, §16.3 scope allocates median 5360224 B in 20121 allocations per run (budget ≤ 5570000 B, ≤ 20700 allocations)
+    budget_test.go:464: large-contradicting-worst: memoized, §16.3 scope median 110µs p95 140µs max 160µs (budget median ≤ 2ms)
+    budget_test.go:476: large-contradicting-worst: memoized, §16.3 scope allocates median 43448 B in 857 allocations per run (budget ≤ 88000 B, ≤ 1620 allocations)
+    budget_test.go:464: large-contradicting-worst: memoized, §16.3 scope, new scrape each run median 1.14ms p95 1.28ms max 1.3ms (budget median ≤ 2ms)
+    budget_test.go:476: large-contradicting-worst: memoized, §16.3 scope, new scrape each run allocates median 968880 B in 5342 allocations per run (budget ≤ 1027000 B, ≤ 5870 allocations)
+    budget_test.go:464: large-contradicting-worst: warm, §16.3 scope and 018 median 6.5ms p95 8.23ms max 8.27ms (reported)
+    budget_test.go:471: large-contradicting-worst: warm, §16.3 scope and 018 allocates median 5939440 B in 24374 allocations per run (reported)
+    budget_test.go:464: large-contradicting-worst: memoized, §16.3 scope and 018 median 4.11ms p95 4.54ms max 7.33ms (reported)
+    budget_test.go:471: large-contradicting-worst: memoized, §16.3 scope and 018 allocates median 4375232 B in 11601 allocations per run (reported)
+    budget_test.go:464: large-contradicting-worst: warm, whole stage median 19.98ms p95 23.06ms max 23.22ms (reported)
+    budget_test.go:464: large-contradicting-worst: memoized, whole stage median 15.25ms p95 17.92ms max 18.21ms (reported)
+--- PASS: TestBudgetAnalyzerStage (4.24s)
+    --- PASS: TestBudgetAnalyzerStage/large (0.48s)
+    --- PASS: TestBudgetAnalyzerStage/large-contradicting-worst (3.76s)
+=== RUN   TestBudgetHeap
+=== RUN   TestBudgetHeap/large
+    budget_test.go:560: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+    budget_test.go:562: 1    3653632    22650880      50184192      27533312
+    budget_test.go:562: 2    3416064    22142976      49946624      27803648
+    budget_test.go:562: 3    3588096    22405120      49913856      27508736
+    budget_test.go:562: 4    3670016    22618112      50077696      27459584
+    budget_test.go:562: 5    3391488    22208512      50020352      27811840
+    budget_test.go:567: median retained 50020352 B (47.7 MiB); +23.5 MiB over the 2.1 baseline 25411584 B (budget ≤ 48 MiB); +0.3 MiB over the 3.1 baseline's +23.2 (budget ≤ +24 MiB)
+    budget_test.go:570:   index: route rows               2.16 MiB
+    budget_test.go:570:   index: Gateway rows             0.05 MiB
+    budget_test.go:570:   index: ListenerSet rows         0.05 MiB
+    budget_test.go:570:   index: lookups                  2.65 MiB
+    budget_test.go:570:   health: findings                0.00 MiB
+    budget_test.go:570:   diagnosis: groups and rank      0.02 MiB
+    budget_test.go:570:   process data                    0.02 MiB
+    budget_test.go:570:   check Stores and findings       0.11 MiB
+    budget_test.go:570:   controller log reader           0.00 MiB
+    budget_test.go:570:   proxy stats and collector       0.00 MiB
+    budget_test.go:570:   computed: checks                1.52 MiB
+    budget_test.go:570:   computed: delegation            0.00 MiB
+    budget_test.go:570:   computed: attachment            0.00 MiB
+    budget_test.go:570:   persistence: windows            0.00 MiB
+    budget_test.go:570:   decode: HTTPRoute views         0.19 MiB
+    budget_test.go:570:   decode: route views             0.08 MiB
+    budget_test.go:570:   decode: route hostnames         0.00 MiB
+    budget_test.go:570:   decode: Gateway views           0.10 MiB
+    budget_test.go:570:   decode: ListenerSet views       0.08 MiB
+    budget_test.go:570:   decode: Backend views           0.00 MiB
+    budget_test.go:570:   rest of engine and model       15.36 MiB
+    budget_test.go:579: 3.2 watches' retained state: median 1396328 B (1.33 MiB), min 1396312, max 1396344 (budget median ≤ 1600000 B)
+    budget_test.go:581: 3.4 watches' retained state (Services, EndpointSlices, list-only kinds): median 3152024 B (3.01 MiB), min 3152024, max 3152040 (reported)
+=== RUN   TestBudgetHeap/large-contradicting
+    budget_test.go:560: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+    budget_test.go:562: 1    3604480    20578304      54362112      33783808
+    budget_test.go:562: 2    3571712    20545536      54337536      33792000
+    budget_test.go:562: 3    3612672    20545536      54403072      33857536
+    budget_test.go:562: 4    3670016    20668416      54329344      33660928
+    budget_test.go:562: 5    3538944    20471808      53919744      33447936
+    budget_test.go:567: median retained 54337536 B (51.8 MiB); +27.6 MiB over the 2.1 baseline 25411584 B (budget ≤ 48 MiB); +3.2 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
+    budget_test.go:570:   index: route rows               2.10 MiB
+    budget_test.go:570:   index: Gateway rows             0.07 MiB
+    budget_test.go:570:   index: ListenerSet rows         0.05 MiB
+    budget_test.go:570:   index: lookups                  2.96 MiB
+    budget_test.go:570:   health: findings                0.00 MiB
+    budget_test.go:570:   diagnosis: groups and rank      0.85 MiB
+    budget_test.go:570:   process data                    0.02 MiB
+    budget_test.go:570:   check Stores and findings       3.69 MiB
+    budget_test.go:570:   controller log reader          -0.01 MiB
+    budget_test.go:570:   proxy stats and collector       0.00 MiB
+    budget_test.go:570:   computed: checks                1.52 MiB
+    budget_test.go:570:   computed: delegation            0.00 MiB
+    budget_test.go:570:   computed: attachment            0.00 MiB
+    budget_test.go:570:   persistence: windows            0.44 MiB
+    budget_test.go:570:   decode: HTTPRoute views         0.19 MiB
+    budget_test.go:570:   decode: route views             0.08 MiB
+    budget_test.go:570:   decode: route hostnames        -0.00 MiB
+    budget_test.go:570:   decode: Gateway views           0.10 MiB
+    budget_test.go:570:   decode: ListenerSet views       0.08 MiB
+    budget_test.go:570:   decode: Backend views           0.00 MiB
+    budget_test.go:570:   rest of engine and model       15.08 MiB
+    budget_test.go:579: 3.2 watches' retained state: median 1396456 B (1.33 MiB), min 1396424, max 1396456 (budget median ≤ 1600000 B)
+    budget_test.go:581: 3.4 watches' retained state (Services, EndpointSlices, list-only kinds): median 3152024 B (3.01 MiB), min 3152024, max 3152040 (reported)
+=== RUN   TestBudgetHeap/large-contradicting-worst
+    budget_test.go:560: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+    budget_test.go:562: 1    3702784    27295744      66617344      39321600
+    budget_test.go:562: 2    3407872    27213824      66019328      38805504
+    budget_test.go:562: 3    3604480    27336704      67854336      40517632
+    budget_test.go:562: 4    3571712    27279360      65945600      38666240
+    budget_test.go:562: 5    3424256    27254784      65552384      38297600
+    budget_test.go:567: median retained 66019328 B (63.0 MiB); +38.7 MiB over the 2.1 baseline 25411584 B (budget ≤ 48 MiB); +14.3 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
+    budget_test.go:570:   index: route rows               2.10 MiB
+    budget_test.go:570:   index: Gateway rows             0.07 MiB
+    budget_test.go:570:   index: ListenerSet rows         0.05 MiB
+    budget_test.go:570:   index: lookups                  3.44 MiB
+    budget_test.go:570:   health: findings                0.00 MiB
+    budget_test.go:570:   diagnosis: groups and rank      1.05 MiB
+    budget_test.go:570:   process data                    0.07 MiB
+    budget_test.go:570:   check Stores and findings       5.18 MiB
+    budget_test.go:570:   controller log reader           0.58 MiB
+    budget_test.go:570:   proxy stats and collector       0.00 MiB
+    budget_test.go:570:   computed: checks                1.52 MiB
+    budget_test.go:570:   computed: delegation            0.00 MiB
+    budget_test.go:570:   computed: attachment            0.00 MiB
+    budget_test.go:570:   persistence: windows            0.44 MiB
+    budget_test.go:570:   decode: HTTPRoute views         0.19 MiB
+    budget_test.go:570:   decode: route views             0.08 MiB
+    budget_test.go:570:   decode: route hostnames         0.00 MiB
+    budget_test.go:570:   decode: Gateway views           0.10 MiB
+    budget_test.go:570:   decode: ListenerSet views       0.08 MiB
+    budget_test.go:570:   decode: Backend views           0.00 MiB
+    budget_test.go:570:   rest of engine and model       15.98 MiB
+    budget_test.go:579: 3.2 watches' retained state: median 1453672 B (1.39 MiB), min 1453576, max 1453800 (budget median ≤ 1600000 B)
+    budget_test.go:581: 3.4 watches' retained state (Services, EndpointSlices, list-only kinds): median 3152056 B (3.01 MiB), min 3152056, max 3152072 (reported)
+=== RUN   TestBudgetHeap/large-paths
+    budget_test.go:560: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+    budget_test.go:562: 1    3604480    25755648      54452224      28696576
+    budget_test.go:562: 2    3645440    25927680      54353920      28426240
+    budget_test.go:562: 3    3735552    26075136      54435840      28360704
+    budget_test.go:562: 4    3571712    25616384      54362112      28745728
+    budget_test.go:562: 5    3678208    25231360      54353920      29122560
+    budget_test.go:567: median retained 54362112 B (51.8 MiB); +27.6 MiB over the 2.1 baseline 25411584 B (budget ≤ 48 MiB); +4.4 MiB over the 3.1 baseline's +23.2 (budget ≤ +24 MiB)
+    budget_test.go:570:   index: route rows               2.16 MiB
+    budget_test.go:570:   index: Gateway rows             0.05 MiB
+    budget_test.go:570:   index: ListenerSet rows         0.05 MiB
+    budget_test.go:570:   index: lookups                  2.66 MiB
+    budget_test.go:570:   health: findings                0.00 MiB
+    budget_test.go:570:   diagnosis: groups and rank      0.02 MiB
+    budget_test.go:570:   process data                    0.02 MiB
+    budget_test.go:570:   check Stores and findings       0.11 MiB
+    budget_test.go:570:   controller log reader          -0.00 MiB
+    budget_test.go:570:   proxy stats and collector       0.00 MiB
+    budget_test.go:570:   computed: checks                1.52 MiB
+    budget_test.go:570:   computed: delegation            0.00 MiB
+    budget_test.go:570:   computed: attachment            0.00 MiB
+    budget_test.go:570:   persistence: windows            0.00 MiB
+    budget_test.go:570:   decode: HTTPRoute views         0.19 MiB
+    budget_test.go:570:   decode: route views             0.13 MiB
+    budget_test.go:570:   decode: route hostnames         0.00 MiB
+    budget_test.go:570:   decode: Gateway views           0.10 MiB
+    budget_test.go:570:   decode: ListenerSet views       0.08 MiB
+    budget_test.go:570:   decode: Backend views           0.00 MiB
+    budget_test.go:570:   rest of engine and model       16.12 MiB
+    budget_test.go:579: 3.2 watches' retained state: median 1396344 B (1.33 MiB), min 1396328, max 1396344 (budget median ≤ 1600000 B)
+    budget_test.go:581: 3.4 watches' retained state (Services, EndpointSlices, list-only kinds): median 3152024 B (3.01 MiB), min 3152024, max 3152040 (reported)
+--- PASS: TestBudgetHeap (14.78s)
+    --- PASS: TestBudgetHeap/large (2.52s)
+    --- PASS: TestBudgetHeap/large-contradicting (2.69s)
+    --- PASS: TestBudgetHeap/large-contradicting-worst (6.93s)
+    --- PASS: TestBudgetHeap/large-paths (2.63s)
+=== RUN   TestBudgetDenseMemory
+    budget_test.go:798: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  208 MiB, per warm Compute  166 MiB; peak RSS  482 MiB; peak HeapInuse cold  224 MiB warm  446 MiB; peak HeapAlloc cold  217 MiB warm  435 MiB
+    budget_test.go:798: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  208 MiB, per warm Compute  166 MiB; peak RSS  471 MiB; peak HeapInuse cold  216 MiB warm  429 MiB; peak HeapAlloc cold  209 MiB warm  419 MiB
+    budget_test.go:798: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  208 MiB, per warm Compute  166 MiB; peak RSS  417 MiB; peak HeapInuse cold  196 MiB warm  377 MiB; peak HeapAlloc cold  189 MiB warm  367 MiB
+    budget_test.go:798: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  208 MiB, per warm Compute  166 MiB; peak RSS  484 MiB; peak HeapInuse cold  219 MiB warm  444 MiB; peak HeapAlloc cold  212 MiB warm  433 MiB
+    budget_test.go:798: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  208 MiB, per warm Compute  166 MiB; peak RSS  484 MiB; peak HeapInuse cold  208 MiB warm  442 MiB; peak HeapAlloc cold  201 MiB warm  432 MiB
+    budget_test.go:806: edges  10000: medians over 5 runs: retained heap  160 MiB, allocated cold  208 MiB, per warm Compute  166 MiB, peak HeapInuse  442 MiB (logged only)
+    budget_test.go:798: edges  20000:  20000 rows; retained heap  187 MiB; allocated cold  248 MiB, per warm Compute  206 MiB; peak RSS  521 MiB; peak HeapInuse cold  227 MiB warm  481 MiB; peak HeapAlloc cold  219 MiB warm  469 MiB
+    budget_test.go:798: edges  50000:  50000 rows; retained heap  261 MiB; allocated cold  369 MiB, per warm Compute  320 MiB; peak RSS  817 MiB; peak HeapInuse cold  329 MiB warm  762 MiB; peak HeapAlloc cold  320 MiB warm  745 MiB
+--- PASS: TestBudgetDenseMemory (6.91s)
+PASS
+ok  	github.com/DuncanDoyle/snellius/pkg/engine	37.997s
+testing: warning: no tests to run
+PASS
+ok  	github.com/DuncanDoyle/snellius/pkg/cache	0.315s [no tests to run]
+go test -tags bench -run '^$' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache
+goos: darwin
+goarch: arm64
+pkg: github.com/DuncanDoyle/snellius/pkg/engine
+cpu: Apple M5 Max
+BenchmarkCompute/typical-18   	     212	   5633568 ns/op	 6789611 B/op	   26320 allocs/op
+BenchmarkCompute/typical-18   	     212	   5655273 ns/op	 6788888 B/op	   26319 allocs/op
+BenchmarkCompute/typical-18   	     214	   5605728 ns/op	 6788314 B/op	   26319 allocs/op
+BenchmarkCompute/typical-18   	     211	   5625252 ns/op	 6791686 B/op	   26320 allocs/op
+BenchmarkCompute/typical-18   	     212	   5655990 ns/op	 6786237 B/op	   26318 allocs/op
+BenchmarkCompute/large-18     	      33	  33985298 ns/op	38620114 B/op	  130538 allocs/op
+BenchmarkCompute/large-18     	      33	  34160509 ns/op	38618651 B/op	  130538 allocs/op
+BenchmarkCompute/large-18     	      33	  34100165 ns/op	38618798 B/op	  130537 allocs/op
+BenchmarkCompute/large-18     	      33	  34139519 ns/op	38624314 B/op	  130540 allocs/op
+BenchmarkCompute/large-18     	      32	  34183661 ns/op	38622131 B/op	  130538 allocs/op
+2026/11/11 13:36:59 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+BenchmarkCompute/extreme-18   	       9	 121855116 ns/op	119618564 B/op	  435281 allocs/op
+BenchmarkCompute/extreme-18   	2026/11/11 13:37:01 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+       9	 119495273 ns/op	119656979 B/op	  435280 allocs/op
+BenchmarkCompute/extreme-18   	2026/11/11 13:37:02 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+       9	 119284972 ns/op	119668397 B/op	  435278 allocs/op
+BenchmarkCompute/extreme-18   	2026/11/11 13:37:03 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+       9	 119685588 ns/op	119623530 B/op	  435276 allocs/op
+BenchmarkCompute/extreme-18   	2026/11/11 13:37:05 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+       9	 119652000 ns/op	119709576 B/op	  435282 allocs/op
+BenchmarkCompute/large-contradicting-18         	      25	  46438308 ns/op	51614926 B/op	  209830 allocs/op
+BenchmarkCompute/large-contradicting-18         	      24	  46849019 ns/op	51603918 B/op	  209826 allocs/op
+BenchmarkCompute/large-contradicting-18         	      24	  46215076 ns/op	51607063 B/op	  209828 allocs/op
+BenchmarkCompute/large-contradicting-18         	      25	  45903457 ns/op	51608327 B/op	  209827 allocs/op
+BenchmarkCompute/large-contradicting-18         	      25	  45879628 ns/op	51599062 B/op	  209825 allocs/op
+BenchmarkCompute/large-hit-18                   	      54	  20598235 ns/op	25718333 B/op	   80002 allocs/op
+BenchmarkCompute/large-hit-18                   	      51	  20574939 ns/op	25700169 B/op	   80000 allocs/op
+BenchmarkCompute/large-hit-18                   	      54	  20781326 ns/op	25734933 B/op	   80002 allocs/op
+BenchmarkCompute/large-hit-18                   	      54	  20600167 ns/op	25716502 B/op	   80002 allocs/op
+BenchmarkCompute/large-hit-18                   	      54	  20852461 ns/op	25718621 B/op	   80002 allocs/op
+BenchmarkCompute/large-contradicting-worst-18   	      22	  51512466 ns/op	56948610 B/op	  254684 allocs/op
+--- BENCH: BenchmarkCompute/large-contradicting-worst-18
+    bench_test.go:85: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkCompute/large-contradicting-worst-18   	      24	  51375627 ns/op	56953557 B/op	  254686 allocs/op
+--- BENCH: BenchmarkCompute/large-contradicting-worst-18
+    bench_test.go:85: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkCompute/large-contradicting-worst-18   	      21	  51918258 ns/op	56957082 B/op	  254686 allocs/op
+--- BENCH: BenchmarkCompute/large-contradicting-worst-18
+    bench_test.go:85: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkCompute/large-contradicting-worst-18   	      22	  51486496 ns/op	56950836 B/op	  254686 allocs/op
+--- BENCH: BenchmarkCompute/large-contradicting-worst-18
+    bench_test.go:85: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkCompute/large-contradicting-worst-18   	      22	  51983292 ns/op	56959806 B/op	  254687 allocs/op
+--- BENCH: BenchmarkCompute/large-contradicting-worst-18
+    bench_test.go:85: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkColdCompute/large-18                   	      22	  50224023 ns/op	49460963 B/op	  381049 allocs/op
+BenchmarkColdCompute/large-18                   	      22	  50088381 ns/op	49465351 B/op	  381052 allocs/op
+BenchmarkColdCompute/large-18                   	      24	  49648260 ns/op	49463548 B/op	  381052 allocs/op
+BenchmarkColdCompute/large-18                   	      22	  49717318 ns/op	49467504 B/op	  381052 allocs/op
+BenchmarkColdCompute/large-18                   	      22	  50213294 ns/op	49467631 B/op	  381052 allocs/op
+BenchmarkColdCompute/large-contradicting-18     	      20	  54220104 ns/op	57274127 B/op	  387505 allocs/op
+BenchmarkColdCompute/large-contradicting-18     	      21	  54437718 ns/op	57307728 B/op	  387510 allocs/op
+BenchmarkColdCompute/large-contradicting-18     	      21	  54381659 ns/op	57209530 B/op	  387507 allocs/op
+BenchmarkColdCompute/large-contradicting-18     	      21	  54568066 ns/op	57284577 B/op	  387505 allocs/op
+BenchmarkColdCompute/large-contradicting-18     	      21	  54405304 ns/op	57273219 B/op	  387508 allocs/op
+BenchmarkAnalyzerStage/warm/large-18            	     561	   2177507 ns/op	 1718159 B/op	   27127 allocs/op
+BenchmarkAnalyzerStage/warm/large-18            	     555	   2123790 ns/op	 1718094 B/op	   27127 allocs/op
+BenchmarkAnalyzerStage/warm/large-18            	     560	   2135111 ns/op	 1718987 B/op	   27127 allocs/op
+BenchmarkAnalyzerStage/warm/large-18            	     555	   2157148 ns/op	 1717988 B/op	   27127 allocs/op
+BenchmarkAnalyzerStage/warm/large-18            	     554	   2139057 ns/op	 1718236 B/op	   27127 allocs/op
+BenchmarkAnalyzerStage/warm/large-contradicting-worst-18         	      60	  20687503 ns/op	23199537 B/op	  208679 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm/large-contradicting-worst-18         	      49	  20856700 ns/op	23185089 B/op	  208678 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm/large-contradicting-worst-18         	      57	  20932327 ns/op	23183899 B/op	  208679 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm/large-contradicting-worst-18         	      51	  20849618 ns/op	23187040 B/op	  208678 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm/large-contradicting-worst-18         	      56	  20904192 ns/op	23175800 B/op	  208678 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized/large-18                         	     535	   2167761 ns/op	 1660343 B/op	   26733 allocs/op
+BenchmarkAnalyzerStage/memoized/large-18                         	     547	   2159001 ns/op	 1660172 B/op	   26733 allocs/op
+BenchmarkAnalyzerStage/memoized/large-18                         	     546	   2151890 ns/op	 1659474 B/op	   26733 allocs/op
+BenchmarkAnalyzerStage/memoized/large-18                         	     543	   2186782 ns/op	 1659127 B/op	   26733 allocs/op
+BenchmarkAnalyzerStage/memoized/large-18                         	     541	   2167041 ns/op	 1659663 B/op	   26733 allocs/op
+BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18     	      78	  15839711 ns/op	15706515 B/op	  141607 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18     	      76	  15812202 ns/op	15706155 B/op	  141607 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18     	      78	  15837587 ns/op	15709517 B/op	  141609 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18     	      75	  15839096 ns/op	15706035 B/op	  141607 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18     	      76	  16283062 ns/op	15707236 B/op	  141608 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm-scope/large-18                       	   13516	     88650 ns/op	  147895 B/op	     616 allocs/op
+BenchmarkAnalyzerStage/warm-scope/large-18                       	   13518	     88713 ns/op	  147895 B/op	     616 allocs/op
+BenchmarkAnalyzerStage/warm-scope/large-18                       	   13593	     88231 ns/op	  147895 B/op	     616 allocs/op
+BenchmarkAnalyzerStage/warm-scope/large-18                       	   13503	     88803 ns/op	  147895 B/op	     616 allocs/op
+BenchmarkAnalyzerStage/warm-scope/large-18                       	   13542	     88537 ns/op	  147895 B/op	     616 allocs/op
+BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18   	     202	   5876211 ns/op	 5360527 B/op	   20121 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18   	     204	   5864809 ns/op	 5360556 B/op	   20121 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18   	     204	   5881017 ns/op	 5360581 B/op	   20121 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18   	     201	   5944616 ns/op	 5360525 B/op	   20121 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18   	     202	   5874520 ns/op	 5360559 B/op	   20121 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/warm-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope/large-18                   	   93996	     12664 ns/op	   20681 B/op	     173 allocs/op
+BenchmarkAnalyzerStage/memoized-scope/large-18                   	   92931	     12659 ns/op	   20681 B/op	     173 allocs/op
+BenchmarkAnalyzerStage/memoized-scope/large-18                   	   92422	     12658 ns/op	   20681 B/op	     173 allocs/op
+BenchmarkAnalyzerStage/memoized-scope/large-18                   	   92612	     12684 ns/op	   20681 B/op	     173 allocs/op
+BenchmarkAnalyzerStage/memoized-scope/large-18                   	   94513	     12586 ns/op	   20681 B/op	     173 allocs/op
+BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18         	   10000	    108065 ns/op	   43449 B/op	     857 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18         	   10000	    108577 ns/op	   43450 B/op	     857 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18         	   10000	    105578 ns/op	   43450 B/op	     857 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18         	   10000	    105953 ns/op	   43449 B/op	     857 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18         	   10000	    106164 ns/op	   43450 B/op	     857 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-18                      	   66512	     17851 ns/op	   21689 B/op	     186 allocs/op
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-18                      	   65840	     17885 ns/op	   21689 B/op	     186 allocs/op
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-18                      	   65488	     18083 ns/op	   21689 B/op	     186 allocs/op
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-18                      	   65103	     18034 ns/op	   21689 B/op	     186 allocs/op
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-18                      	   65385	     18125 ns/op	   21689 B/op	     186 allocs/op
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18  	    1036	   1148769 ns/op	  968908 B/op	    5342 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18  	    1036	   1158497 ns/op	  968906 B/op	    5342 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18  	    1033	   1153288 ns/op	  968910 B/op	    5342 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18  	    1004	   1157158 ns/op	  968907 B/op	    5342 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18  	    1006	   1163927 ns/op	  968912 B/op	    5342 allocs/op
+--- BENCH: BenchmarkAnalyzerStage/memoized-scope-scrape/large-contradicting-worst-18
+    bench_test.go:297: measurement world: 103 Gateways, 7046 findings map[KGWUI-001:103 KGWUI-002:2524 KGWUI-003:53 KGWUI-011:38 KGWUI-012:3338 KGWUI-013:117 KGWUI-014:129 KGWUI-015:18 KGWUI-016:20 KGWUI-017:10 KGWUI-018:1 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:90 KGWUI-025:103 KGWUI-026:103], 2890 groups map[Data plane rejects:103 Empty backend:90 Missing backend:61 Not permitted:61 Other:2459 Process:103 Replaced by policy:12 Status not progressing:1] (map[Missing backend:32 Not permitted:35 Other:2124 Process:103 Replaced by policy:5 Status not progressing:1] with two or more findings), 1000 derived log events
+BenchmarkDenseSelection/large-18                                           	      21	  53610980 ns/op	         0 capped	     10000 rows	78191309 B/op	  295083 allocs/op
+--- BENCH: BenchmarkDenseSelection/large-18
+    bench_test.go:569: large: 20 parents × 500 routes: cap "", 10000 rows, last row ns-000/p-019 rule 0 ref 0 → ns-001/r-00499 (attached)
+BenchmarkDenseSelection/large-18                                           	      20	  53698229 ns/op	         0 capped	     10000 rows	78199195 B/op	  295087 allocs/op
+--- BENCH: BenchmarkDenseSelection/large-18
+    bench_test.go:569: large: 20 parents × 500 routes: cap "", 10000 rows, last row ns-000/p-019 rule 0 ref 0 → ns-001/r-00499 (attached)
+BenchmarkDenseSelection/large-18                                           	      20	  54306896 ns/op	         0 capped	     10000 rows	78197046 B/op	  295086 allocs/op
+--- BENCH: BenchmarkDenseSelection/large-18
+    bench_test.go:569: large: 20 parents × 500 routes: cap "", 10000 rows, last row ns-000/p-019 rule 0 ref 0 → ns-001/r-00499 (attached)
+BenchmarkDenseSelection/large-18                                           	      21	  53393587 ns/op	         0 capped	     10000 rows	78185641 B/op	  295081 allocs/op
+--- BENCH: BenchmarkDenseSelection/large-18
+    bench_test.go:569: large: 20 parents × 500 routes: cap "", 10000 rows, last row ns-000/p-019 rule 0 ref 0 → ns-001/r-00499 (attached)
+BenchmarkDenseSelection/large-18                                           	      20	  53594467 ns/op	         0 capped	     10000 rows	78200362 B/op	  295086 allocs/op
+--- BENCH: BenchmarkDenseSelection/large-18
+    bench_test.go:569: large: 20 parents × 500 routes: cap "", 10000 rows, last row ns-000/p-019 rule 0 ref 0 → ns-001/r-00499 (attached)
+BenchmarkDenseSelection/extreme-18                                         	       9	 113557574 ns/op	         1.000 capped	     10000 rows	174424918 B/op	  529135 allocs/op
+--- BENCH: BenchmarkDenseSelection/extreme-18
+    bench_test.go:569: extreme: 100 parents × 1000 routes: cap "edges", 10000 rows, last row ns-000/p-009 rule 0 ref 0 → ns-001/r-00999 (attached)
+BenchmarkDenseSelection/extreme-18                                         	       9	 113853315 ns/op	         1.000 capped	     10000 rows	174430621 B/op	  529138 allocs/op
+--- BENCH: BenchmarkDenseSelection/extreme-18
+    bench_test.go:569: extreme: 100 parents × 1000 routes: cap "edges", 10000 rows, last row ns-000/p-009 rule 0 ref 0 → ns-001/r-00999 (attached)
+BenchmarkDenseSelection/extreme-18                                         	       9	 114773292 ns/op	         1.000 capped	     10000 rows	174431329 B/op	  529139 allocs/op
+--- BENCH: BenchmarkDenseSelection/extreme-18
+    bench_test.go:569: extreme: 100 parents × 1000 routes: cap "edges", 10000 rows, last row ns-000/p-009 rule 0 ref 0 → ns-001/r-00999 (attached)
+BenchmarkDenseSelection/extreme-18                                         	       9	 113836190 ns/op	         1.000 capped	     10000 rows	174432490 B/op	  529140 allocs/op
+--- BENCH: BenchmarkDenseSelection/extreme-18
+    bench_test.go:569: extreme: 100 parents × 1000 routes: cap "edges", 10000 rows, last row ns-000/p-009 rule 0 ref 0 → ns-001/r-00999 (attached)
+BenchmarkDenseSelection/extreme-18                                         	       9	 114065630 ns/op	         1.000 capped	     10000 rows	174425591 B/op	  529136 allocs/op
+--- BENCH: BenchmarkDenseSelection/extreme-18
+    bench_test.go:569: extreme: 100 parents × 1000 routes: cap "edges", 10000 rows, last row ns-000/p-009 rule 0 ref 0 → ns-001/r-00999 (attached)
+BenchmarkConfirmTick/large-18                                              	    4837	    226611 ns/op	   70024 B/op	     109 allocs/op
+BenchmarkConfirmTick/large-18                                              	    5282	    224302 ns/op	   70024 B/op	     109 allocs/op
+BenchmarkConfirmTick/large-18                                              	    5385	    224216 ns/op	   70024 B/op	     109 allocs/op
+BenchmarkConfirmTick/large-18                                              	    5400	    223095 ns/op	   70024 B/op	     109 allocs/op
+BenchmarkConfirmTick/large-18                                              	    5236	    225955 ns/op	   70024 B/op	     109 allocs/op
+2026/11/11 13:39:27 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+BenchmarkConfirmTick/extreme-18                                            	    1424	    849509 ns/op	  234984 B/op	     115 allocs/op
+BenchmarkConfirmTick/extreme-18                                            	2026/11/11 13:39:28 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+    1404	    850751 ns/op	  234984 B/op	     115 allocs/op
+BenchmarkConfirmTick/extreme-18                                            	2026/11/11 13:39:30 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+    1453	    845200 ns/op	  234984 B/op	     115 allocs/op
+BenchmarkConfirmTick/extreme-18                                            	2026/11/11 13:39:31 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+    1393	    842184 ns/op	  234984 B/op	     115 allocs/op
+BenchmarkConfirmTick/extreme-18                                            	2026/11/11 13:39:33 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+    1399	    859826 ns/op	  234984 B/op	     115 allocs/op
+PASS
+ok  	github.com/DuncanDoyle/snellius/pkg/engine	166.738s
+goos: darwin
+goarch: arm64
+pkg: github.com/DuncanDoyle/snellius/pkg/cache
+cpu: Apple M5 Max
+BenchmarkFingerprint/large-18         	    5515	    217405 ns/op	   59108 B/op	      86 allocs/op
+BenchmarkFingerprint/large-18         	    5388	    219312 ns/op	   59097 B/op	      86 allocs/op
+BenchmarkFingerprint/large-18         	    5443	    218467 ns/op	   59119 B/op	      86 allocs/op
+BenchmarkFingerprint/large-18         	    5238	    215950 ns/op	   59119 B/op	      86 allocs/op
+BenchmarkFingerprint/large-18         	    5407	    218107 ns/op	   59114 B/op	      86 allocs/op
+BenchmarkFingerprint/extreme-18       	    1484	    826676 ns/op	  170275 B/op	      86 allocs/op
+BenchmarkFingerprint/extreme-18       	    1504	    812615 ns/op	  170434 B/op	      86 allocs/op
+BenchmarkFingerprint/extreme-18       	    1436	    826324 ns/op	  170463 B/op	      86 allocs/op
+BenchmarkFingerprint/extreme-18       	    1518	    811847 ns/op	  170200 B/op	      86 allocs/op
+BenchmarkFingerprint/extreme-18       	    1528	    814178 ns/op	  170200 B/op	      86 allocs/op
+PASS
+ok  	github.com/DuncanDoyle/snellius/pkg/cache	13.008s
+go test -tags bench -v -short -run 'Budget' -count 1 -timeout 75m ./pkg/api
+=== RUN   TestBudgetListRequests
+=== RUN   TestBudgetListRequests/allow-all
+    budget_test.go:245: widest delegating parent ns-038/r-00200: 1275 view B rows; label ref rule 0 ref 0, scope 2000 HTTPRoutes, selection hidden false
+    budget_test.go:251: parents: Gateway ns-079/gw-079 (61 rows), ListenerSet ns-084/ls-0184 (6 rows), listener ns-041/gw-041/l2 (30 members), HTTPRoute ns-038/r-00200 (50 children); namespace ns-018 (28 rows); deepest child ns-001/r-01852 at depth 3
+    budget_test.go:267: none                      50 rows on the page, total 2300
+    budget_test.go:273: none                      sequential p50 280µs p95 303µs p99 585µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 446µs p95 1.51ms p99 4.61ms (budget p95 < 100 ms)
+    budget_test.go:267: parent-gateway            50 rows on the page, total 61
+    budget_test.go:273: parent-gateway            sequential p50 236µs p95 256µs p99 413µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 383µs p95 1.22ms p99 3.88ms (budget p95 < 100 ms)
+    budget_test.go:267: parent-listenerset        6 rows on the page, total 6
+    budget_test.go:273: parent-listenerset        sequential p50 41µs p95 47µs p99 74µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 61µs p95 249µs p99 869µs (budget p95 < 100 ms)
+    budget_test.go:267: parent+listener           30 rows on the page, total 30
+    budget_test.go:273: parent+listener           sequential p50 181µs p95 198µs p99 347µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 328µs p95 1.08ms p99 3.45ms (budget p95 < 100 ms)
+    budget_test.go:267: namespace+state           5 rows on the page, total 5
+    budget_test.go:273: namespace+state           sequential p50 30µs p95 35µs p99 50µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 42µs p95 115µs p99 547µs (budget p95 < 100 ms)
+    budget_test.go:267: q                         50 rows on the page, total 1000
+    budget_test.go:273: q                         sequential p50 284µs p95 308µs p99 552µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 460µs p95 1.41ms p99 4.08ms (budget p95 < 100 ms)
+    budget_test.go:267: sort=health               50 rows on the page, total 2300
+    budget_test.go:273: sort=health               sequential p50 456µs p95 485µs p99 523µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 600µs p95 2.72ms p99 7.35ms (budget p95 < 100 ms)
+    budget_test.go:267: parent-httproute          50 rows on the page, total 50
+    budget_test.go:273: parent-httproute          sequential p50 144µs p95 156µs p99 244µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 212µs p95 777µs p99 2.27ms (budget p95 < 100 ms)
+    budget_test.go:267: delegation-widest-parent  50 rows on the page, total 1275
+    budget_test.go:273: delegation-widest-parent  sequential p50 193µs p95 210µs p99 394µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 356µs p95 1.22ms p99 3.97ms (budget p95 < 100 ms)
+    budget_test.go:291: detail-deepest-child      sequential p50 10.62ms p95 12.32ms p99 12.74ms (budget p95 < 50 ms)
+    budget_test.go:291: detail-widest-parent      sequential p50 10.78ms p95 12.52ms p99 12.88ms (budget p95 < 50 ms)
+    budget_test.go:298: refs-full-trail           sequential p50 10µs p95 12µs p99 14µs (budget p95 < 50 ms)
+=== RUN   TestBudgetListRequests/restricted
+    budget_test.go:245: widest delegating parent ns-038/r-00200: 1275 view B rows; label ref rule 0 ref 0, scope 2000 HTTPRoutes, selection hidden true
+    budget_test.go:251: parents: Gateway ns-079/gw-079 (61 rows), ListenerSet ns-084/ls-0184 (6 rows), listener ns-099/gw-099/l0 (30 members), HTTPRoute ns-038/r-00200 (50 children); namespace ns-018 (28 rows); deepest child ns-004/r-01889 at depth 3
+    budget_test.go:267: none                      50 rows on the page, total 2085
+    budget_test.go:273: none                      sequential p50 482µs p95 510µs p99 730µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 645µs p95 1.89ms p99 5.21ms (budget p95 < 100 ms)
+    budget_test.go:267: parent-gateway            50 rows on the page, total 53
+    budget_test.go:273: parent-gateway            sequential p50 382µs p95 406µs p99 599µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 527µs p95 1.52ms p99 4.45ms (budget p95 < 100 ms)
+    budget_test.go:267: parent-listenerset        6 rows on the page, total 6
+    budget_test.go:273: parent-listenerset        sequential p50 169µs p95 178µs p99 195µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 205µs p95 438µs p99 1.29ms (budget p95 < 100 ms)
+    budget_test.go:267: parent+listener           27 rows on the page, total 27
+    budget_test.go:273: parent+listener           sequential p50 264µs p95 281µs p99 314µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 344µs p95 1.01ms p99 3.32ms (budget p95 < 100 ms)
+    budget_test.go:267: namespace+state           5 rows on the page, total 5
+    budget_test.go:273: namespace+state           sequential p50 157µs p95 166µs p99 181µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 181µs p95 341µs p99 943µs (budget p95 < 100 ms)
+    budget_test.go:267: q                         50 rows on the page, total 916
+    budget_test.go:273: q                         sequential p50 452µs p95 479µs p99 706µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 621µs p95 1.69ms p99 4.85ms (budget p95 < 100 ms)
+    budget_test.go:267: sort=health               50 rows on the page, total 2085
+    budget_test.go:273: sort=health               sequential p50 646µs p95 677µs p99 730µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 817µs p95 2.81ms p99 5.88ms (budget p95 < 100 ms)
+    budget_test.go:267: parent-httproute          50 rows on the page, total 50
+    budget_test.go:273: parent-httproute          sequential p50 278µs p95 297µs p99 318µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 344µs p95 913µs p99 2.97ms (budget p95 < 100 ms)
+    budget_test.go:267: delegation-widest-parent  50 rows on the page, total 1276
+    budget_test.go:273: delegation-widest-parent  sequential p50 228µs p95 247µs p99 475µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 416µs p95 1.42ms p99 4.19ms (budget p95 < 100 ms)
+    budget_test.go:291: detail-deepest-child      sequential p50 10.76ms p95 12ms p99 12.4ms (budget p95 < 50 ms)
+    budget_test.go:291: detail-widest-parent      sequential p50 11.08ms p95 12.3ms p99 12.61ms (budget p95 < 50 ms)
+    budget_test.go:298: refs-full-trail           sequential p50 10µs p95 12µs p99 15µs (budget p95 < 50 ms)
+--- PASS: TestBudgetListRequests (495.94s)
+    --- PASS: TestBudgetListRequests/allow-all (240.60s)
+    --- PASS: TestBudgetListRequests/restricted (255.34s)
+=== RUN   TestBudgetFindingsRequests
+=== RUN   TestBudgetFindingsRequests/allow-all
+    budget_test.go:328: 6647 findings by code and severity map[KGWUI-002/error:2524 KGWUI-003/warning:73 KGWUI-011/warning:38 KGWUI-012/warning:3338 KGWUI-013/error:117 KGWUI-014/error:129 KGWUI-015/error:18 KGWUI-017/error:10 KGWUI-019/warning:103 KGWUI-021/warning:103 KGWUI-022/warning:104 KGWUI-023/warning:90]; 2819 groups, largest f1-2iyngj4h2bva7p5zvswgdspfvr (Other, 8 members)
+    budget_test.go:343: none                      50 rows on the page, total 6647
+    budget_test.go:347: none                      sequential p50 92µs p95 102µs p99 149µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 147µs p95 431µs p99 1.29ms (budget p95 < 100 ms)
+    budget_test.go:343: severity=error            50 rows on the page, total 2798
+    budget_test.go:347: severity=error            sequential p50 106µs p95 117µs p99 181µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 146µs p95 410µs p99 2.22ms (budget p95 < 100 ms)
+    budget_test.go:343: code=KGWUI-012            50 rows on the page, total 3338
+    budget_test.go:347: code=KGWUI-012            sequential p50 107µs p95 116µs p99 213µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 152µs p95 424µs p99 1.7ms (budget p95 < 100 ms)
+    budget_test.go:343: q                         50 rows on the page, total 2235
+    budget_test.go:347: q                         sequential p50 397µs p95 421µs p99 448µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 488µs p95 907µs p99 3.33ms (budget p95 < 100 ms)
+    budget_test.go:343: group                     8 rows on the page, total 8
+    budget_test.go:347: group                     sequential p50 39µs p95 44µs p99 68µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 66µs p95 256µs p99 802µs (budget p95 < 100 ms)
+    budget_test.go:343: sort=since                50 rows on the page, total 6647
+    budget_test.go:347: sort=since                sequential p50 84µs p95 92µs p99 145µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 125µs p95 372µs p99 1.12ms (budget p95 < 100 ms)
+    budget_test.go:343: view=groups               50 rows on the page, total 2819
+    budget_test.go:347: view=groups               sequential p50 188µs p95 205µs p99 261µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 276µs p95 809µs p99 2.93ms (budget p95 < 100 ms)
+    budget_test.go:343: view=groups&severity=error 50 rows on the page, total 2115
+    budget_test.go:347: view=groups&severity=error sequential p50 196µs p95 215µs p99 271µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 293µs p95 895µs p99 3.29ms (budget p95 < 100 ms)
+    budget_test.go:343: view=groups&q             50 rows on the page, total 949
+    budget_test.go:347: view=groups&q             sequential p50 478µs p95 514µs p99 562µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 616µs p95 1.18ms p99 3.91ms (budget p95 < 100 ms)
+    budget_test.go:349: detail-largest-group      sequential p50 3µs p95 3µs p99 5µs (budget p95 < 50 ms)
+=== RUN   TestBudgetFindingsRequests/restricted
+    budget_test.go:328: 6647 findings by code and severity map[KGWUI-002/error:2524 KGWUI-003/warning:73 KGWUI-011/warning:38 KGWUI-012/warning:3338 KGWUI-013/error:117 KGWUI-014/error:129 KGWUI-015/error:18 KGWUI-017/error:10 KGWUI-019/warning:103 KGWUI-021/warning:103 KGWUI-022/warning:104 KGWUI-023/warning:90]; 2819 groups, largest f1-2iyngj4h2bva7p5zvswgdspfvr (Other, 8 members)
+    budget_test.go:343: none                      50 rows on the page, total 6647
+    budget_test.go:347: none                      sequential p50 89µs p95 99µs p99 155µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 148µs p95 483µs p99 1.25ms (budget p95 < 100 ms)
+    budget_test.go:343: severity=error            50 rows on the page, total 2798
+    budget_test.go:347: severity=error            sequential p50 102µs p95 113µs p99 172µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 157µs p95 465µs p99 2.2ms (budget p95 < 100 ms)
+    budget_test.go:343: code=KGWUI-012            50 rows on the page, total 3338
+    budget_test.go:347: code=KGWUI-012            sequential p50 114µs p95 126µs p99 235µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 163µs p95 520µs p99 2.66ms (budget p95 < 100 ms)
+    budget_test.go:343: q                         50 rows on the page, total 2235
+    budget_test.go:347: q                         sequential p50 612µs p95 669µs p99 762µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 791µs p95 1.42ms p99 4.99ms (budget p95 < 100 ms)
+    budget_test.go:343: group                     8 rows on the page, total 8
+    budget_test.go:347: group                     sequential p50 33µs p95 38µs p99 61µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 58µs p95 225µs p99 823µs (budget p95 < 100 ms)
+    budget_test.go:343: sort=since                50 rows on the page, total 6647
+    budget_test.go:347: sort=since                sequential p50 87µs p95 98µs p99 147µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 146µs p95 537µs p99 1.46ms (budget p95 < 100 ms)
+    budget_test.go:343: view=groups               50 rows on the page, total 2819
+    budget_test.go:347: view=groups               sequential p50 451µs p95 496µs p99 948µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 928µs p95 4.18ms p99 7.75ms (budget p95 < 100 ms)
+    budget_test.go:343: view=groups&severity=error 50 rows on the page, total 2115
+    budget_test.go:347: view=groups&severity=error sequential p50 461µs p95 506µs p99 1.01ms (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 976µs p95 4.36ms p99 8.19ms (budget p95 < 100 ms)
+    budget_test.go:343: view=groups&q             50 rows on the page, total 949
+    budget_test.go:347: view=groups&q             sequential p50 767µs p95 832µs p99 918µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 1.05ms p95 1.8ms p99 6.71ms (budget p95 < 100 ms)
+    budget_test.go:349: detail-largest-group      sequential p50 2µs p95 2µs p99 5µs (budget p95 < 50 ms)
+--- PASS: TestBudgetFindingsRequests (50.06s)
+    --- PASS: TestBudgetFindingsRequests/allow-all (19.04s)
+    --- PASS: TestBudgetFindingsRequests/restricted (31.02s)
+=== RUN   TestBudgetDiagnosticsRequests
+=== RUN   TestBudgetDiagnosticsRequests/allow-all
+    budget_test.go:369: 7046 findings, 2878 groups, 103 Gateways, 206 proxy Pods
+    budget_test.go:380: diagnostics               20644 B
+    budget_test.go:381: diagnostics               sequential p50 318µs p95 340µs p99 379µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 447µs p95 1.06ms p99 4.16ms (budget p95 < 100 ms)
+    budget_test.go:380: processes                 38495 B
+    budget_test.go:381: processes                 sequential p50 250µs p95 269µs p99 368µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 362µs p95 986µs p99 4.53ms (budget p95 < 100 ms)
+    budget_test.go:380: processes?q               311 B
+    budget_test.go:381: processes?q               sequential p50 144µs p95 153µs p99 175µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 184µs p95 342µs p99 1.06ms (budget p95 < 100 ms)
+    budget_test.go:380: processes?restarts        38495 B
+    budget_test.go:381: processes?restarts        sequential p50 251µs p95 270µs p99 371µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 355µs p95 948µs p99 4.27ms (budget p95 < 100 ms)
+    budget_test.go:380: findings?view=groups      86724 B
+    budget_test.go:381: findings?view=groups      sequential p50 393µs p95 430µs p99 731µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 715µs p95 2.04ms p99 7.23ms (budget p95 < 100 ms)
+    budget_test.go:380: findings?view=groups&code 25670 B
+    budget_test.go:381: findings?view=groups&code sequential p50 168µs p95 183µs p99 235µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 249µs p95 720µs p99 1.92ms (budget p95 < 100 ms)
+=== RUN   TestBudgetDiagnosticsRequests/restricted
+    budget_test.go:369: 7046 findings, 2878 groups, 103 Gateways, 206 proxy Pods
+    budget_test.go:380: diagnostics               18981 B
+    budget_test.go:381: diagnostics               sequential p50 819µs p95 869µs p99 1.38ms (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 1.21ms p95 3.58ms p99 10.44ms (budget p95 < 100 ms)
+    budget_test.go:380: processes                 38449 B
+    budget_test.go:381: processes                 sequential p50 270µs p95 290µs p99 410µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 403µs p95 1.07ms p99 4.42ms (budget p95 < 100 ms)
+    budget_test.go:380: processes?q               332 B
+    budget_test.go:381: processes?q               sequential p50 152µs p95 162µs p99 192µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 193µs p95 432µs p99 1.18ms (budget p95 < 100 ms)
+    budget_test.go:380: processes?restarts        38449 B
+    budget_test.go:381: processes?restarts        sequential p50 270µs p95 291µs p99 422µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 409µs p95 1.05ms p99 5.04ms (budget p95 < 100 ms)
+    budget_test.go:380: findings?view=groups      80646 B
+    budget_test.go:381: findings?view=groups      sequential p50 657µs p95 713µs p99 1.38ms (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 1.41ms p95 5.65ms p99 11.68ms (budget p95 < 100 ms)
+    budget_test.go:380: findings?view=groups&code 23096 B
+    budget_test.go:381: findings?view=groups&code sequential p50 443µs p95 492µs p99 902µs (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 868µs p95 2.85ms p99 7.45ms (budget p95 < 100 ms)
+--- PASS: TestBudgetDiagnosticsRequests (48.89s)
+    --- PASS: TestBudgetDiagnosticsRequests/allow-all (18.13s)
+    --- PASS: TestBudgetDiagnosticsRequests/restricted (30.76s)
+=== RUN   TestBudgetHealth
+=== RUN   TestBudgetHealth/large/allow-all
+    budget_test.go:479: large allow-all: 135 findings (0 KGWUI-012 of 0 checks), 65015 B (63.5 KiB); sequential p50 182µs p95 199µs p99 395µs; 20 clients p50 284µs p95 1.51ms p99 3.38ms
+=== RUN   TestBudgetHealth/large/restricted
+    budget_test.go:479: large restricted: 135 findings (0 KGWUI-012 of 0 checks), 63860 B (62.4 KiB); sequential p50 195µs p95 218µs p99 482µs; 20 clients p50 330µs p95 1.71ms p99 3.63ms
+=== RUN   TestBudgetHealth/large-contradicting/allow-all
+    budget_test.go:479: large-contradicting allow-all: 6005 findings (3391 KGWUI-012 of 3391 checks), 2951396 B (2882.2 KiB); sequential p50 7.89ms p95 9.82ms p99 10.24ms; 20 clients p50 14.92ms p95 27.43ms p99 35.68ms
+=== RUN   TestBudgetHealth/large-contradicting/restricted
+    budget_test.go:479: large-contradicting restricted: 6005 findings (3391 KGWUI-012 of 3391 checks), 2846096 B (2779.4 KiB); sequential p50 8.34ms p95 10.03ms p99 10.76ms; 20 clients p50 17.82ms p95 30.62ms p99 37.78ms
+--- PASS: TestBudgetHealth (19.35s)
+    --- PASS: TestBudgetHealth/large/allow-all (0.27s)
+    --- PASS: TestBudgetHealth/large/restricted (0.30s)
+    --- PASS: TestBudgetHealth/large-contradicting/allow-all (9.11s)
+    --- PASS: TestBudgetHealth/large-contradicting/restricted (9.67s)
+=== RUN   TestBudgetSustainedStream
+=== RUN   TestBudgetSustainedStream/large
+    budget_test.go:575: run 1: budget_test.go:924: stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 2.93s = 4.9 % of one core (budget ≤ 15 %); recompute wall 1.833s = 3.1 %; GC share 26.6 % of used CPU (1.3 % of one core)
+    budget_test.go:575: run 1: budget_test.go:930: polls: 240, p50 748µs p95 1.05ms max 2.1ms
+    budget_test.go:575: run 1: budget_test.go:935: large: heap after GC 60.8 MiB at 1 min, 60.8 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 1: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 163.3 MiB, heap in use 71.6 MiB
+    budget_test.go:575: run 2: budget_test.go:924: stream 1m0.001s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 2.983s = 5.0 % of one core (budget ≤ 15 %); recompute wall 1.858s = 3.1 %; GC share 27.3 % of used CPU (1.4 % of one core)
+    budget_test.go:575: run 2: budget_test.go:930: polls: 240, p50 664µs p95 1.03ms max 1.41ms
+    budget_test.go:575: run 2: budget_test.go:935: large: heap after GC 63.1 MiB at 1 min, 63.1 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 2: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 163.2 MiB, heap in use 76.8 MiB
+    budget_test.go:575: run 3: budget_test.go:924: stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 3.07s = 5.1 % of one core (budget ≤ 15 %); recompute wall 1.867s = 3.1 %; GC share 28.5 % of used CPU (1.5 % of one core)
+    budget_test.go:575: run 3: budget_test.go:930: polls: 241, p50 782µs p95 1.1ms max 1.47ms
+    budget_test.go:575: run 3: budget_test.go:935: large: heap after GC 60.5 MiB at 1 min, 60.5 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 3: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 163.2 MiB, heap in use 71.0 MiB
+    budget_test.go:575: run 4: budget_test.go:924: stream 1m0s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 2.985s = 5.0 % of one core (budget ≤ 15 %); recompute wall 1.807s = 3.0 %; GC share 29.1 % of used CPU (1.5 % of one core)
+    budget_test.go:575: run 4: budget_test.go:930: polls: 240, p50 731µs p95 1.07ms max 2.51ms
+    budget_test.go:575: run 4: budget_test.go:935: large: heap after GC 62.1 MiB at 1 min, 62.1 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 4: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 155.2 MiB, heap in use 72.9 MiB
+    budget_test.go:575: run 5: budget_test.go:924: stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 2.971s = 5.0 % of one core (budget ≤ 15 %); recompute wall 1.888s = 3.1 %; GC share 26.6 % of used CPU (1.3 % of one core)
+    budget_test.go:575: run 5: budget_test.go:930: polls: 241, p50 643µs p95 1.03ms max 1.18ms
+    budget_test.go:575: run 5: budget_test.go:935: large: heap after GC 61.1 MiB at 1 min, 61.1 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 5: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 163.3 MiB, heap in use 73.6 MiB
+    budget_test.go:591: large: memory from the OS over 5 runs: median 163.2 MiB, min 155.2, max 163.3 (budget median ≤ 288 MiB)
+=== RUN   TestBudgetSustainedStream/large-contradicting
+    budget_test.go:575: run 1: budget_test.go:924: stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 3.935s = 6.6 % of one core (budget ≤ 15 %); recompute wall 2.608s = 4.3 %; GC share 26.6 % of used CPU (1.8 % of one core)
+    budget_test.go:575: run 1: budget_test.go:930: polls: 241, p50 663µs p95 963µs max 1.15ms
+    budget_test.go:575: run 1: budget_test.go:935: large-contradicting: heap after GC 63.6 MiB at 1 min, 63.6 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 1: budget_test.go:940: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 170.8 MiB, heap in use 76.3 MiB
+    budget_test.go:575: run 2: budget_test.go:924: stream 1m0.001s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 3.885s = 6.5 % of one core (budget ≤ 15 %); recompute wall 2.554s = 4.3 %; GC share 26.1 % of used CPU (1.7 % of one core)
+    budget_test.go:575: run 2: budget_test.go:930: polls: 240, p50 746µs p95 1.05ms max 1.2ms
+    budget_test.go:575: run 2: budget_test.go:935: large-contradicting: heap after GC 63.2 MiB at 1 min, 63.2 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 2: budget_test.go:940: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 179.6 MiB, heap in use 75.7 MiB
+    budget_test.go:575: run 3: budget_test.go:924: stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 4.022s = 6.7 % of one core (budget ≤ 15 %); recompute wall 2.615s = 4.4 %; GC share 26.9 % of used CPU (1.8 % of one core)
+    budget_test.go:575: run 3: budget_test.go:930: polls: 241, p50 752µs p95 1.05ms max 1.87ms
+    budget_test.go:575: run 3: budget_test.go:935: large-contradicting: heap after GC 62.8 MiB at 1 min, 62.8 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 3: budget_test.go:940: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 184.2 MiB, heap in use 75.3 MiB
+    budget_test.go:575: run 4: budget_test.go:924: stream 1m0.001s: 600 updates and 0 EndpointSlice updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 4.007s = 6.7 % of one core (budget ≤ 15 %); recompute wall 2.627s = 4.4 %; GC share 26.9 % of used CPU (1.8 % of one core)
+    budget_test.go:575: run 4: budget_test.go:930: polls: 241, p50 672µs p95 1.06ms max 1.2ms
+    budget_test.go:575: run 4: budget_test.go:935: large-contradicting: heap after GC 63.2 MiB at 1 min, 63.2 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 4: budget_test.go:940: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 175.1 MiB, heap in use 75.8 MiB
+    budget_test.go:575: run 5: budget_test.go:924: stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 3.912s = 6.5 % of one core (budget ≤ 15 %); recompute wall 2.555s = 4.3 %; GC share 26.4 % of used CPU (1.8 % of one core)
+    budget_test.go:575: run 5: budget_test.go:930: polls: 241, p50 654µs p95 957µs max 1.11ms
+    budget_test.go:575: run 5: budget_test.go:935: large-contradicting: heap after GC 63.8 MiB at 1 min, 63.8 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 5: budget_test.go:940: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 171.6 MiB, heap in use 76.0 MiB
+    budget_test.go:591: large-contradicting: memory from the OS over 5 runs: median 175.1 MiB, min 170.8, max 184.2 (budget median ≤ 288 MiB)
+--- PASS: TestBudgetSustainedStream (902.31s)
+    --- PASS: TestBudgetSustainedStream/large (300.80s)
+    --- PASS: TestBudgetSustainedStream/large-contradicting (601.51s)
+=== RUN   TestBudgetSpecEditStream
+=== RUN   TestBudgetSpecEditStream/large
+    budget_test.go:575: run 1: budget_test.go:924: spec-edit stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s), 56 publications; process CPU 4.307s = 7.2 % of one core (budget ≤ 25 %); recompute wall 2.736s = 4.6 %; GC share 28.2 % of used CPU (2.1 % of one core)
+    budget_test.go:575: run 1: budget_test.go:927: spec-edit recomputes by cause: 56 edit-driven (0.93/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.93/s (deadlines and total logged)
+    budget_test.go:575: run 1: budget_test.go:930: polls: 240, p50 800µs p95 1.15ms max 1.33ms
+    budget_test.go:575: run 1: budget_test.go:935: large: heap after GC 61.2 MiB at 1 min, 61.2 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 1: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.3 MiB, heap in use 76.6 MiB
+    budget_test.go:575: run 1: budget_test.go:955: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:760]
+    budget_test.go:575: run 2: budget_test.go:924: spec-edit stream 1m0.003s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s), 56 publications; process CPU 4.124s = 6.9 % of one core (budget ≤ 25 %); recompute wall 2.698s = 4.5 %; GC share 26.8 % of used CPU (1.9 % of one core)
+    budget_test.go:575: run 2: budget_test.go:927: spec-edit recomputes by cause: 56 edit-driven (0.93/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.93/s (deadlines and total logged)
+    budget_test.go:575: run 2: budget_test.go:930: polls: 241, p50 743µs p95 1.05ms max 1.19ms
+    budget_test.go:575: run 2: budget_test.go:935: large: heap after GC 61.6 MiB at 1 min, 61.6 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 2: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 179.6 MiB, heap in use 75.7 MiB
+    budget_test.go:575: run 2: budget_test.go:955: large: findings by code at the end map[KGWUI-002:98 KGWUI-003:759]
+    budget_test.go:575: run 3: budget_test.go:924: spec-edit stream 1m0.001s: 600 updates and 0 EndpointSlice updates, 57 recomputes (0.95/s), 57 publications; process CPU 4.264s = 7.1 % of one core (budget ≤ 25 %); recompute wall 2.712s = 4.5 %; GC share 28.6 % of used CPU (2.1 % of one core)
+    budget_test.go:575: run 3: budget_test.go:927: spec-edit recomputes by cause: 57 edit-driven (0.95/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.95/s (deadlines and total logged)
+    budget_test.go:575: run 3: budget_test.go:930: polls: 240, p50 667µs p95 984µs max 1.22ms
+    budget_test.go:575: run 3: budget_test.go:935: large: heap after GC 61.2 MiB at 1 min, 61.2 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 3: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.3 MiB, heap in use 77.7 MiB
+    budget_test.go:575: run 3: budget_test.go:955: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:765]
+    budget_test.go:575: run 4: budget_test.go:924: spec-edit stream 1m0.001s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s), 56 publications; process CPU 4.194s = 7.0 % of one core (budget ≤ 25 %); recompute wall 2.703s = 4.5 %; GC share 27.2 % of used CPU (2.0 % of one core)
+    budget_test.go:575: run 4: budget_test.go:927: spec-edit recomputes by cause: 56 edit-driven (0.93/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.93/s (deadlines and total logged)
+    budget_test.go:575: run 4: budget_test.go:930: polls: 240, p50 733µs p95 1.08ms max 1.2ms
+    budget_test.go:575: run 4: budget_test.go:935: large: heap after GC 61.3 MiB at 1 min, 61.3 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 4: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.8 MiB, heap in use 77.0 MiB
+    budget_test.go:575: run 4: budget_test.go:955: large: findings by code at the end map[KGWUI-002:98 KGWUI-003:759]
+    budget_test.go:575: run 5: budget_test.go:924: spec-edit stream 1m0.002s: 600 updates and 0 EndpointSlice updates, 56 recomputes (0.93/s), 56 publications; process CPU 4.149s = 6.9 % of one core (budget ≤ 25 %); recompute wall 2.663s = 4.4 %; GC share 28.2 % of used CPU (2.0 % of one core)
+    budget_test.go:575: run 5: budget_test.go:927: spec-edit recomputes by cause: 56 edit-driven (0.93/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.93/s (deadlines and total logged)
+    budget_test.go:575: run 5: budget_test.go:930: polls: 240, p50 726µs p95 1.04ms max 1.27ms
+    budget_test.go:575: run 5: budget_test.go:935: large: heap after GC 61.6 MiB at 1 min, 61.6 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 5: budget_test.go:940: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 180.0 MiB, heap in use 76.8 MiB
+    budget_test.go:575: run 5: budget_test.go:955: large: findings by code at the end map[KGWUI-002:98 KGWUI-003:759]
+    budget_test.go:591: large: memory from the OS over 5 runs: median 175.8 MiB, min 175.3, max 180.0 (budget median ≤ 288 MiB)
+=== RUN   TestBudgetSpecEditStream/large-contradicting-worst
+    budget_test.go:575: run 1: budget_test.go:924: spec-edit stream 1m0.002s: 600 updates and 600 EndpointSlice updates, 59 recomputes (0.98/s), 59 publications; process CPU 6.526s = 10.9 % of one core (budget ≤ 25 %); recompute wall 4.196s = 7.0 %; GC share 26.3 % of used CPU (2.9 % of one core)
+    budget_test.go:575: run 1: budget_test.go:927: spec-edit recomputes by cause: 59 edit-driven (0.98/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.98/s (deadlines and total logged)
+    budget_test.go:575: run 1: budget_test.go:930: polls: 241, p50 628µs p95 1.01ms max 1.16ms
+    budget_test.go:575: run 1: budget_test.go:935: large-contradicting-worst: heap after GC 90.3 MiB at 1 min, 90.3 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 1: budget_test.go:940: large-contradicting-worst: 2505 KGWUI-012 of 2505 checks at the end; memory from the OS 258.2 MiB, heap in use 116.9 MiB
+    budget_test.go:575: run 1: budget_test.go:955: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1809 KGWUI-003:804 KGWUI-011:38 KGWUI-012:2505 KGWUI-013:79 KGWUI-014:88 KGWUI-015:11 KGWUI-016:20 KGWUI-017:10 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:58 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:575: run 2: budget_test.go:924: spec-edit stream 1m0s: 600 updates and 600 EndpointSlice updates, 59 recomputes (0.98/s), 59 publications; process CPU 6.596s = 11.0 % of one core (budget ≤ 25 %); recompute wall 4.193s = 7.0 %; GC share 27.1 % of used CPU (3.1 % of one core)
+    budget_test.go:575: run 2: budget_test.go:927: spec-edit recomputes by cause: 59 edit-driven (0.98/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.98/s (deadlines and total logged)
+    budget_test.go:575: run 2: budget_test.go:930: polls: 240, p50 635µs p95 1.02ms max 1.14ms
+    budget_test.go:575: run 2: budget_test.go:935: large-contradicting-worst: heap after GC 89.0 MiB at 1 min, 89.0 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 2: budget_test.go:940: large-contradicting-worst: 2505 KGWUI-012 of 2505 checks at the end; memory from the OS 250.7 MiB, heap in use 114.8 MiB
+    budget_test.go:575: run 2: budget_test.go:955: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1809 KGWUI-003:804 KGWUI-011:38 KGWUI-012:2505 KGWUI-013:79 KGWUI-014:88 KGWUI-015:11 KGWUI-016:20 KGWUI-017:10 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:58 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:575: run 3: budget_test.go:924: spec-edit stream 1m0s: 600 updates and 600 EndpointSlice updates, 59 recomputes (0.98/s), 59 publications; process CPU 6.584s = 11.0 % of one core (budget ≤ 25 %); recompute wall 4.203s = 7.0 %; GC share 26.7 % of used CPU (3.0 % of one core)
+    budget_test.go:575: run 3: budget_test.go:927: spec-edit recomputes by cause: 59 edit-driven (0.98/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.98/s (deadlines and total logged)
+    budget_test.go:575: run 3: budget_test.go:930: polls: 240, p50 698µs p95 1.01ms max 1.9ms
+    budget_test.go:575: run 3: budget_test.go:935: large-contradicting-worst: heap after GC 88.8 MiB at 1 min, 88.8 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 3: budget_test.go:940: large-contradicting-worst: 2505 KGWUI-012 of 2505 checks at the end; memory from the OS 254.7 MiB, heap in use 116.4 MiB
+    budget_test.go:575: run 3: budget_test.go:955: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1809 KGWUI-003:804 KGWUI-011:38 KGWUI-012:2505 KGWUI-013:79 KGWUI-014:88 KGWUI-015:11 KGWUI-016:20 KGWUI-017:10 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:58 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:575: run 4: budget_test.go:924: spec-edit stream 1m0.001s: 600 updates and 600 EndpointSlice updates, 59 recomputes (0.98/s), 59 publications; process CPU 6.533s = 10.9 % of one core (budget ≤ 25 %); recompute wall 4.194s = 7.0 %; GC share 26.6 % of used CPU (2.9 % of one core)
+    budget_test.go:575: run 4: budget_test.go:927: spec-edit recomputes by cause: 59 edit-driven (0.98/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.98/s (deadlines and total logged)
+    budget_test.go:575: run 4: budget_test.go:930: polls: 240, p50 636µs p95 953µs max 1.7ms
+    budget_test.go:575: run 4: budget_test.go:935: large-contradicting-worst: heap after GC 89.7 MiB at 1 min, 89.7 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 4: budget_test.go:940: large-contradicting-worst: 2505 KGWUI-012 of 2505 checks at the end; memory from the OS 254.6 MiB, heap in use 115.7 MiB
+    budget_test.go:575: run 4: budget_test.go:955: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1809 KGWUI-003:804 KGWUI-011:38 KGWUI-012:2505 KGWUI-013:79 KGWUI-014:88 KGWUI-015:11 KGWUI-016:20 KGWUI-017:10 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:58 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:575: run 5: budget_test.go:924: spec-edit stream 1m0.001s: 600 updates and 600 EndpointSlice updates, 59 recomputes (0.98/s), 59 publications; process CPU 6.706s = 11.2 % of one core (budget ≤ 25 %); recompute wall 4.321s = 7.2 %; GC share 26.1 % of used CPU (3.0 % of one core)
+    budget_test.go:575: run 5: budget_test.go:927: spec-edit recomputes by cause: 59 edit-driven (0.98/s, budget ≤ 1/s), 0 deadline (0.00/s), 0 safety; total 0.98/s (deadlines and total logged)
+    budget_test.go:575: run 5: budget_test.go:930: polls: 240, p50 677µs p95 1.04ms max 1.37ms
+    budget_test.go:575: run 5: budget_test.go:935: large-contradicting-worst: heap after GC 88.8 MiB at 1 min, 88.8 MiB at the end (+0.0 MiB)
+    budget_test.go:575: run 5: budget_test.go:940: large-contradicting-worst: 2505 KGWUI-012 of 2505 checks at the end; memory from the OS 254.7 MiB, heap in use 115.8 MiB
+    budget_test.go:575: run 5: budget_test.go:955: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1809 KGWUI-003:804 KGWUI-011:38 KGWUI-012:2505 KGWUI-013:79 KGWUI-014:88 KGWUI-015:11 KGWUI-016:20 KGWUI-017:10 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-023:58 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:591: large-contradicting-worst: memory from the OS over 5 runs: median 254.7 MiB, min 250.7, max 258.2 (budget median ≤ 288 MiB)
+--- PASS: TestBudgetSpecEditStream (1052.95s)
+    --- PASS: TestBudgetSpecEditStream/large (300.82s)
+    --- PASS: TestBudgetSpecEditStream/large-contradicting-worst (752.13s)
+=== RUN   TestBudgetMatcherMaterialization
+    budget_test.go:1074: {depth:100 leaves:200 keys:16 size:1 fan:1}: 200 rows, 0 path steps, 0 key matches, 200 rows truncated
+    budget_test.go:1098: {depth:100 leaves:200 keys:16 size:1 fan:1}: one page allocates 1.8 MiB, body 0.3 MiB
+    budget_test.go:1074: {depth:25 leaves:200 keys:16 size:1 fan:1}: 200 rows, 150 path steps, 62400 key matches, 194 rows truncated
+    budget_test.go:1098: {depth:25 leaves:200 keys:16 size:1 fan:1}: one page allocates 23.9 MiB, body 3.4 MiB
+    budget_test.go:1074: {depth:10 leaves:200 keys:16 size:1 fan:1}: 200 rows, 320 path steps, 56320 key matches, 168 rows truncated
+    budget_test.go:1098: {depth:10 leaves:200 keys:16 size:1 fan:1}: one page allocates 23.9 MiB, body 3.4 MiB
+    budget_test.go:1074: {depth:25 leaves:200 keys:16 size:200 fan:1}: 200 rows, 25 path steps, 10400 key matches, 199 rows truncated
+    budget_test.go:1098: {depth:25 leaves:200 keys:16 size:200 fan:1}: one page allocates 17.0 MiB, body 2.9 MiB
+    budget_test.go:1074: {depth:100 leaves:200 keys:16 size:4096 fan:1}: 200 rows, 0 path steps, 0 key matches, 200 rows truncated
+    budget_test.go:1098: {depth:100 leaves:200 keys:16 size:4096 fan:1}: one page allocates 1.8 MiB, body 0.3 MiB
+    budget_test.go:1074: {depth:26 leaves:200 keys:0 size:0 fan:20}: 200 rows, 20280 path steps, 0 key matches, 161 rows truncated
+    budget_test.go:1098: {depth:26 leaves:200 keys:0 size:0 fan:20}: one page allocates 25.4 MiB, body 3.7 MiB
+--- PASS: TestBudgetMatcherMaterialization (22.94s)
+=== RUN   TestBudgetPathsRequests
+=== RUN   TestBudgetPathsRequests/large-paths
+    budget_test.go:1222: large-paths allow-all: 19179 paths (hidden false, unmemoised false); cold median 31.12ms max 33.8ms, 26.64 MiB allocated (budget < 100ms, < 32 MiB); warm median 1.27ms p95 1.37ms, 0.542 MiB allocated (budget < 5ms, < 2 MiB)
+    budget_test.go:1222: large-paths restricted: 15864 paths (hidden true, unmemoised false); cold median 32.53ms max 32.95ms, 27.10 MiB allocated (budget < 100ms, < 32 MiB); warm median 1.43ms p95 1.55ms, 1.072 MiB allocated (budget < 5ms, < 2 MiB)
+=== RUN   TestBudgetPathsRequests/large-contradicting-worst
+    budget_test.go:1222: large-contradicting-worst allow-all: 13213 paths (hidden false, unmemoised false); cold median 24.47ms max 26.27ms, 27.34 MiB allocated (budget < 100ms, < 32 MiB); warm median 1.41ms p95 1.51ms, 0.497 MiB allocated (budget < 5ms, < 2 MiB)
+    budget_test.go:1222: large-contradicting-worst restricted: 10732 paths (hidden true, unmemoised false); cold median 25.56ms max 26.59ms, 28.18 MiB allocated (budget < 100ms, < 32 MiB); warm median 1.81ms p95 2.01ms, 1.735 MiB allocated (budget < 5ms, < 2 MiB)
+--- PASS: TestBudgetPathsRequests (3.77s)
+    --- PASS: TestBudgetPathsRequests/large-paths (1.47s)
+    --- PASS: TestBudgetPathsRequests/large-contradicting-worst (2.30s)
+=== RUN   TestBudgetRouteDetail
+=== RUN   TestBudgetRouteDetail/large-paths
+    budget_test.go:1300: large-paths allow-all: ns-038/r-00200 with 1275 view B rows, 3 serves, 50 of 50 refs traced; cold median 31.44ms max 32.32ms, 26.36 MiB allocated (budget < 100ms, < 32 MiB); warm median 382µs p95 436µs, 0.468 MiB allocated (budget < 5ms, < 2 MiB)
+    budget_test.go:1300: large-paths restricted: ns-038/r-00200 with 1275 view B rows, 3 serves, 50 of 50 refs traced; cold median 31.38ms max 32.5ms, 26.30 MiB allocated (budget < 100ms, < 32 MiB); warm median 429µs p95 489µs, 0.465 MiB allocated (budget < 5ms, < 2 MiB)
+=== RUN   TestBudgetRouteDetail/large-contradicting-worst
+    budget_test.go:1300: large-contradicting-worst allow-all: ns-038/r-00200 with 1275 view B rows, 3 serves, 50 of 50 refs traced; cold median 25.37ms max 26.65ms, 28.63 MiB allocated (budget < 100ms, < 32 MiB); warm median 1.26ms p95 1.37ms, 0.948 MiB allocated (budget < 5ms, < 2 MiB)
+    budget_test.go:1300: large-contradicting-worst restricted: ns-038/r-00200 with 1275 view B rows, 3 serves, 50 of 50 refs traced; cold median 25.12ms max 26.34ms, 28.51 MiB allocated (budget < 100ms, < 32 MiB); warm median 1.34ms p95 1.47ms, 0.965 MiB allocated (budget < 5ms, < 2 MiB)
+--- PASS: TestBudgetRouteDetail (3.23s)
+    --- PASS: TestBudgetRouteDetail/large-paths (1.01s)
+    --- PASS: TestBudgetRouteDetail/large-contradicting-worst (2.21s)
+=== RUN   TestBudgetBackendDetail
+=== RUN   TestBudgetBackendDetail/large-paths
+    budget_test.go:1466: large-paths allow-all: 9 rounds of 4 concurrent cold details, 0 endpoints shown; median 0.23 MiB allocated per detail, max 0.74 (budget < 4 MiB); median round 869µs
+    budget_test.go:1466: large-paths restricted: 9 rounds of 4 concurrent cold details, 0 endpoints shown; median 0.81 MiB allocated per detail, max 1.35 (budget < 4 MiB); median round 1.08ms
+=== RUN   TestBudgetBackendDetail/large-contradicting-worst
+    budget_test.go:1466: large-contradicting-worst allow-all: 9 rounds of 4 concurrent cold details, 35000 endpoints shown; median 0.59 MiB allocated per detail, max 0.86 (budget < 4 MiB); median round 2.03ms
+    budget_test.go:1466: large-contradicting-worst restricted: 9 rounds of 4 concurrent cold details, 30000 endpoints shown; median 1.84 MiB allocated per detail, max 2.37 (budget < 4 MiB); median round 2.51ms
+--- PASS: TestBudgetBackendDetail (1.17s)
+    --- PASS: TestBudgetBackendDetail/large-paths (0.16s)
+    --- PASS: TestBudgetBackendDetail/large-contradicting-worst (1.01s)
+=== RUN   TestBudgetHeapAPIWarm
+=== RUN   TestBudgetHeapAPIWarm/large-paths
+    budget_test.go:1547: run  engine (B)  settled (B)  warm (B)  API memos warm (B)  HeapAlloc added (B)  freed by dropping them (B)
+    budget_test.go:1553: 1    54001664    57950208    58187776    4186112    3290384    3198112
+    budget_test.go:1553: 2    54009856    58163200    58408960    4399104    3288896    3198080
+    budget_test.go:1553: 3    53764096    58114048    58359808    4595712    3291024    3198096
+    budget_test.go:1553: 4    52928512    57475072    57630720    4702208    3289616    3198096
+    budget_test.go:1553: 5    53862400    57876480    58089472    4227072    3291152    3198096
+    budget_test.go:1562: large-paths: 19179 paths (unmemoised false), 200 listed Services, 48 Service details; settled retained median +31.0 MiB over the 2.1 baseline 25411584 B (budget ≤ 48 MiB); reported: warm again +31.3 MiB, engine figure +27.1 MiB, API memos warm +4.20 MiB (freed by dropping them 3.05 MiB)
+=== RUN   TestBudgetHeapAPIWarm/large-contradicting-worst
+    budget_test.go:1547: run  engine (B)  settled (B)  warm (B)  API memos warm (B)  HeapAlloc added (B)  freed by dropping them (B)
+    budget_test.go:1553: 1    66568192    74358784    75186176    8617984    4418440    4328272
+    budget_test.go:1553: 2    66306048    74186752    75014144    8708096    4418376    4328272
+    budget_test.go:1553: 3    67010560    74407936    75259904    8249344    4417688    4328272
+    budget_test.go:1553: 4    66486272    74055680    74915840    8429568    4418552    4328272
+    budget_test.go:1553: 5    66363392    74031104    74899456    8536064    4417912    4328272
+    budget_test.go:1562: large-contradicting-worst: 13213 paths (unmemoised false), 200 listed Services, 48 Service details; settled retained median +46.5 MiB over the 2.1 baseline 25411584 B (budget ≤ 48 MiB); reported: warm again +47.3 MiB, engine figure +39.2 MiB, API memos warm +8.14 MiB (freed by dropping them 4.13 MiB)
+=== RUN   TestBudgetHeapAPIWarm/extreme
+    budget_test.go:1547: run  engine (B)  settled (B)  warm (B)  API memos warm (B)  HeapAlloc added (B)  freed by dropping them (B)
+    budget_test.go:1553: 1    140836864    143802368    144171008    3334144    454656    495472
+    budget_test.go:1553: 2    141115392    144433152    144777216    3661824    590992    495472
+    budget_test.go:1553: 3    142557184    145760256    146038784    3481600    593184    495456
+    budget_test.go:1553: 4    140845056    143966208    144359424    3514368    734656    495456
+    budget_test.go:1553: 5    142262272    144203776    144498688    2236416    452544    495456
+    budget_test.go:1562: extreme: 19429 paths (unmemoised true), 200 listed Services, 48 Service details; settled retained median +113.3 MiB over the 2.1 baseline 25411584 B (reported: D-057 is a Large budget); reported: warm again +113.6 MiB, engine figure +110.3 MiB, API memos warm +3.32 MiB (freed by dropping them 0.47 MiB)
+--- PASS: TestBudgetHeapAPIWarm (22.18s)
+    --- PASS: TestBudgetHeapAPIWarm/large-paths (1.18s)
+    --- PASS: TestBudgetHeapAPIWarm/large-contradicting-worst (5.69s)
+    --- PASS: TestBudgetHeapAPIWarm/extreme (15.30s)
+=== RUN   TestDelegationPageBudget
+--- PASS: TestDelegationPageBudget (0.02s)
+=== RUN   TestPageBudgetChargesReasonAndEscaping
+--- PASS: TestPageBudgetChargesReasonAndEscaping (0.05s)
+PASS
+ok  	github.com/DuncanDoyle/snellius/pkg/api	2623.272s
+go test -tags bench -run '^$' -bench . -benchmem -count 5 ./pkg/api
+goos: darwin
+goarch: arm64
+pkg: github.com/DuncanDoyle/snellius/pkg/api
+cpu: Apple M5 Max
+BenchmarkListsLarge/routes-18         	    3998	    285992 ns/op	  221690 B/op	    2403 allocs/op
+BenchmarkListsLarge/routes-18         	    4258	    283720 ns/op	  222609 B/op	    2403 allocs/op
+BenchmarkListsLarge/routes-18         	    4201	    282376 ns/op	  221945 B/op	    2403 allocs/op
+BenchmarkListsLarge/routes-18         	    4374	    282138 ns/op	  222366 B/op	    2403 allocs/op
+BenchmarkListsLarge/routes-18         	    4335	    282782 ns/op	  222263 B/op	    2403 allocs/op
+BenchmarkListsLarge/routes-health-desc-18         	     891	   1317594 ns/op	  856992 B/op	   11820 allocs/op
+BenchmarkListsLarge/routes-health-desc-18         	     898	   1323370 ns/op	  867622 B/op	   11821 allocs/op
+BenchmarkListsLarge/routes-health-desc-18         	     907	   1312577 ns/op	  863781 B/op	   11821 allocs/op
+BenchmarkListsLarge/routes-health-desc-18         	     918	   1318755 ns/op	  863278 B/op	   11821 allocs/op
+BenchmarkListsLarge/routes-health-desc-18         	     902	   1320477 ns/op	  856884 B/op	   11820 allocs/op
+BenchmarkListsLarge/routes-by-gateway-18          	   12810	     93702 ns/op	   82037 B/op	     874 allocs/op
+BenchmarkListsLarge/routes-by-gateway-18          	   12754	     94040 ns/op	   82084 B/op	     874 allocs/op
+BenchmarkListsLarge/routes-by-gateway-18          	   12787	     93740 ns/op	   82157 B/op	     874 allocs/op
+BenchmarkListsLarge/routes-by-gateway-18          	   12766	     93869 ns/op	   82109 B/op	     874 allocs/op
+BenchmarkListsLarge/routes-by-gateway-18          	   12756	     94044 ns/op	   82022 B/op	     874 allocs/op
+BenchmarkListsLarge/routes-q-18                   	    4394	    271222 ns/op	  204683 B/op	    2437 allocs/op
+BenchmarkListsLarge/routes-q-18                   	    4508	    270379 ns/op	  204745 B/op	    2437 allocs/op
+BenchmarkListsLarge/routes-q-18                   	    4467	    269285 ns/op	  203898 B/op	    2437 allocs/op
+BenchmarkListsLarge/routes-q-18                   	    4440	    270986 ns/op	  203977 B/op	    2437 allocs/op
+BenchmarkListsLarge/routes-q-18                   	    4405	    269827 ns/op	  204309 B/op	    2437 allocs/op
+BenchmarkListsLarge/gateways-by-routes-18         	   14205	     84564 ns/op	   47376 B/op	     569 allocs/op
+BenchmarkListsLarge/gateways-by-routes-18         	   14180	     84648 ns/op	   47388 B/op	     569 allocs/op
+BenchmarkListsLarge/gateways-by-routes-18         	   14206	     84485 ns/op	   47375 B/op	     569 allocs/op
+BenchmarkListsLarge/gateways-by-routes-18         	   14152	     84672 ns/op	   47402 B/op	     569 allocs/op
+BenchmarkListsLarge/gateways-by-routes-18         	   14180	     84742 ns/op	   47402 B/op	     569 allocs/op
+BenchmarkListsLarge/listenersets-18               	   14355	     83473 ns/op	   71003 B/op	    1012 allocs/op
+BenchmarkListsLarge/listenersets-18               	   14370	     83460 ns/op	   71007 B/op	    1012 allocs/op
+BenchmarkListsLarge/listenersets-18               	   14415	     83178 ns/op	   70989 B/op	    1012 allocs/op
+BenchmarkListsLarge/listenersets-18               	   14392	     83299 ns/op	   70998 B/op	    1012 allocs/op
+BenchmarkListsLarge/listenersets-18               	   14424	     83179 ns/op	   71010 B/op	    1012 allocs/op
+BenchmarkListsLargeRestricted/routes-18           	    2426	    486470 ns/op	  223892 B/op	    2391 allocs/op
+BenchmarkListsLargeRestricted/routes-18           	    2456	    488213 ns/op	  223946 B/op	    2391 allocs/op
+BenchmarkListsLargeRestricted/routes-18           	    2431	    485473 ns/op	  223992 B/op	    2391 allocs/op
+BenchmarkListsLargeRestricted/routes-18           	    2412	    486049 ns/op	  224771 B/op	    2391 allocs/op
+BenchmarkListsLargeRestricted/routes-18           	    2482	    485085 ns/op	  225077 B/op	    2391 allocs/op
+BenchmarkListsLargeRestricted/routes-health-desc-18         	     782	   1494694 ns/op	  823866 B/op	   11037 allocs/op
+BenchmarkListsLargeRestricted/routes-health-desc-18         	     804	   1499702 ns/op	  817990 B/op	   11037 allocs/op
+BenchmarkListsLargeRestricted/routes-health-desc-18         	     793	   1498545 ns/op	  830805 B/op	   11037 allocs/op
+BenchmarkListsLargeRestricted/routes-health-desc-18         	     795	   1499708 ns/op	  821598 B/op	   11037 allocs/op
+BenchmarkListsLargeRestricted/routes-health-desc-18         	     798	   1488419 ns/op	  820800 B/op	   11037 allocs/op
+BenchmarkListsLargeRestricted/routes-by-gateway-18          	    5786	    206126 ns/op	   67365 B/op	     726 allocs/op
+BenchmarkListsLargeRestricted/routes-by-gateway-18          	    5760	    206350 ns/op	   67249 B/op	     726 allocs/op
+BenchmarkListsLargeRestricted/routes-by-gateway-18          	    5884	    206081 ns/op	   67501 B/op	     726 allocs/op
+BenchmarkListsLargeRestricted/routes-by-gateway-18          	    5805	    206696 ns/op	   67457 B/op	     726 allocs/op
+BenchmarkListsLargeRestricted/routes-by-gateway-18          	    5721	    206323 ns/op	   67231 B/op	     726 allocs/op
+BenchmarkListsLargeRestricted/routes-q-18                   	    3108	    388176 ns/op	  183582 B/op	    2188 allocs/op
+BenchmarkListsLargeRestricted/routes-q-18                   	    3147	    385304 ns/op	  184057 B/op	    2188 allocs/op
+BenchmarkListsLargeRestricted/routes-q-18                   	    3180	    385277 ns/op	  183676 B/op	    2188 allocs/op
+BenchmarkListsLargeRestricted/routes-q-18                   	    3094	    386817 ns/op	  183254 B/op	    2188 allocs/op
+BenchmarkListsLargeRestricted/routes-q-18                   	    3111	    384952 ns/op	  183091 B/op	    2188 allocs/op
+BenchmarkListsLargeRestricted/gateways-by-routes-18         	   10000	    119315 ns/op	  126764 B/op	     585 allocs/op
+BenchmarkListsLargeRestricted/gateways-by-routes-18         	   10000	    119187 ns/op	  126815 B/op	     585 allocs/op
+BenchmarkListsLargeRestricted/gateways-by-routes-18         	   10000	    119203 ns/op	  126783 B/op	     585 allocs/op
+BenchmarkListsLargeRestricted/gateways-by-routes-18         	   10000	    119761 ns/op	  126764 B/op	     585 allocs/op
+BenchmarkListsLargeRestricted/gateways-by-routes-18         	   10000	    120062 ns/op	  126834 B/op	     585 allocs/op
+BenchmarkListsLargeRestricted/listenersets-18               	   10000	    118894 ns/op	  152440 B/op	    1025 allocs/op
+BenchmarkListsLargeRestricted/listenersets-18               	   10000	    118511 ns/op	  152453 B/op	    1025 allocs/op
+BenchmarkListsLargeRestricted/listenersets-18               	   10000	    118011 ns/op	  152421 B/op	    1025 allocs/op
+BenchmarkListsLargeRestricted/listenersets-18               	   10000	    118313 ns/op	  152446 B/op	    1025 allocs/op
+BenchmarkListsLargeRestricted/listenersets-18               	   10000	    118328 ns/op	  152434 B/op	    1025 allocs/op
+BenchmarkDetailsLarge/gateway-18                            	   95923	     12257 ns/op	   10334 B/op	      72 allocs/op
+BenchmarkDetailsLarge/gateway-18                            	   96613	     12273 ns/op	   10333 B/op	      72 allocs/op
+BenchmarkDetailsLarge/gateway-18                            	   96450	     12213 ns/op	   10333 B/op	      72 allocs/op
+BenchmarkDetailsLarge/gateway-18                            	   97650	     12192 ns/op	   10333 B/op	      72 allocs/op
+BenchmarkDetailsLarge/gateway-18                            	   97878	     12167 ns/op	   10332 B/op	      72 allocs/op
+BenchmarkDetailsLarge/route-deepest-child-18                	     109	  10818091 ns/op	 7422815 B/op	  114704 allocs/op
+BenchmarkDetailsLarge/route-deepest-child-18                	     100	  10792856 ns/op	 7353710 B/op	  114488 allocs/op
+BenchmarkDetailsLarge/route-deepest-child-18                	     100	  10762998 ns/op	 7353086 B/op	  114488 allocs/op
+BenchmarkDetailsLarge/route-deepest-child-18                	     100	  10800503 ns/op	 7353739 B/op	  114488 allocs/op
+BenchmarkDetailsLarge/route-deepest-child-18                	     100	  10736992 ns/op	 7353546 B/op	  114488 allocs/op
+BenchmarkDetailsLargeRestricted/gateway-18                  	   82398	     14239 ns/op	   15063 B/op	      79 allocs/op
+BenchmarkDetailsLargeRestricted/gateway-18                  	   85291	     14104 ns/op	   15064 B/op	      79 allocs/op
+BenchmarkDetailsLargeRestricted/gateway-18                  	   84567	     14179 ns/op	   15063 B/op	      79 allocs/op
+BenchmarkDetailsLargeRestricted/gateway-18                  	   84483	     14183 ns/op	   15064 B/op	      79 allocs/op
+BenchmarkDetailsLargeRestricted/gateway-18                  	   83128	     14282 ns/op	   15065 B/op	      79 allocs/op
+BenchmarkDetailsLargeRestricted/route-deepest-child-18      	     110	  10800788 ns/op	 7384978 B/op	  114586 allocs/op
+BenchmarkDetailsLargeRestricted/route-deepest-child-18      	     100	  10730966 ns/op	 7317459 B/op	  114383 allocs/op
+BenchmarkDetailsLargeRestricted/route-deepest-child-18      	     100	  10779284 ns/op	 7317034 B/op	  114383 allocs/op
+BenchmarkDetailsLargeRestricted/route-deepest-child-18      	     100	  10851634 ns/op	 7317594 B/op	  114383 allocs/op
+BenchmarkDetailsLargeRestricted/route-deepest-child-18      	     100	  10778286 ns/op	 7316795 B/op	  114382 allocs/op
+BenchmarkPathsLarge/cold-18                                 	      37	  31525286 ns/op	27606635 B/op	  327382 allocs/op
+BenchmarkPathsLarge/cold-18                                 	      38	  31388580 ns/op	27588768 B/op	  327366 allocs/op
+BenchmarkPathsLarge/cold-18                                 	      37	  31383173 ns/op	27585267 B/op	  327365 allocs/op
+BenchmarkPathsLarge/cold-18                                 	      38	  31458164 ns/op	27592390 B/op	  327366 allocs/op
+BenchmarkPathsLarge/cold-18                                 	      37	  31438448 ns/op	27604408 B/op	  327368 allocs/op
+BenchmarkPathsLarge/warm-18                                 	     886	   1331594 ns/op	  607289 B/op	    2984 allocs/op
+BenchmarkPathsLarge/warm-18                                 	     921	   1295983 ns/op	  575955 B/op	    2618 allocs/op
+BenchmarkPathsLarge/warm-18                                 	     914	   1296379 ns/op	  576927 B/op	    2618 allocs/op
+BenchmarkPathsLarge/warm-18                                 	     908	   1297274 ns/op	  576638 B/op	    2618 allocs/op
+BenchmarkPathsLarge/warm-18                                 	     927	   1294329 ns/op	  577165 B/op	    2618 allocs/op
+BenchmarkPathsLarge/warm-error-18                           	   14193	     84569 ns/op	   13282 B/op	      40 allocs/op
+BenchmarkPathsLarge/warm-error-18                           	   14233	     84380 ns/op	   13282 B/op	      40 allocs/op
+BenchmarkPathsLarge/warm-error-18                           	   14160	     84577 ns/op	   13282 B/op	      40 allocs/op
+BenchmarkPathsLarge/warm-error-18                           	   14240	     84249 ns/op	   13282 B/op	      40 allocs/op
+BenchmarkPathsLarge/warm-error-18                           	   14174	     84529 ns/op	   13282 B/op	      40 allocs/op
+BenchmarkPathsLarge/warm-q-18                               	    1951	    607981 ns/op	   13269 B/op	      39 allocs/op
+BenchmarkPathsLarge/warm-q-18                               	    1909	    619643 ns/op	   13267 B/op	      39 allocs/op
+BenchmarkPathsLarge/warm-q-18                               	    1915	    633054 ns/op	   13268 B/op	      39 allocs/op
+BenchmarkPathsLarge/warm-q-18                               	    1886	    623510 ns/op	   13268 B/op	      39 allocs/op
+BenchmarkPathsLarge/warm-q-18                               	    1920	    609126 ns/op	   13269 B/op	      39 allocs/op
+BenchmarkPathsLarge/warm-limit-max-18                       	     502	   2384107 ns/op	 1328917 B/op	   18283 allocs/op
+BenchmarkPathsLarge/warm-limit-max-18                       	     501	   2382740 ns/op	 1317157 B/op	   18283 allocs/op
+BenchmarkPathsLarge/warm-limit-max-18                       	     505	   2380598 ns/op	 1319257 B/op	   18283 allocs/op
+BenchmarkPathsLarge/warm-limit-max-18                       	     500	   2383508 ns/op	 1319608 B/op	   18283 allocs/op
+BenchmarkPathsLarge/warm-limit-max-18                       	     500	   2387210 ns/op	 1321985 B/op	   18283 allocs/op
+BenchmarkPathsLargeRestricted/cold-18                       	      36	  31692612 ns/op	28146775 B/op	  327393 allocs/op
+BenchmarkPathsLargeRestricted/cold-18                       	      37	  31689372 ns/op	28140016 B/op	  327392 allocs/op
+BenchmarkPathsLargeRestricted/cold-18                       	      36	  31663441 ns/op	28140857 B/op	  327390 allocs/op
+BenchmarkPathsLargeRestricted/cold-18                       	      37	  31518025 ns/op	28152080 B/op	  327392 allocs/op
+BenchmarkPathsLargeRestricted/cold-18                       	      38	  31634664 ns/op	28156045 B/op	  327392 allocs/op
+BenchmarkPathsLargeRestricted/warm-18                       	     784	   1508125 ns/op	 1168940 B/op	    3058 allocs/op
+BenchmarkPathsLargeRestricted/warm-18                       	     812	   1469683 ns/op	 1134036 B/op	    2644 allocs/op
+BenchmarkPathsLargeRestricted/warm-18                       	     811	   1473024 ns/op	 1135453 B/op	    2644 allocs/op
+BenchmarkPathsLargeRestricted/warm-18                       	     811	   1464824 ns/op	 1136513 B/op	    2645 allocs/op
+BenchmarkPathsLargeRestricted/warm-18                       	     814	   1471314 ns/op	 1136832 B/op	    2645 allocs/op
+BenchmarkPathsLargeRestricted/warm-error-18                 	    2847	    413852 ns/op	  669390 B/op	      72 allocs/op
+BenchmarkPathsLargeRestricted/warm-error-18                 	    2834	    413088 ns/op	  669390 B/op	      72 allocs/op
+BenchmarkPathsLargeRestricted/warm-error-18                 	    2910	    412333 ns/op	  669398 B/op	      72 allocs/op
+BenchmarkPathsLargeRestricted/warm-error-18                 	    2878	    410475 ns/op	  669395 B/op	      72 allocs/op
+BenchmarkPathsLargeRestricted/warm-error-18                 	    2935	    410966 ns/op	  669386 B/op	      72 allocs/op
+BenchmarkPathsLargeRestricted/warm-q-18                     	    1364	    859208 ns/op	  669369 B/op	      71 allocs/op
+BenchmarkPathsLargeRestricted/warm-q-18                     	    1384	    853384 ns/op	  669376 B/op	      71 allocs/op
+BenchmarkPathsLargeRestricted/warm-q-18                     	    1378	    856091 ns/op	  669377 B/op	      71 allocs/op
+BenchmarkPathsLargeRestricted/warm-q-18                     	    1374	    863061 ns/op	  669375 B/op	      71 allocs/op
+BenchmarkPathsLargeRestricted/warm-q-18                     	    1382	    880050 ns/op	  669379 B/op	      71 allocs/op
+BenchmarkPathsLargeRestricted/warm-limit-max-18             	     464	   2580771 ns/op	 1892558 B/op	   18285 allocs/op
+BenchmarkPathsLargeRestricted/warm-limit-max-18             	     464	   2588624 ns/op	 1889997 B/op	   18285 allocs/op
+BenchmarkPathsLargeRestricted/warm-limit-max-18             	     466	   2584047 ns/op	 1887226 B/op	   18285 allocs/op
+BenchmarkPathsLargeRestricted/warm-limit-max-18             	     464	   2583290 ns/op	 1892552 B/op	   18285 allocs/op
+BenchmarkPathsLargeRestricted/warm-limit-max-18             	     459	   2587881 ns/op	 1893141 B/op	   18285 allocs/op
+PASS
+ok  	github.com/DuncanDoyle/snellius/pkg/api	155.149s

@@ -3,6 +3,16 @@ import type { Ref } from "../api/types";
 import { navCopy } from "../copy/explorer";
 
 // region Helpers
+/** An implementation's own backend kind: a Backends list chip and the label of its spec.type on backend detail. */
+export interface BackendKind {
+  group: string;
+  kind: string;
+  /** The chip that lists only this kind, e.g. "Backend resources". */
+  chip: string;
+  /** The label of the kind's type on its detail page. */
+  typeLabel: string;
+}
+
 /** Platform copy (D-016). The defaults describe Kubernetes; a downstream overrides any entry through ShellExtension.vocabulary. */
 export interface Vocabulary {
   /** Title while the backend has not read its data source yet. */
@@ -21,6 +31,8 @@ export interface Vocabulary {
   getCommand: (ref: Ref, resource: string) => string | undefined;
   /** Label of the button that copies that command. */
   copyCommand: string;
+  /** Backend kinds the implementation adds; the core lists Services only. */
+  backendKinds: BackendKind[];
 }
 
 /** The Kubernetes vocabulary, the default. */
@@ -48,4 +60,5 @@ export const kubernetesVocabulary: Vocabulary = {
     return `kubectl get ${type}${ns} ${ref.name} -o yaml`;
   },
   copyCommand: navCopy.copyCommand,
+  backendKinds: [],
 };

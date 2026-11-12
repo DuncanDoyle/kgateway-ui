@@ -123,6 +123,9 @@ type ParentLink struct {
 	// Cond is the deciding condition: the first current False among
 	// Accepted, ResolvedRefs and the install's optional route types (design §7.3).
 	Cond *metav1.Condition
+	// Programming is the first current False optional type when Cond is
+	// Accepted or ResolvedRefs: a programming failure that Cond's order would hide.
+	Programming *metav1.Condition
 	// Pending is why the status entry is not current, for a pending link.
 	Pending string
 	// Spec is the index of Ref in the row's spec parentRefs, or -1.
@@ -455,16 +458,25 @@ func requiredNotOK(rep health.Report) bool {
 }
 
 // DetailKinds returns the served group/kinds with a detail view: Gateway,
-// every ListenerSet kind and HTTPRoute.
+// every ListenerSet kind, HTTPRoute, GRPCRoute, TCPRoute and TLSRoute.
 func DetailKinds(served []kinds.Served) []objects.GroupKind {
 	var out []objects.GroupKind
 	for _, k := range served {
 		gw := k.Category == kinds.CategoryGateway && k.Group == objects.GatewayAPIGroup && k.Kind == "Gateway"
-		if gw || k.Category == kinds.CategoryListenerSet || isHTTPRoute(k.Group, k.Kind) {
+		if gw || k.Category == kinds.CategoryListenerSet || IsDetailRoute(k.Group, k.Kind) {
 			out = append(out, objects.GroupKind{Group: k.Group, Kind: k.Kind})
 		}
 	}
 	return out
+}
+
+// IsDetailRoute reports whether group/kind is a route kind with a detail view.
+func IsDetailRoute(group, kind string) bool {
+	switch kind {
+	case "HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute":
+		return group == objects.GatewayAPIGroup
+	}
+	return false
 }
 
 // isHTTPRoute reports whether group/kind is HTTPRoute.

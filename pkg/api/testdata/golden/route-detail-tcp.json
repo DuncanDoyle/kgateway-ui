@@ -1,0 +1,246 @@
+{
+  "body": {
+    "ancestors": [
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TCPRoute",
+              "link": "detail",
+              "name": "tcp",
+              "namespace": "shop"
+            }
+          }
+        ]
+      }
+    ],
+    "ancestorsTruncated": false,
+    "annotations": {},
+    "attachments": [
+      {
+        "index": 0,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra",
+          "sectionName": "tcp"
+        },
+        "result": {
+          "computed": {
+            "by": "ui",
+            "coverage": [
+              "status-compatible"
+            ],
+            "label": "kgateway 2.4",
+            "rule": "section-and-port",
+            "rules": "kgateway-2.4",
+            "state": "checked"
+          },
+          "listeners": [
+            {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "count-agrees",
+                  "status-compatible"
+                ],
+                "label": "kgateway 2.4",
+                "rule": "section-and-port",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listener": "tcp",
+              "resource": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "edge",
+                "namespace": "infra"
+              }
+            }
+          ],
+          "outcome": "accepted"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "childCount": 0,
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "declaredCount": 0,
+    "generation": 1,
+    "health": "healthy",
+    "hostnames": [],
+    "install": "kgw.kgateway",
+    "parentRefs": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "name": "edge",
+        "namespace": "infra",
+        "sectionName": "tcp",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "parents": [
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra",
+          "sectionName": "tcp"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "TCPRoute",
+      "link": "detail",
+      "name": "tcp",
+      "namespace": "shop"
+    },
+    "ruleSet": "kgateway-2.4",
+    "ruleSetLabel": "kgateway 2.4",
+    "rules": [
+      {
+        "backendRefs": [
+          {
+            "endpoints": {
+              "complete": "complete",
+              "port": {
+                "name": "http",
+                "port": 80
+              },
+              "readAt": "2026-10-17T12:00:00Z",
+              "ready": 1,
+              "source": "kubernetes",
+              "total": 1
+            },
+            "filters": [],
+            "port": 80,
+            "problem": {
+              "signals": [],
+              "state": "healthy"
+            },
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "cart-svc",
+              "namespace": "shop"
+            },
+            "share": 100,
+            "shareState": "shown",
+            "weight": 2
+          },
+          {
+            "filters": [],
+            "port": 80,
+            "problem": {
+              "signals": [],
+              "state": "healthy"
+            },
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "other-svc",
+              "namespace": "shop"
+            },
+            "share": 0,
+            "shareState": "no-traffic",
+            "weight": 0
+          }
+        ],
+        "filters": [],
+        "index": 0,
+        "matches": []
+      }
+    ],
+    "serves": [
+      {
+        "gateway": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "hostnames": [],
+        "listener": {
+          "name": "tcp",
+          "port": 9000,
+          "protocol": "TCP"
+        },
+        "state": "healthy"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

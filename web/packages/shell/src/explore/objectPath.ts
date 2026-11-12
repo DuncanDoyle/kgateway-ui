@@ -6,8 +6,18 @@ export function resourcePath(installId: string, r: Ref): string {
   return installPath(installId, `r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`);
 }
 
+/** Path of the backend detail page of r (Phase 6 design §8.2), "-" for the empty group. */
+export function backendPath(installId: string, r: Ref): string {
+  const seg = encodeURIComponent;
+  return installPath(
+    installId,
+    `backends/${seg(r.group || "-")}/${seg(r.kind)}/${seg(r.namespace ?? "")}/${seg(r.name)}`,
+  );
+}
+
 // region Helpers
 const GATEWAY_API = "gateway.networking.k8s.io";
+const ROUTE_KINDS = new Set(["HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute"]);
 
 /** Where r opens, from its server-computed link only (design §7.1): detail → its detail page, yaml → the YAML view, none → undefined. */
 export function objectPath(installId: string, r: LinkedRef): string | undefined {
@@ -16,8 +26,8 @@ export function objectPath(installId: string, r: LinkedRef): string | undefined 
   const ns = encodeURIComponent(r.namespace ?? "");
   const name = encodeURIComponent(r.name);
   if (r.group === GATEWAY_API && r.kind === "Gateway") return installPath(installId, `gateways/${ns}/${name}`);
-  // The server sends detail only for its DetailKinds, so any kind besides Gateway and HTTPRoute is a ListenerSet kind.
-  const page = r.group === GATEWAY_API && r.kind === "HTTPRoute" ? "routes" : "listenersets";
+  // The server sends detail only for its DetailKinds, so any kind besides Gateway and a route kind is a ListenerSet kind.
+  const page = r.group === GATEWAY_API && ROUTE_KINDS.has(r.kind) ? "routes" : "listenersets";
   return installPath(installId, `${page}/${encodeURIComponent(r.group)}/${encodeURIComponent(r.kind)}/${ns}/${name}`);
 }
 

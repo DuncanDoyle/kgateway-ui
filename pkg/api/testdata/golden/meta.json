@@ -279,6 +279,18 @@
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "GRPCRoute"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "TCPRoute"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "TLSRoute"
       }
     ]
   },

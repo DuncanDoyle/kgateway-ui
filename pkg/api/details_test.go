@@ -2,17 +2,21 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -597,14 +601,14 @@ func TestSpecParentRefsAreLinked(t *testing.T) {
 	}
 }
 
-func TestNonHTTPRouteDetailIs404(t *testing.T) {
-	// edge's HTTP listener does not admit a TCPRoute.
+func TestOtherKindDetailIs404(t *testing.T) {
+	// edge's HTTP listener does not admit a TCPRoute; its detail still opens.
 	st := testutil.AcceptedBy(edgeRef, testutil.Controller)
 	st.Conds[0] = testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners")
 	_, srv, _ := startWith(t, setup{}, world(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{edgeRef}, st))...)
 	for _, p := range []string{
-		base + "/routes/gateway.networking.k8s.io/TCPRoute/shop/tcp",
-		base + "/routes/gateway.networking.k8s.io/GRPCRoute/shop/cart",
+		base + "/routes/gateway.networking.k8s.io/UDPRoute/shop/tcp",
+		base + "/routes/gateway.kgateway.dev/TCPRoute/shop/tcp",
 		base + "/routes/gateway.networking.k8s.io/Gateway/infra/edge",
 		base + "/listenersets/gateway.networking.k8s.io/Gateway/infra/edge",
 	} {
@@ -612,7 +616,10 @@ func TestNonHTTPRouteDetailIs404(t *testing.T) {
 			t.Errorf("%s: %q", p, e.Error)
 		}
 	}
-	// The TCPRoute still opens as YAML.
+	get[RouteDetail](t, srv, base+"/routes/gateway.networking.k8s.io/TCPRoute/shop/tcp", 200)
+	if e := getErr(t, srv, base+"/routes/gateway.networking.k8s.io/GRPCRoute/shop/cart", 404); e.Error != notFoundInScope {
+		t.Errorf("absent GRPCRoute: %q", e.Error)
+	}
 	get[map[string]any](t, srv, resourcePath(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "TCPRoute", Namespace: "shop", Name: "tcp"}), 200)
 	for _, l := range []string{"/gateways/infra/edge", "/routes/gateway.networking.k8s.io/HTTPRoute/shop/cart", "/listenersets/gateway.networking.k8s.io/ListenerSet/infra/x"} {
 		getErr(t, srv, "/api/v1/installs/nope"+l, 404)
@@ -622,8 +629,9 @@ func TestNonHTTPRouteDetailIs404(t *testing.T) {
 func TestMetaViews(t *testing.T) {
 	_, srv, _ := startWith(t, setup{}, world()...)
 	m := get[MetaResponse](t, srv, "/api/v1/meta", 200)
-	want := []objects.GroupKind{{Group: objects.GatewayAPIGroup, Kind: "Gateway"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"},
-		{Group: objects.GatewayAPIGroup, Kind: "ListenerSet"}, {Group: "gateway.networking.x-k8s.io", Kind: "XListenerSet"}}
+	want := []objects.GroupKind{{Group: objects.GatewayAPIGroup, Kind: "GRPCRoute"}, {Group: objects.GatewayAPIGroup, Kind: "Gateway"},
+		{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}, {Group: objects.GatewayAPIGroup, Kind: "ListenerSet"},
+		{Group: objects.GatewayAPIGroup, Kind: "TCPRoute"}, {Group: objects.GatewayAPIGroup, Kind: "TLSRoute"}, {Group: "gateway.networking.x-k8s.io", Kind: "XListenerSet"}}
 	got := slices.Clone(m.Views)
 	slices.SortFunc(got, func(a, b objects.GroupKind) int { return strings.Compare(a.Group+a.Kind, b.Group+b.Kind) })
 	if !slices.Equal(got, want) {
@@ -721,5 +729,212 @@ func TestRouteDetailRestricted(t *testing.T) {
 	// The hidden top1 shows only the match it delegated mid under (rule 3, D-024).
 	if s := d.Ancestors[4].Steps[0]; len(s.Matches) != 1 || *s.Matches[0].Path != (PathMatchDTO{"PathPrefix", "/api"}) {
 		t.Errorf("hidden ancestor step %+v", s)
+	}
+}
+
+// Trace fixture routes (design §7).
+var (
+	grpcDetail = base + "/routes/gateway.networking.k8s.io/GRPCRoute/shop/grpc"
+	tcpDetail  = base + "/routes/gateway.networking.k8s.io/TCPRoute/shop/tcp"
+	tlsDetail  = base + "/routes/gateway.networking.k8s.io/TLSRoute/shop/tls"
+	otherGwRef = testutil.GwRef("infra", "other")
+)
+
+// traceWorld is edge with an http, a tcp and a tls listener, and infra/other
+// whose listener web is not programmed. shop/grpc attaches to edge's http and
+// to other: a method and header match sending 1:3 to cart-svc and other-svc.
+// shop/tcp sends 2:0 to the same Services; shop/tls sends to cart-svc.
+// cart-svc has one ready endpoint on port 80; other-svc is not in the cache.
+func traceWorld() []runtime.Object {
+	tcp, tls := lst("tcp", 9000, ""), lst("tls", 443, "")
+	tcp.Protocol, tls.Protocol = "TCP", "TLS"
+	gw := edgeWith([]objects.Listener{lst("http", 80, ""), tcp, tls}, up("http", 1), up("tcp", 1), up("tls", 1))
+	other := testutil.GatewayWithListeners("infra", "other", "kgateway", []objects.Listener{lst("web", 8080, "")}, testutil.Listener{Name: "web", Attached: 1,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionFalse, "Invalid")}})
+	ref := func(name string, w int64) map[string]any {
+		return map[string]any{"name": name, "port": int64(80), "weight": w}
+	}
+	kind := func(k, name string, parents []objects.ParentRef, rules ...map[string]any) *unstructured.Unstructured {
+		st := make([]testutil.RouteParent, 0, len(parents))
+		for _, p := range parents {
+			st = append(st, testutil.AcceptedBy(p, testutil.Controller))
+		}
+		return testutil.WithRules(asKind(k, testutil.HTTPRoute("shop", name, parents, st...)), rules...)
+	}
+	grpcRule := testutil.Rule(map[string]any{"method": map[string]any{"service": "cart.Cart", "method": "Get"},
+		"headers": []any{map[string]any{"name": "x-env", "value": "prod"}}})
+	grpcRule["backendRefs"] = []any{ref("cart-svc", 1), ref("other-svc", 3)}
+	grpc := kind("GRPCRoute", "grpc", []objects.ParentRef{sectionRef("http"), otherGwRef}, grpcRule)
+	tcpRt := kind("TCPRoute", "tcp", []objects.ParentRef{sectionRef("tcp")}, map[string]any{"backendRefs": []any{ref("cart-svc", 2), ref("other-svc", 0)}})
+	tlsRt := testutil.WithHostnames(kind("TLSRoute", "tls", []objects.ParentRef{sectionRef("tls")}, map[string]any{"backendRefs": []any{svcRef("cart-svc")}}), "tls.example.com")
+	name, port, ready := "http", int32(80), true
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "cart-svc", UID: "svc-cart-svc"},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, Ports: []corev1.ServicePort{{Name: name, Port: port}}}}
+	es := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "cart-svc-x", UID: "es-cart-svc",
+		Labels: map[string]string{discoveryv1.LabelServiceName: "cart-svc"}}, AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:     []discoveryv1.EndpointPort{{Name: &name, Port: &port}},
+		Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}, Conditions: discoveryv1.EndpointConditions{Ready: &ready}}}}
+	return viewAWorld(gw, other, grpc, tcpRt, tlsRt, svc, es)
+}
+
+// traceCases are the route detail goldens of the other route kinds (design §7.2).
+func traceCases(t *testing.T) []goldenCase {
+	_, srv, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	return []goldenCase{
+		{"route-detail-grpc", srv, grpcDetail},
+		{"route-detail-tcp", srv, tcpDetail},
+		{"route-detail-tls", srv, tlsDetail},
+	}
+}
+
+// TestGoldenRouteTrace pins the GRPCRoute, TCPRoute and TLSRoute detail bodies.
+func TestGoldenRouteTrace(t *testing.T) { runGolden(t, traceCases(t)) }
+
+// GRPCRoute detail: its method and header match, shares of its 1:3 rule, and
+// each ref's problem the worst across its two attachments, naming the one it
+// came from (design §4.4, §4.5, §7).
+func TestGRPCRouteDetail(t *testing.T) {
+	_, srv, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	d := get[RouteDetail](t, srv, grpcDetail, 200)
+	if d.Ref.Kind != "GRPCRoute" || len(d.Rules) != 1 || len(d.ParentRefs) != 2 || len(d.Parents) != 2 {
+		t.Fatalf("detail %+v", d)
+	}
+	m := d.Rules[0].Matches
+	if len(m) != 1 || m[0].GRPCMethod == nil || *m[0].GRPCMethod != (GRPCMethodDTO{"Exact", "cart.Cart", "Get"}) || m[0].Method != "" || m[0].Path != nil ||
+		len(m[0].Headers) != 1 || m[0].Headers[0] != (KeyMatchDTO{"Exact", "x-env", "prod"}) {
+		t.Errorf("gRPC match %+v", m)
+	}
+	refs := d.Rules[0].BackendRefs
+	if len(refs) != 2 || refs[0].Share == nil || *refs[0].Share != 25 || refs[1].Share == nil || *refs[1].Share != 75 ||
+		refs[0].ShareState != "shown" || refs[1].ShareState != "shown" || refs[0].Weight != 1 || refs[1].Weight != 3 {
+		t.Fatalf("shares %+v", refs)
+	}
+	// edge serves healthy; other's listener is not programmed.
+	if len(d.Serves) != 2 || d.Serves[0].Gateway.Name != "edge" || d.Serves[0].Listener != (PathListenerDTO{"http", "HTTP", 80}) ||
+		d.Serves[0].State != health.StateHealthy || d.Serves[1].Gateway.Name != "other" || d.Serves[1].State != health.StateError {
+		t.Fatalf("serves %+v", d.Serves)
+	}
+	p := refs[0].Problem
+	if p == nil || p.State != health.StateError {
+		t.Fatalf("cart-svc problem %+v", p)
+	}
+	var named bool
+	for _, s := range p.Signals {
+		if s.Kind == "listener" && s.Code == "Programmed" {
+			named = s.Attachment != nil && *s.Attachment == 1
+		}
+		if s.Attachment != nil && *s.Attachment == 0 {
+			t.Errorf("healthy edge attachment named by %+v", s)
+		}
+	}
+	if !named {
+		t.Errorf("listener signal does not name other's attachment: %+v", p.Signals)
+	}
+	if e := refs[0].Endpoints; e == nil || e.Complete != "complete" || e.Ready == nil || *e.Ready != 1 {
+		t.Errorf("cart-svc endpoints %+v", e)
+	}
+	// Without other, only edge serves and cart-svc is healthy.
+	hideOther := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != otherGwRef.Ref() })
+	_, some, _ := startWith(t, setup{endpoints: true, authz: hideOther}, traceWorld()...)
+	h := get[RouteDetail](t, some, grpcDetail, 200)
+	if len(h.Serves) != 1 || h.Serves[0].Gateway.Name != "edge" || h.Rules[0].BackendRefs[0].Problem == nil || h.Rules[0].BackendRefs[0].Problem.State != health.StateHealthy {
+		t.Errorf("hidden other: serves %+v, cart-svc %+v", h.Serves, h.Rules[0].BackendRefs[0].Problem)
+	}
+}
+
+// TCPRoute and TLSRoute detail: no matches ([] on the wire), ports, weights and shares.
+func TestTCPAndTLSRouteDetail(t *testing.T) {
+	_, srv, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	tcp := get[RouteDetail](t, srv, tcpDetail, 200)
+	r := tcp.Rules[0]
+	if r.Matches == nil || len(r.Matches) != 0 || len(r.BackendRefs) != 2 || r.BackendRefs[0].Port != 80 || r.BackendRefs[0].Weight != 2 ||
+		r.BackendRefs[1].Weight != 0 || *r.BackendRefs[0].Share != 100 || r.BackendRefs[1].ShareState != "no-traffic" || *r.BackendRefs[1].Share != 0 {
+		t.Errorf("tcp rule %+v", r)
+	}
+	if len(tcp.Serves) != 1 || tcp.Serves[0].Listener != (PathListenerDTO{"tcp", "TCP", 9000}) || len(tcp.Serves[0].Hostnames) != 0 || tcp.Serves[0].Hostnames == nil {
+		t.Errorf("tcp serves %+v", tcp.Serves)
+	}
+	tls := get[RouteDetail](t, srv, tlsDetail, 200)
+	if r := tls.Rules[0]; r.Matches == nil || len(r.Matches) != 0 || len(r.BackendRefs) != 1 || *r.BackendRefs[0].Share != 100 {
+		t.Errorf("tls rule %+v", r)
+	}
+	if !slices.Equal(tls.Hostnames, []string{"tls.example.com"}) || len(tls.Serves) != 1 || tls.Serves[0].Listener.Name != "tls" {
+		t.Errorf("tls hostnames %v, serves %+v", tls.Hostnames, tls.Serves)
+	}
+	for _, p := range []string{tcpDetail, tlsDetail} {
+		if raw := wire(t, srv, p); !bytes.Contains(raw, []byte(`"matches": []`)) {
+			t.Errorf("%s: matches not [] on the wire:\n%s", p, raw)
+		}
+	}
+}
+
+// Every route kind with a detail view links to it from the routes list.
+func TestRouteKindsLinkToDetail(t *testing.T) {
+	_, srv, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	pg := get[Page[RouteRow]](t, srv, listBase+"/routes", 200)
+	for _, n := range []string{"shop/grpc", "shop/tcp", "shop/tls"} {
+		if r := routeByName(t, pg, n); r.Ref.Link != LinkDetail {
+			t.Errorf("%s links %q", n, r.Ref.Link)
+		}
+	}
+}
+
+// HTTPRoute detail keeps every field as it was: rules and backendRefs gain
+// only the trace keys, and no body sets effectiveFilters or grpcMethod.
+func TestRouteDetailTraceKeysOnly(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, delegationWorld()...)
+	var body map[string]any
+	if err := json.Unmarshal(wire(t, srv, routeDetail+"shop/mid"), &body); err != nil {
+		t.Fatal(err)
+	}
+	top := []string{"install", "ref", "generation", "health", "ruleSet", "ruleSetLabel", "hostnames", "annotations", "parentRefs", "parents",
+		"attachments", "serves", "rules", "effective", "effectiveTruncated", "ancestors", "ancestorsTruncated", "childCount", "declaredCount", "collectedAt"}
+	ref := []string{"ref", "port", "weight", "weightDefaulted", "filters", "delegation", "backend", "share", "shareState", "problem", "endpoints"}
+	only := func(what string, m map[string]any, keys []string) {
+		for k := range m {
+			if !slices.Contains(keys, k) {
+				t.Errorf("%s gained %q", what, k)
+			}
+		}
+	}
+	b := body["body"].(map[string]any)
+	only("route", b, top)
+	for _, r := range b["rules"].([]any) {
+		only("rule", r.(map[string]any), []string{"index", "name", "matches", "filters", "backendRefs"})
+		for _, br := range r.(map[string]any)["backendRefs"].([]any) {
+			only("backendRef", br.(map[string]any), ref)
+		}
+	}
+	_, trace, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	for _, p := range []string{routeDetail + "shop/mid", grpcDetail, tcpDetail, tlsDetail} {
+		s := srv
+		if p != routeDetail+"shop/mid" {
+			s = trace
+		}
+		raw := wire(t, s, p)
+		if bytes.Contains(raw, []byte(`"effectiveFilters"`)) || p != grpcDetail && bytes.Contains(raw, []byte(`"grpcMethod"`)) {
+			t.Errorf("%s: reserved or gRPC key:\n%s", p, raw)
+		}
+	}
+}
+
+// serves keeps the path model's attachment order, which signal attachment
+// indexes point into; shop/mid's seven root attachments on edge/http merge
+// into one entry per hostname list, the worst state winning.
+func TestServesOrderAndMerge(t *testing.T) {
+	_, srv, _ := startWith(t, setup{endpoints: true}, traceWorld()...)
+	g := get[RouteDetail](t, srv, grpcDetail, 200)
+	for _, b := range g.Rules[0].BackendRefs {
+		for _, s := range b.Problem.Signals {
+			if s.Attachment != nil && s.Ref != nil && s.Ref.Kind == "Gateway" && g.Serves[*s.Attachment].Gateway.Ref != s.Ref.Ref {
+				t.Errorf("signal %+v names serves %d, %+v", s, *s.Attachment, g.Serves[*s.Attachment])
+			}
+		}
+	}
+	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
+	m := get[RouteDetail](t, deleg, routeDetail+"shop/mid", 200)
+	if len(m.Serves) != 2 || len(m.Serves[0].Hostnames) != 0 || m.Serves[0].State != health.StateError ||
+		!slices.Equal(m.Serves[1].Hostnames, []string{"top.example.com"}) || m.Serves[1].State != health.StateHealthy {
+		t.Errorf("merged serves %+v", m.Serves)
 	}
 }

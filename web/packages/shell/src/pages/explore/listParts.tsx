@@ -102,10 +102,10 @@ export function OneLine({ text, children, placement }: { text: string; children?
 }
 
 /** A name cell: OneLine, with the name's own link as the focusable element. */
-export function NameCell({ r, installId }: { r: LinkedRef; installId: string }) {
+export function NameCell({ r, installId, to }: { r: LinkedRef; installId: string; to?: string }) {
   return (
     <Tooltip label={refText(r)} stylesOverride={nameTip}>
-      <LinkedName refValue={r} installId={installId} truncate />
+      <LinkedName refValue={r} installId={installId} truncate to={to} />
     </Tooltip>
   );
 }

@@ -1,4 +1,14 @@
-import { appendVia, type Crumb, collapse, crumbRef, leavingVia, objectCrumb, parseVia, viaParam } from "./trail";
+import {
+  appendVia,
+  type Crumb,
+  collapse,
+  crumbRef,
+  kindList,
+  leavingVia,
+  objectCrumb,
+  parseVia,
+  viaParam,
+} from "./trail";
 
 const ID = "kgw.kgateway";
 const GW = "gateway.networking.k8s.io";
@@ -119,4 +129,14 @@ test("a 4 KiB via is cut to the last 6 valid entries", () => {
   const written = viaParam(long, ID);
   expect(written.length).toBeLessThanOrEqual(4096);
   expect(parseVia(`?${new URLSearchParams({ via: written })}`, ID).at(-1)).toEqual(nth(299));
+});
+
+it("every route kind's trail starts at the routes list", () => {
+  for (const kind of ["HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute"])
+    expect(kindList({ group: "gateway.networking.k8s.io", kind, namespace: "shop", name: "r" })).toEqual({
+      kind: "list",
+      path: "routes",
+      search: "",
+    });
+  expect(kindList({ group: "", kind: "Service", namespace: "shop", name: "s" })).toBeUndefined();
 });

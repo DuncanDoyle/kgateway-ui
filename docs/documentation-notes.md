@@ -27,3 +27,34 @@ Topics the user-facing documentation must cover when it is written. Each entry s
 - **What it does not claim.** Snellius is built for kgateway. A class-only install shows what the controller wrote to status, judged by the core checks only. Explain which finding codes can appear (the core ones, design §6) and which never do.
 - **Assumed scope.** A route outside the controller's real discovery scope shows as not accepted (KGWUI-003). Say this is what the user sees from the cluster, and that Snellius cannot read the controller's settings.
 - **The core-only build.** `cmd/snellius-core` (`make build-core`, `make image-core`) is the core with no pack and class-only installs always on. It is for testing the core's independence, not a supported product build; say so if it is documented at all.
+
+## Traffic: the path list (2026-11-12, Phase 6 design §4–§5)
+
+- **What a path is.** One row per Gateway, listener, route (and delegated routes), rule and backendRef. Hostnames are a list on the row. A rule with no backend shows its written action (redirect, direct response, no backend); a delegation ref shows "delegate".
+- **Where a problem comes from.** The worst existing signal along the whole chain: Gateway, listener, route status, delegation, backend findings, endpoints. Phase 6 adds no checks. Explain "unknown" (a check it depends on is unavailable, or a finding is still held) and why it is never shown as healthy.
+- **Share.** Only within one rule, as Gateway API defines weights; never a share of Gateway traffic. Weight 0 is "no traffic". No share on rules that delegate, redirect or have no backend.
+- **Counts and visibility.** The summary counts only paths the viewer may see, and says when some are hidden. A class-only install has no paths; the page says why.
+- **Known over-report.** A delegated path can show an error that belongs to another rule of its root route. It never hides one.
+
+## Backends and endpoints (2026-11-12, Phase 6 design §8–§9)
+
+- **What is listed.** Every kgateway Backend, and every Service or other backend a route or GatewayExtension names. Unreferenced Services are not listed.
+- **Endpoints.** The list counts ready endpoints per backend port from the cached facts, as KGWUI-023 does. Backend detail reads that one Service's EndpointSlices on request (at most about 1,000 endpoints; more reads "partial"). Only a complete read establishes zero. Explain "partial", "timed out", "busy, retry" and "not applicable" (ExternalName, Backend resources).
+- **Port chain.** backendRef port → Service port → targetPort → slice ports. Named targetPorts are not resolved to container ports; explain why (no Pod watch).
+- **Reference explanations.** When a ref does not resolve, the page shows the controller's reason and the fix (for `RefNotPermitted`, the ReferenceGrant). When the controller's status does not say which ref failed, every candidate says so; Snellius does not guess.
+- **RBAC.** The live read uses the EndpointSlice `list` the `diagnostics.endpoints` value already grants; with it off, the section shows "unavailable".
+
+## Route trace (2026-11-12, Phase 6 design §7)
+
+- **What it shows.** Per rule of a route: its match, filters as written, a share bar and each backend with port, weight, share, endpoints and state, for all four route kinds.
+- **Wording per protocol.** "Requests fail" for HTTP and gRPC, "connections fail" for TCP and TLS. No status code is promised.
+- **What it does not show yet.** The effective filter chain (later phase) and per-proxy endpoints (after GA, #35).
+
+## Gateway map (2026-11-12, Phase 6 design §6)
+
+- **What it is.** One Gateway's paths as columns: Gateway → listeners → routes → rules → backends. It ignores the Overview tab's listener picker.
+- **Reading it.** Edge colour is the worst state of its paths; a dashed edge with an error icon means every path on it fails; a solid error edge with a hollow ring means some do. Under a state filter no edge is drawn as broken. Animation is off with reduced motion.
+- **Interactions.** Hover, side panel, expand into rules, collapse delegated routes, "Show only its paths", search and chips. Expand, collapse and focus live in the URL, so a link reproduces the view.
+- **Large Gateways.** More than 60 routes or backends opens on problems only, with a prompt to narrow.
+- **Keyboard and accessibility.** One tab stop; arrow keys along the paths, Enter for details, Escape to close. The Table button is the accessible equivalent.
+- **Export.** SVG or PNG of the whole drawn graph (filters, focus and collapse applied), with a title line and legend; not the visible viewport.

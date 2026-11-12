@@ -21,15 +21,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # nack applies the xDS reject fixture (fixtures/nack.yaml) for TestDataPlaneDiagnostics and diagnostics.spec.ts.
+        # Its Cluster reject reaches every proxy of install A, so the traffic specs run only on rows without it.
         include:
           # A 10 min safety timer lets TestForcedDisagreementRaisesKGWUI012 run: only its deadline can mature the check.
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", ui_args: "--poll-interval=10m" }
           - { kgw: v2.3.11, gwapi: v1.5.1, second: "0" }
+          - { kgw: v2.3.11, gwapi: v1.5.1, second: "0", nack: "1" }
           # kgateway v2.5.0 pins Gateway API v1.7.0 (go.mod at the tag).
           - { kgw: v2.5.0, gwapi: v1.7.0, second: "0" }
-          - { kgw: v2.4.7, gwapi: v1.6.1, second: "1" }
+          - { kgw: v2.5.0, gwapi: v1.7.0, second: "0", nack: "1" }
+          - { kgw: v2.4.7, gwapi: v1.6.1, second: "1", nack: "1" }
           # The log row: diagnostics.controllerLogs on, with its pods/log Role in kgw-a, for TestControllerLogSignals.
-          - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", logs: "1" }
+          - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", logs: "1", nack: "1" }
     runs-on: ubuntu-latest
     env:
       KGW_VERSION: ${{ matrix.kgw }}
@@ -37,8 +41,7 @@ jobs:
       SECOND_INSTALL: ${{ matrix.second }}
       UI_EXTRA_ARGS: ${{ matrix.ui_args }}
       CONTROLLER_LOGS: ${{ matrix.logs }}
-      # The xDS reject fixture (fixtures/nack.yaml) for TestDataPlaneDiagnostics and diagnostics.spec.ts.
-      NACK: "1"
+      NACK: ${{ matrix.nack }}
       E2E_DIR: ${{ github.workspace }}/.e2e
     steps:
       - uses: actions/checkout@v7
@@ -62,7 +65,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-${{ matrix.kgw }}-${{ matrix.second }}${{ matrix.logs == '1' && '-logs' || '' }}
+          name: e2e-${{ matrix.kgw }}-${{ matrix.second }}${{ matrix.logs == '1' && '-logs' || '' }}${{ matrix.nack == '1' && '-nack' || '' }}
           path: |
             web/test-results
             web/playwright-report

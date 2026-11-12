@@ -1,3 +1,7 @@
+import backendDetailBackendGolden from "../../../../../pkg/api/testdata/golden/backend-detail-backend.json";
+import backendDetailExplainedGolden from "../../../../../pkg/api/testdata/golden/backend-detail-explained.json";
+import backendDetailServiceGolden from "../../../../../pkg/api/testdata/golden/backend-detail-service.json";
+import backendsGolden from "../../../../../pkg/api/testdata/golden/backends.json";
 import badRequestGolden from "../../../../../pkg/api/testdata/golden/bad-request.json";
 import bareInstalls from "../../../../../pkg/api/testdata/golden/bare-installs.json";
 import bareMeta from "../../../../../pkg/api/testdata/golden/bare-meta.json";
@@ -35,6 +39,8 @@ import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listeners
 import meta from "../../../../../pkg/api/testdata/golden/meta.json";
 import notFound from "../../../../../pkg/api/testdata/golden/not-found.json";
 import overview from "../../../../../pkg/api/testdata/golden/overview.json";
+import pathsGolden from "../../../../../pkg/api/testdata/golden/paths.json";
+import pathsRestrictedGolden from "../../../../../pkg/api/testdata/golden/paths-restricted.json";
 import processesGolden from "../../../../../pkg/api/testdata/golden/processes.json";
 import processesRestrictedGolden from "../../../../../pkg/api/testdata/golden/processes-restricted.json";
 import refsGolden from "../../../../../pkg/api/testdata/golden/refs.json";
@@ -46,8 +52,11 @@ import routeDetailGolden from "../../../../../pkg/api/testdata/golden/route-deta
 import routeDetailCandidateGolden from "../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
 import routeDetailDelegationRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-delegation-restricted.json";
 import routeDetailEffectiveGolden from "../../../../../pkg/api/testdata/golden/route-detail-effective.json";
+import routeDetailGrpcGolden from "../../../../../pkg/api/testdata/golden/route-detail-grpc.json";
 import routeDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
 import routeDetailSelectedGolden from "../../../../../pkg/api/testdata/golden/route-detail-selected.json";
+import routeDetailTcpGolden from "../../../../../pkg/api/testdata/golden/route-detail-tcp.json";
+import routeDetailTlsGolden from "../../../../../pkg/api/testdata/golden/route-detail-tls.json";
 import routesGolden from "../../../../../pkg/api/testdata/golden/routes.json";
 import routesByBackendGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend.json";
 import routesByBackendRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend-restricted.json";
@@ -61,8 +70,16 @@ import type {
   AllowedRoutes,
   AncestorPath,
   AncestorStep,
+  BackendConsumer,
+  BackendDetail,
+  BackendFacets,
+  BackendGatewayFacet,
+  BackendNamespaceFacet,
+  BackendPort,
   BackendRef,
+  BackendRow,
   BackendState,
+  BackendsResponse,
   Candidate,
   Capability,
   CheckHold,
@@ -81,7 +98,10 @@ import type {
   EffectiveContext,
   EffectiveEdge,
   EffectiveRule,
+  Endpoint,
+  Endpoints,
   EndpointsEvidence,
+  EndpointsRuntime,
   ErrorResponse,
   Evidence,
   Filter,
@@ -92,9 +112,12 @@ import type {
   FreshnessCount,
   FreshnessEvidence,
   GatewayDetail,
+  GatewayFacet,
   GatewayListRow,
   GatewayProcesses,
   GatewayRow,
+  GRPCMatch,
+  GRPCMethod,
   GrantShape,
   GroupKind,
   GroupList,
@@ -116,6 +139,7 @@ import type {
   Match,
   MetaResponse,
   Mirror,
+  NamespaceFacet,
   NextStep,
   OverviewResponse,
   Page,
@@ -123,8 +147,17 @@ import type {
   ParentRef,
   ParentStatus,
   ParentSummary,
+  PathCounts,
+  PathFacets,
+  PathListener,
   PathMatch,
+  PathProblem,
+  PathRow,
+  PathSignal,
   PathStep,
+  PathSummary,
+  PathsResponse,
+  PortChain,
   ProbeFacts,
   ProcessEvidence,
   ProcessesResponse,
@@ -135,6 +168,7 @@ import type {
   ProxyTypeRejects,
   Readiness,
   Ref,
+  RefExplanation,
   RefLocation,
   RefsEvidence,
   ReleaseModeCount,
@@ -147,10 +181,12 @@ import type {
   RuleReplacedEvidence,
   ScopeSummary,
   ServedKind,
+  ServiceFact,
   SpecParentRef,
   StatusProgressEvidence,
   SuggestedFix,
   TerminationFacts,
+  TraceAttachment,
   TrailRefs,
   VersionPods,
   VersionSkewEvidence,
@@ -739,10 +775,58 @@ const listenerSetDetail = shape<ListenerSetDetail>(
   },
   { health: healthState },
 );
+const endpoints = shape<Endpoints>(
+  {
+    source: "!",
+    port: "?",
+    runtime: "?",
+    readAt: "!",
+    complete: "!",
+    ready: "?",
+    total: "?",
+    items: "?",
+    cachedReady: "?",
+  },
+  {
+    port: shape<BackendPort>({ port: "!", name: "?" }),
+    runtime: shape<EndpointsRuntime>({ install: "!", gateway: "!", proxy: "!", instance: "!" }, { gateway: linkedRef }),
+    items: shape<Endpoint>({ address: "!", port: "?", ready: "!", serving: "!", terminating: "!", pod: "?" }),
+  },
+  {
+    complete: {
+      complete: 1,
+      partial: 1,
+      failed: 1,
+      unavailable: 1,
+      stale: 1,
+      "not-applicable": 1,
+      "timed-out": 1,
+      busy: 1,
+    },
+  },
+);
+const pathSignal = shape<PathSignal>(
+  { kind: "!", code: "?", title: "?", ref: "?", state: "!", attachment: "?", listener: "?" },
+  { ref: linkedRef },
+  {
+    kind: {
+      gateway: 1,
+      listener: 1,
+      "route-status": 1,
+      waiting: 1,
+      finding: 1,
+      delegation: 1,
+      coverage: 1,
+    },
+    state: healthState,
+  },
+);
+const pathProblem = shape<PathProblem>({ state: "!", signals: "!" }, { signals: pathSignal }, { state: healthState });
 const keyMatch = shape<KeyMatch>({ type: "!", name: "!", value: "!" });
+const grpcMethod = shape<GRPCMethod>({ type: "?", service: "?", method: "?" });
 const match = shape<Match>(
-  { path: "?", headers: "?", queryParams: "?", method: "?" },
-  { path: shape<PathMatch>({ type: "!", value: "!" }), headers: keyMatch, queryParams: keyMatch },
+  { path: "?", headers: "?", queryParams: "?", method: "?", grpcMethod: "?" },
+  { path: shape<PathMatch>({ type: "!", value: "!" }), headers: keyMatch, queryParams: keyMatch, grpcMethod },
 );
 const mirror = shape<Mirror>(
   { backendRef: "!", port: "?", percent: "?", fraction: "?" },
@@ -753,8 +837,21 @@ const filter = shape<Filter>(
   { type: "!", extensionRef: "?", mirror: "?", config: "?" },
   { extensionRef: linkedRef, mirror },
 );
+const shareStates = { shown: 1, "not-shown": 1, "no-traffic": 1, failing: 1, "may-fail": 1, mirror: 1 } as const;
 const backendRef = shape<BackendRef>(
-  { ref: "!", port: "?", weight: "!", weightDefaulted: "?", filters: "!", delegation: "?", backend: "?" },
+  {
+    ref: "!",
+    port: "?",
+    weight: "!",
+    weightDefaulted: "?",
+    filters: "!",
+    delegation: "?",
+    backend: "?",
+    share: "?",
+    shareState: "?",
+    problem: "?",
+    endpoints: "?",
+  },
   {
     ref: linkedRef,
     filters: filter,
@@ -768,11 +865,14 @@ const backendRef = shape<BackendRef>(
       { accepted: condition },
       { state: healthState },
     ),
+    problem: pathProblem,
+    endpoints,
   },
+  { shareState: shareStates },
 );
 const rule = shape<Rule>(
-  { index: "!", name: "?", matches: "!", filters: "!", backendRefs: "!" },
-  { matches: match, filters: filter, backendRefs: backendRef },
+  { index: "!", name: "?", matches: "!", filters: "!", backendRefs: "!", effectiveFilters: "?" },
+  { matches: match, filters: filter, backendRefs: backendRef, effectiveFilters: filter },
 );
 const ancestor = shape<AncestorPath>(
   { steps: "!", cycle: "!" },
@@ -861,6 +961,7 @@ const routeDetail = shape<RouteDetail>(
     parentRefs: "!",
     parents: "!",
     attachments: "?",
+    serves: "?",
     rules: "!",
     effective: "?",
     effectiveTruncated: "?",
@@ -879,6 +980,15 @@ const routeDetail = shape<RouteDetail>(
     attachments: shape<RouteAttachment>(
       { parentRef: "!", index: "!", target: "!", result: "!" },
       { parentRef, target: linkedRef, result: computedAttachment },
+    ),
+    serves: shape<TraceAttachment>(
+      { gateway: "!", listenerSet: "?", listener: "!", hostnames: "!", state: "!" },
+      {
+        gateway: linkedRef,
+        listenerSet: linkedRef,
+        listener: shape<PathListener>({ name: "!", protocol: "?", port: "?" }),
+      },
+      { state: healthState },
     ),
     rules: rule,
     effective: effectiveEdge,
@@ -1105,6 +1215,158 @@ const gatewayDetail = shape<GatewayDetail>(
   },
   { health: healthState },
 );
+// Paths (sub-phase 6.2).
+const pathCounts = shape<PathCounts>({ paths: "!", routes: "!", gateways: "!", backends: "!" });
+const pathRow = shape<PathRow>(
+  {
+    id: "?",
+    gateway: "!",
+    listenerSet: "?",
+    listener: "!",
+    hostnames: "!",
+    routes: "!",
+    delegated: "!",
+    rule: "!",
+    matches: "!",
+    grpcMatches: "?",
+    action: "!",
+    delegation: "?",
+    backend: "?",
+    port: "?",
+    weight: "!",
+    share: "?",
+    shareState: "!",
+    mirror: "!",
+    mirrorPercent: "?",
+    problem: "!",
+    endpoints: "?",
+    note: "?",
+  },
+  {
+    gateway: linkedRef,
+    listenerSet: linkedRef,
+    listener: shape<PathListener>({ name: "!", protocol: "?", port: "?" }),
+    routes: linkedRef,
+    matches: match,
+    grpcMatches: shape<GRPCMatch>({ method: "?", headers: "?" }, { method: grpcMethod, headers: keyMatch }),
+    delegation: shape<DelegationRef>(
+      { mode: "!", namespace: "!", name: "?", label: "?", state: "?", selected: "?", attached: "?", computed: "?" },
+      { computed },
+      delegationRefEnums,
+    ),
+    backend: linkedRef,
+    problem: pathProblem,
+    endpoints,
+  },
+  {
+    action: { backend: 1, redirect: 1, "direct-response": 1, none: 1, delegate: 1 },
+    shareState: shareStates,
+    note: { unknown: 1, unconfirmable: 1, "not-computed": 1 },
+  },
+);
+const pathsResponse = shape<PathsResponse>(
+  { install: "!", revision: "?", rows: "!", next: "?", prev: "?", summary: "!", collectedAt: "!" },
+  {
+    rows: pathRow,
+    summary: shape<PathSummary>(
+      {
+        paths: "!",
+        routes: "!",
+        gateways: "!",
+        backends: "!",
+        byState: "!",
+        notComputed: "?",
+        endpointsNotRead: "?",
+        hidden: "?",
+        unmemoised: "?",
+        facets: "?",
+      },
+      {
+        facets: shape<PathFacets>(
+          { gateways: "!", namespaces: "!" },
+          {
+            gateways: shape<GatewayFacet>({ ref: "!", paths: "!" }, { ref: linkedRef }),
+            namespaces: shape<NamespaceFacet>({ name: "!", paths: "!" }),
+          },
+        ),
+        byState: shape<PathSummary["byState"]>(
+          { healthy: "!", warning: "!", error: "!", unknown: "!" },
+          { healthy: pathCounts, warning: pathCounts, error: pathCounts, unknown: pathCounts },
+        ),
+      },
+      { notComputed: { "no-attachments": 1 } },
+    ),
+  },
+);
+// Backends (sub-phase 6.3).
+const backendsResponse = shape<BackendsResponse>(
+  { install: "!", rows: "!", next: "?", prev: "?", hidden: "?", facets: "?", collectedAt: "!" },
+  {
+    facets: shape<BackendFacets>(
+      { gateways: "!", namespaces: "!" },
+      {
+        gateways: shape<BackendGatewayFacet>({ ref: "!", backends: "!" }, { ref: linkedRef }),
+        namespaces: shape<BackendNamespaceFacet>({ name: "!", backends: "!" }),
+      },
+    ),
+    rows: shape<BackendRow>(
+      {
+        ref: "!",
+        kind: "!",
+        endpoints: "!",
+        routes: "!",
+        gateways: "!",
+        consumers: "!",
+        confirmed: "!",
+        problem: "!",
+      },
+      { ref: linkedRef, endpoints, problem: pathProblem },
+    ),
+  },
+);
+const backendDetail = shape<BackendDetail>(
+  {
+    install: "!",
+    ref: "!",
+    kind: "!",
+    type: "?",
+    problem: "!",
+    status: "!",
+    exposure: "!",
+    consumers: "!",
+    sources: "!",
+    portChain: "!",
+    explanations: "!",
+    service: "?",
+    conditions: "?",
+    collectedAt: "!",
+  },
+  {
+    ref: linkedRef,
+    problem: pathProblem,
+    status: pathSignal,
+    exposure: pathsResponse,
+    consumers: shape<BackendConsumer>({ consumer: "!", role: "!", field: "!", port: "?" }, { consumer: linkedRef }),
+    sources: endpoints,
+    portChain: shape<PortChain>({
+      refPort: "!",
+      servicePort: "?",
+      servicePortName: "?",
+      targetPort: "?",
+      targetName: "?",
+      slicePorts: "!",
+      noSuchPort: "?",
+      noSlicePort: "?",
+    }),
+    explanations: shape<RefExplanation>(
+      { route: "!", rule: "!", ref: "!", path: "!", kind: "!", reason: "?", explanation: "?", fix: "?" },
+      { route: linkedRef, fix: suggestedFix },
+      { kind: { attributed: 1, candidate: 1, waiting: 1 } },
+    ),
+    service: shape<ServiceFact>({ type: "!", ports: "!" }, { ports: shape<BackendPort>({ port: "!", name: "?" }) }),
+    conditions: condition,
+  },
+);
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
 function problems(s: Shape, v: unknown, path: string): string[] {
   if (Array.isArray(v)) return v.flatMap((e, i) => problems(s, e, `${path}[${i}]`));
@@ -1186,6 +1448,9 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["route-detail", routeDetailGolden.body satisfies Wide<RouteDetail>, routeDetail],
     ["route-detail-restricted", routeDetailRestrictedGolden.body satisfies Wide<RouteDetail>, routeDetail],
     ["route-detail-candidate", routeDetailCandidateGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-grpc", routeDetailGrpcGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-tcp", routeDetailTcpGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-tls", routeDetailTlsGolden.body satisfies Wide<RouteDetail>, routeDetail],
     ["route-delegation", routeDelegationGolden.body satisfies Wide<Page<DelegationRow>>, page(delegationRow)],
     ["route-delegation-cut", routeDelegationCutGolden.body satisfies Wide<Page<DelegationRow>>, page(delegationRow)],
     [
@@ -1239,6 +1504,12 @@ describe("types.ts matches the golden v1 wire format", () => {
       findingDetail,
     ],
     ["refs-restricted", refsRestrictedGolden.body satisfies Wide<TrailRefs>, trailRefs],
+    ["paths", pathsGolden.body satisfies Wide<PathsResponse>, pathsResponse],
+    ["paths-restricted", pathsRestrictedGolden.body satisfies Wide<PathsResponse>, pathsResponse],
+    ["backends", backendsGolden.body satisfies Wide<BackendsResponse>, backendsResponse],
+    ["backend-detail-service", backendDetailServiceGolden.body satisfies Wide<BackendDetail>, backendDetail],
+    ["backend-detail-backend", backendDetailBackendGolden.body satisfies Wide<BackendDetail>, backendDetail],
+    ["backend-detail-explained", backendDetailExplainedGolden.body satisfies Wide<BackendDetail>, backendDetail],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });
@@ -1448,5 +1719,29 @@ describe("types.ts matches the golden v1 wire format", () => {
       processesGolden.body.proxies.items.some((g) => "skew" in g && g.skew && g.set.processes[0]?.restartsRecent),
     ).toBe(true);
     expect(processesGolden.body.proxies.items.some((g) => !g.set.observed && g.health === "unknown")).toBe(true);
+  });
+
+  it("covers 6.2 paths: actions, shares, mirrors, ListenerSet rows, endpoints and hidden rows", () => {
+    const rows = pathsGolden.body.rows;
+    expect(new Set(rows.map((r) => r.action))).toEqual(new Set(["backend", "redirect", "delegate", "none"]));
+    expect(rows.some((r) => r.mirror && r.mirrorPercent === 100)).toBe(true);
+    expect(rows.some((r) => "listenerSet" in r)).toBe(true);
+    expect(rows.some((r) => r.delegated)).toBe(true);
+    expect(rows.some((r) => r.endpoints?.complete === "complete" && r.endpoints.ready === 1)).toBe(true);
+    expect(rows.some((r) => r.endpoints?.complete === "not-applicable")).toBe(true);
+    expect(pathsRestrictedGolden.body.summary.hidden).toBe(true);
+    expect(pathsRestrictedGolden.body.rows.every((r) => r.gateway.name !== "edge")).toBe(true);
+  });
+
+  it("covers 6.3 backends: unused and failed refs, consumers, kinds and a named targetPort", () => {
+    const rows = backendsGolden.body.rows;
+    expect(rows.some((r) => r.kind === "Backend · Static" && r.routes === 0 && r.consumers === 0)).toBe(true);
+    expect(rows.some((r) => r.routes > 0 && r.confirmed === 0 && r.problem.state === "error")).toBe(true);
+    expect(rows.some((r) => r.consumers > 0)).toBe(true);
+    expect(rows.some((r) => r.endpoints.some((e) => e.complete === "not-applicable"))).toBe(true);
+    const [chain] = backendDetailServiceGolden.body.portChain;
+    expect(chain?.targetName).toBe("http-web");
+    expect(chain?.slicePorts).toEqual([8080]);
+    expect(backendDetailBackendGolden.body.type).toBe("Static");
   });
 });

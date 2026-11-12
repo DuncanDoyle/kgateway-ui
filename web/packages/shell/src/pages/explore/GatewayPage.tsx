@@ -5,12 +5,17 @@ import { useGatewayDetail, useListenerSets } from "../../api/exploreHooks";
 import { useFeatureCheck, useListFilter } from "../../api/hooks";
 import type { LinkedRef, ListenerSetRow } from "../../api/types";
 import { columnCopy, dataPlaneCopy, detailCopy, gatewayCopy } from "../../copy/explorer";
+import { mapCopy } from "../../copy/map";
+import { trafficCopy } from "../../copy/traffic";
 import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
-import { DetailFrame, expectedRows, Facts, refParam, Section, SubList } from "./detailParts";
+import { installPath } from "../../shell/paths";
+import { InlineLink } from "../../states/controls";
+import { MapTab } from "../map/MapTab";
+import { DetailFrame, type ExtraTab, expectedRows, Facts, refParam, Section, SubList } from "./detailParts";
 import { DataPlaneSection } from "./gateway/DataPlaneSection";
 import { ListenerTable } from "./gateway/ListenerTable";
 import { ProxiesSection } from "./gateway/ProxiesSection";
@@ -36,7 +41,7 @@ interface GatewayPageProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** One Gateway: conditions, data plane, proxies, listeners, its ListenerSets, and its routes (design §8.5). */
+/** One Gateway: conditions, data plane, proxies, listeners, its ListenerSets, and its routes (design §8.5); a Map tab (Phase 6 §6). */
 export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
   const id = useInstallId();
   const { ns = "", name = "" } = useParams();
@@ -48,6 +53,10 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
   const ref = useMemo<LinkedRef>(
     () => ({ group: GW, kind: "Gateway", namespace: ns, name, link: "detail" }),
     [ns, name],
+  );
+  const extraTabs = useMemo<ExtraTab[]>(
+    () => [{ id: "map", label: mapCopy.tab, content: <MapTab installId={id} gateway={ref} /> }],
+    [id, ref],
   );
   const lsQuery = useMemo(() => ({ parent: refParam(ref) }), [ref]);
   const lsCols = useMemo(() => lsColumns(id), [id]);
@@ -97,6 +106,7 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
       error={error}
       side={wide ? conditions : null}
       sideWhenWide
+      extraTabs={extraTabs}
       stylesOverride={stylesOverride}
     >
       {data ? (
@@ -108,6 +118,12 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
               <dd>{data.class}</dd>
               <dt>{columnCopy.addresses}</dt>
               <dd>{data.addresses.length ? data.addresses.join(", ") : <Muted>{columnCopy.none}</Muted>}</dd>
+              <dt>{trafficCopy.title}</dt>
+              <dd>
+                <InlineLink to={`${installPath(id, "traffic")}?${new URLSearchParams({ gateway: `${ns}/${name}` })}`}>
+                  {trafficCopy.gatewayEntry}
+                </InlineLink>
+              </dd>
             </Facts>
           </Section>
           {/* Sent for a Gateway the install owns; it arrives with the detail, so nothing below moves. */}

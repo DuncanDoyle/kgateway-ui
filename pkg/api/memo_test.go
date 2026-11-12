@@ -146,7 +146,7 @@ func memoWorld(t *testing.T) (*httptest.Server, *callerAuthz, map[string]map[str
 	want := map[string]map[string]reply{}
 	for _, who := range []string{"a", "b"} {
 		want[who] = map[string]reply{}
-		for _, p := range endpoints {
+		for _, p := range visRequests {
 			st, body, err := ask(srv, who, p)
 			if err != nil {
 				t.Fatalf("%s GET %s: %v", who, p, err)
@@ -180,7 +180,7 @@ func TestPooledMemoSequentialCallers(t *testing.T) {
 	usePool(t, newChanMemos(t, 1))
 	for range 20 {
 		for _, who := range []string{"a", "b"} {
-			for _, p := range endpoints {
+			for _, p := range visRequests {
 				st, body, err := ask(srv, who, p)
 				if err != nil {
 					t.Fatalf("%s GET %s: %v", who, p, err)
@@ -200,7 +200,7 @@ func TestPooledMemoConcurrentCallers(t *testing.T) {
 		who := []string{"a", "b"}[i%2]
 		wg.Go(func() {
 			for range 10 {
-				for _, p := range endpoints {
+				for _, p := range visRequests {
 					st, body, err := ask(srv, who, p)
 					if err != nil {
 						t.Errorf("%s GET %s: %v", who, p, err)

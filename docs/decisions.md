@@ -1206,3 +1206,118 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Per-cluster counters from the stats Snellius already reads, in Phase 6: rejected for now, since the mapping to backends is the hard part and it would grow Phase 6.
 
 **Consequences:** A backend without Kubernetes endpoints shows `Backend` status only until #35. The Phase 6 design checks each seam above against #35.
+
+## D-070 — Three views on one path model; path list scope and entry filters (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §3, §5)
+
+**Context:** Phase 6 answers "where does this traffic go, and is it getting there?" for three people: an operator at scale, an application owner, and someone giving an overview or demo.
+
+**Decision:** One path model (a row per attachment, rule and backendRef) feeds three views: a path list, a route trace in route detail, and a per-Gateway map. The path list opens on every Gateway of the install, problems first, and narrows by server-side filters. The page it opens from sets the starting filter (`gateway=`, `backend=`, `route=`), and every filter lives in the URL.
+
+**Consequences:** All three views and backend detail agree, since they read one model. One broken shared backend reads as one backend with many routes, not many failures.
+
+**Alternatives:** A whole-cluster graph: rejected (roadmap principle 5). A path list per Gateway only: rejected, because the operator needs every affected Gateway at once.
+
+## D-071 — Topology and health memoised separately; delegation from view C; problems over the whole chain (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §4.2, §4.3, §4.5)
+
+**Context:** A path joins view A, decoded rules and delegation. Its health changes with collected values and staleness, not only with the snapshot.
+
+**Decision:** Topology is derived from view A, the Delegator's view C and decoded rules, and memoised per install for one snapshot generation. Health is projected onto it per model publication and not reused past its earliest pending deadline. Delegated rows come from view C, and view C's unknown or truncated states carry over. A row's problem is the most severe existing signal along its whole chain; an unknown never hides an error.
+
+**Consequences:** Neither memo outlives one generation. Phase 6 adds no delegation evaluator and no new check.
+
+**Alternatives:** One memo for topology and health: rejected, because health changes far more often than topology.
+
+## D-072 — All route kinds decode rules; route detail for all four, additive DTO (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §4.1, §7.2)
+
+**Context:** GRPCRoute, TCPRoute and TLSRoute keep only `{Ref, Mirror}` today, and route detail serves HTTPRoute only.
+
+**Decision:** The three kinds decode their rules: GRPCRoute matches, and backendRefs with port and weight for all three. Route detail and the route trace serve all four kinds. New DTO fields are optional; HTTPRoute responses keep their shape and meaning, and `MatchDTO.Method` stays HTTP-only.
+
+**Consequences:** More retained decoded rules, counted against D-057. API v1 stays additive.
+
+**Alternatives:** HTTPRoute only in Phase 6: rejected, because paths through the other kinds would show no rule or weight.
+
+## D-073 — Share only where Gateway API defines it; failing share only when attributed (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §4.4)
+
+**Context:** Gateway API defines weights as proportional within one rule. Delegation splits and unattributed `ResolvedRefs` failures are controller semantics.
+
+**Decision:** Share is weight over the rule's weight sum, shown as "% of this rule's requests". It is not shown in a rule with a delegation ref. A share shows as failing only when KGWUI-013/014 attributes the failure to that ref; other candidates show "may fail". Mirror rows show their percent.
+
+**Consequences:** No share of Gateway traffic is ever shown. Failure wording follows the protocol and promises no status code.
+
+**Alternatives:** Shares across delegation or of the whole Gateway: rejected, as they re-derive translation (principle 4).
+
+## D-074 — Backend detail reads EndpointSlices through a bounded, neutral scoped reader (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §9.3)
+
+**Context:** The cached Service and EndpointSlice facts strip addresses and serving state (D-057), and backend detail needs them per endpoint.
+
+**Decision:** A `ScopedReader` interface in the core, implemented by the Kubernetes provider, reads one Service's EndpointSlices on request: a paged, label-selected LIST of at most 10 pages of 10 slices. At most 4 reads run at once, each times out after 2 s, and a memo keeps 32 Services for 5 s. Over a bound the result is partial, timed out or busy. The caller is authorised before any read.
+
+**Consequences:** No watch and no retained state beyond the memo. The reader is the seam #35 reuses (D-069).
+
+**Alternatives:** Keep addresses in the cached facts: rejected by the memory budget. A Pod watch: rejected for the same reason.
+
+## D-075 — Backend judgement and GatewayExtension consumers move behind the kgateway pack (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §11)
+
+**Context:** Phase 5 left Backend judgement in the core and promised to move it. Backend detail also needs to show GatewayExtensions that use a backend.
+
+**Decision:** In 6.3, `backendCheck` moves to the kgateway pack's checks with the same ID and findings. The badge goes behind an optional `computed.BackendJudge` hook. `health.BackendState` keeps its signature. GatewayExtension backend refs come from a new pack hook, `extension.Impl.BackendConsumers`, with role and field. Wrapping rule sets forward the new hook (D-058 item 9).
+
+**Consequences:** Without the pack, a Backend shows conditions and no badge. kgwctl keeps compiling.
+
+**Alternatives:** Keep the judgement in the core: rejected, as it is kgateway-specific.
+
+## D-076 — `cache.ListOnce` and namespace-scoped inputs, additive (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §12; kgwctl #18, #19)
+
+**Context:** A kind is usable only after a WATCH succeeds, and every input is cluster-wide. A kgwctl user with `list` but not `watch`, or with namespace-scoped RBAC, gets nothing (D-056).
+
+**Decision:** `cache.ListOnce(ctx, Config)` fills the same `Snapshot` from LISTs only. A denied LIST is `denied`, any other error `failed`, and `Mode` says "list" or "watch". The error return is for configuration errors and a cancelled context only. `Config.Namespaces` reads namespaced inputs per namespace; nil or empty means cluster-wide. `Access` holds the worst state over the namespaces, and a new `NamespaceAccess` holds the detail; fingerprints include it. A check denied in a namespace reports "unknown" there, never healthy. A scoped install whose controller is not observed says "controller not observed".
+
+**Consequences:** Snellius itself keeps cluster-wide informers and sees no change. The next tag after 6.1 is a minor.
+
+**Alternatives:** A separate snapshot type for list-only reads: rejected, as kgwctl would need two code paths.
+
+## D-077 — Visible-only rows and counts on the Phase 6 pages (2026-11-10, phase 6)
+**Status:** accepted (user, 2026-11-10; Phase 6 design §13)
+
+**Context:** A path exposes its Gateway, ListenerSet, listener, hostnames and delegation ancestors, not only its route and backend. The Authorizer is allow-all today (D-013).
+
+**Decision:** Every new endpoint authorises each row on its whole dependency set per request, memo hits included, before counting and paging. A row the viewer may not fully see is left out, not shown as a placeholder. Summaries, counts and filter options count visible rows only, and the summary says "some paths are hidden from you" when any were.
+
+**Consequences:** This supersedes D-013's count rule on the new pages only. Existing pages keep their rules until Phase 10, and D-013's restricted-finding rule stays on the findings pages.
+
+**Alternatives:** Placeholders for hidden rows, as D-013 counts: rejected, because a path's dependencies would leak through its placeholder.
+
+## D-078 — Phase 6 as built: deviations from the design (2026-11-12, phase 6)
+**Status:** rulings made while the user was away; pending user review
+
+**Context:** Phase 6 ran largely while the user was away. Where the build met a question the design did not settle, a ruling was made and logged; the design (`docs/phases/phase-6/design.md`) now describes the result.
+
+**Decision:** These rulings stand until the user reviews them:
+1. A zero-ready port takes its severity from KGWUI-023 (warning), not the counts; unknown during the hold (§4.5). If wrong: a broken backend shows as a warning, as on the findings page.
+2. Any weight-0 ref is "no traffic", not only when all weights are 0 (§4.4). If wrong: one test changes.
+3. Delegated rows take the root's unattributed `ResolvedRefs` failure without the root's 013/014 candidates (§4.5). If wrong: a false error on a delegated path, never a hidden one.
+4. Rule decoding is opt-in (`objects.DecodeRouteRules`), off the recompute hot path, to protect the heap (D-039).
+5. The topology memo reuses on snapshot `Source` and views generation together, and holds no model or snapshot pointers (§4.3). If wrong: a stale topology until the next change.
+6. Summaries gain `facets` and `notComputed`; a class-only install gets an explanation, not paths (§5). If wrong: those installs see no paths.
+7. The path and backend lists page on the server (≤ 200 rows) instead of a virtualised table (§5). If wrong: a later virtualisation pass.
+8. The scoped-reader memo has a 1 MiB byte budget (§9.3). If wrong: fewer Services kept warm for 5 s.
+9. D-057 gates the settled heap after a publication, measured in-child with the engine figure, world built with GC off; Extreme is reported, not gated (§14). At phase close the settled worst world is +46.6 of 48 MiB (warm again +47.4, reported). If wrong: a real process's heap fragmentation can pass the budget.
+10. The map chunk budget is 80 kB gzipped, not ~50 kB; React Flow alone is ≈ 60 kB (§6.2). If wrong: 20 kB more on the map tab only.
+11. Delegated children show at rest; a delegating route collapses (`collapse`); the rule column is always reserved so backends never move (§6.1). If wrong: a wider resting map.
+12. Edge state is the worst row, a lit edge the worst shared row; broken only when every row fails, never under a state filter; partial error has a hollow ring (§6.1). If wrong: one styling rule to revisit.
+13. Export covers the whole drawn graph, not the viewport (§6.1).
+14. Events stay cluster-wide under `Config.Namespaces` (§12.2). If wrong: a namespace-only user sees Events "denied".
+15. No `@axe-core/playwright` scan (a new dependency needs approval); role, name and focus assertions stand in for it.
+16. Reversed in 6.7: the Backends `used` filter and its facets count visible routes and consumers only. A Backend only hidden objects use is listed under `used=no` ("no visible consumers"); excluding it there revealed the hidden use (D-077).
+
+**Consequences:** Nothing here changes a budget, a finding code or the meaning of API v1. Each item can be reversed on its own.
+
+**Alternatives:** Wait for the user at each question: rejected under the away rule; only pushes, posts and approvals were queued.

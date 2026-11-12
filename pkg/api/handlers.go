@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/endpoints"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -20,6 +21,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/overview"
+	"github.com/DuncanDoyle/snellius/pkg/paths"
 	"github.com/DuncanDoyle/snellius/pkg/platform"
 	"github.com/DuncanDoyle/snellius/pkg/version"
 )
@@ -45,7 +47,13 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 		cfg.commands = diagnose.Kubectl{}
 	}
 	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor,
-		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor}
+		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor, pathMemo: cfg.pathMemo, scoped: cfg.scoped, consumersFor: cfg.consumersFor}
+	if h.pathMemo == nil {
+		h.pathMemo = paths.NewMemo(nil)
+	}
+	if h.scoped == nil {
+		h.scoped = endpoints.NoReader
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -66,6 +74,9 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation", h.routeDelegation)
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
 	mux.HandleFunc("GET /api/v1/installs/{id}/refs", h.refs)
+	mux.HandleFunc("GET /api/v1/installs/{id}/paths", h.pathList)
+	mux.HandleFunc("GET /api/v1/installs/{id}/backends", h.backendList)
+	mux.HandleFunc("GET /api/v1/installs/{id}/backends/{group}/{kind}/{ns}/{name}", h.backendDetail)
 	mountExts(mux, cfg.ext)
 	// Unknown /api/ paths, extension ones included, get a JSON 404, never the SPA.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
@@ -85,6 +96,19 @@ type handler struct {
 	featuresFor func(install.Install) []string
 	packs       []string
 	kindFor     func(install.Install, objects.GroupKind) bool
+	// pathMemo holds the path topologies and projections; one per handler.
+	pathMemo *paths.Memo
+	// scoped reads one Service's endpoints for backend detail; never nil.
+	// Authorise the backend before every call, memo hits included.
+	scoped endpoints.ScopedReader
+	// consumersFor, if set, gives an install's non-route backend consumers.
+	consumersFor func(install.Install, *install.Owned) []objects.Consumer
+}
+
+// WithScopedReader reads one Service's endpoints for backend detail (design
+// §9.3). Without it, or with nil, those endpoints are unavailable.
+func WithScopedReader(r endpoints.ScopedReader) HandlerOption {
+	return func(c *handlerConfig) { c.scoped = r }
 }
 
 // commandsOf is i's next-step commands: its own, else the handler's.
