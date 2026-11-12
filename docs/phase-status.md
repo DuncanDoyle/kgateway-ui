@@ -14,7 +14,7 @@ Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a tim
 - [x] 6.4 route trace, all route kinds (Tasks 40–42) — closed 2026-11-11, phases/phase-6/phase-6.4-complete.md
 - [x] 6.5 Gateway map, core (Tasks 43–47) — closed 2026-11-11, phases/phase-6/phase-6.5-complete.md
 - [ ] 6.6 Gateway map, the rest; phase close (Tasks 48–50) — Task 50 part 2 waits on Docker
-- [ ] 6.7 phase review fixes (stabilization; reviews/phase-codex.md #1–#9) ← CURRENT
+- [x] 6.7 phase review fixes (stabilization; reviews/phase-codex.md #1–#9) — closed 2026-11-12, phases/phase-6/phase-6.7-complete.md
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -26,10 +26,9 @@ Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a tim
 - [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 6.7 — Phase review fixes (stabilization)
-Base: c227d8d
-Brief: phases/phase-6/phase-6.7-brief.md
-Also open: 6.6 (Base b246dcc) — Task 50 part 2 (e2e matrix, map export specs, reel) waits on Docker
+Sub-phase: 6.6 — Gateway map, the rest; phase close (planned) — Task 50 part 2 (e2e matrix, map export specs, reel) waits on Docker
+Base: b246dcc
+Brief: phases/phase-6/phase-6.6-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
