@@ -456,13 +456,21 @@ func (p *projector) parent(s *attSignals, route objects.Ref, i int) []Signal {
 	if j < 0 || links[j].Attachment != explore.AttachmentAccepted && links[j].Attachment != explore.AttachmentNotAccepted {
 		return append(s.sigs, Signal{Kind: SignalWaiting, Ref: route, State: health.StateUnknown})
 	}
-	c := links[j].Cond
-	switch {
-	case c == nil:
-	case c.Type == "ResolvedRefs":
-		s.refsFalse = true
-	default:
-		s.sigs = append(s.sigs, Signal{Kind: SignalRouteStatus, Code: c.Type, Ref: route, State: health.StateError})
+	// ResolvedRefs is left to ref attribution; a programming failure beside it is every row's.
+	for _, c := range [2]*metav1.Condition{links[j].Cond, links[j].Programming} {
+		switch {
+		case c == nil:
+		case c.Type == "ResolvedRefs":
+			s.refsFalse = true
+		default:
+			s.sigs = append(s.sigs, Signal{Kind: SignalRouteStatus, Code: c.Type, Ref: route, State: health.StateError})
+			// The route's KGWUI-015 comes from such a failure on one of its parents.
+			for _, f := range p.findings[route] {
+				if f.Code == health.CodeRuleReplaced && !slices.ContainsFunc(s.sigs, func(g Signal) bool { return g.Code == f.Code && g.Ref == route }) {
+					s.sigs = append(s.sigs, Signal{Kind: SignalFinding, Code: f.Code, Ref: route, State: sevState(f.Severity)})
+				}
+			}
+		}
 	}
 	return s.sigs
 }

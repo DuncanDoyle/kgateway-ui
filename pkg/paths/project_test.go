@@ -428,3 +428,42 @@ func TestProjectPathsWorldBytes(t *testing.T) {
 		t.Logf("%s endpoints %s: %d rows, %d with signals, %d distinct sets, %d bytes", tier.Name, cap, len(p.Problems), bad, len(sets), p.Bytes())
 	}
 }
+
+// parentWith is the status.parents entry of a route on p with Accepted=True
+// and the given ResolvedRefs and kgateway.dev/Programmed conditions.
+func parentWith(p objects.ParentRef, refs, programmed metav1.Condition) testutil.RouteParent {
+	return testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), refs, programmed}}
+}
+
+// Simultaneous failures: ResolvedRefs=False attributed to ref b does not hide
+// the attachment's kgateway.dev/Programmed=False from ref cart's row, and a
+// root route's KGWUI-015 counts on its rows.
+func TestProjectRefsDoNotHideProgramming(t *testing.T) {
+	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{1}, 1)
+	refsFalse := testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	for _, reason := range []string{"Invalid", "RouteRuleDropped"} {
+		st := parentWith(gwEdge, refsFalse, testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, reason))
+		r := testutil.WithRules(testutil.HTTPRoute("shop", "r", []objects.ParentRef{gwEdge}, st), rule([]any{svc("cart"), svc("b")}))
+		top, p, _ := project(t, endpointsSnap(t, svcs, eps, edge("http"), r), "on")
+		for i := range top.Rows {
+			pr := p.Problems[i]
+			if pr.State != health.StateError || !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool {
+				return s.Kind == paths.SignalRouteStatus && s.Code == "kgateway.dev/Programmed"
+			}) {
+				t.Fatalf("%s: row %d %+v", reason, i, pr)
+			}
+			if reason == "RouteRuleDropped" && !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool { return s.Code == health.CodeRuleReplaced }) {
+				t.Fatalf("%s: row %d lacks the root's KGWUI-015: %+v", reason, i, pr)
+			}
+		}
+	}
+	// A root's KGWUI-015 alone, ResolvedRefs resolved, counts too.
+	st := parentWith(gwEdge, testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
+		testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleDropped"))
+	r := testutil.WithRules(testutil.HTTPRoute("shop", "r", []objects.ParentRef{gwEdge}, st), rule([]any{svc("cart")}))
+	_, p, _ := project(t, endpointsSnap(t, svcs, eps, edge("http"), r), "on")
+	if pr := p.Problems[0]; !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool { return s.Code == health.CodeRuleReplaced }) {
+		t.Fatalf("root KGWUI-015 missing: %+v", pr)
+	}
+}

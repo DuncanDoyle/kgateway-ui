@@ -123,6 +123,9 @@ type ParentLink struct {
 	// Cond is the deciding condition: the first current False among
 	// Accepted, ResolvedRefs and the install's optional route types (design §7.3).
 	Cond *metav1.Condition
+	// Programming is the first current False optional type when Cond is
+	// ResolvedRefs: a programming failure that Cond's order would hide.
+	Programming *metav1.Condition
 	// Pending is why the status entry is not current, for a pending link.
 	Pending string
 	// Spec is the index of Ref in the row's spec parentRefs, or -1.
