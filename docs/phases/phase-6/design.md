@@ -89,6 +89,7 @@ A **path** is one way traffic can flow: Gateway → listener → effective hostn
 - A row carries the attachment's effective hostnames as a list; it does not expand per hostname. `sort=hostname` sorts by the first hostname in order; `q` matches any (our call, builder Q3).
 - A ListenerSet attachment projects to its parent Gateway. The row shows the ListenerSet and the Gateway.
 - A rule with no backendRef is one row whose backend is the **written action**: redirect, direct response (via `extensionRef`), or "no backend". No intent is inferred (Codex #3).
+- A backendRef to an HTTPRoute that the Delegator follows is a row with the action `delegate`; its children's rows follow under it (§4.2). The API's actions are `redirect`, `direct-response`, `none` and `delegate`.
 - A mirror is a row with a `mirror` flag and its percent.
 
 Inputs, all existing:
@@ -109,6 +110,7 @@ View A excludes delegated children that have no Gateway or ListenerSet parent (`
 
 - **Topology** (attachments × rules × refs, with dependency sets) is derived from the snapshot and the computed views. It is memoised per install for one snapshot generation. A row is a compact struct of indexes into existing objects, ≤ 48 bytes.
 - **Health projection** maps each row to its problem from findings, conditions and capability states. It is memoised per model publication: the engine's published model identity, which changes with collected values and staleness (`pkg/engine/loop.go:11-31`), not only with the snapshot. Like D-052, the memo also holds the earliest pending deadline (finding holds, persistence, scrape expiry) and is not reused past it.
+- **Memo keys:** the topology is reused while the snapshot's `Source` is equal **and** the install's views generation (`computed.Views.Generation`, bumped only when view A or view C recomputes) is equal. The projection is keyed by the model's `Seq` plus its earliest deadline. The memo holds no model or snapshot pointers, only the data it derived, and drops installs absent from the latest publication.
 - Sorting happens on the projected table. Paging and authorisation happen per request (§13).
 - `explore.Index.ByBackend` (`pkg/explore/explore.go:168-173`) stays as is.
 
@@ -118,7 +120,8 @@ Cardinality: rows = Σ over attachments of Σ over rules of max(1, refs), plus d
 
 Gateway API defines weights as proportional within one rule. Share = weight ÷ sum of the rule's weights, shown as "% of this rule's requests". It is never shown as a share of Gateway traffic.
 - Share is shown only for rules with no delegation ref. In a rule that mixes delegation and ordinary refs it is "not shown", because the split there is controller semantics (principle 4).
-- When every weight in the rule is 0, every ref shows "0 %, no traffic".
+- Any ref with weight 0 shows "0 %, no traffic", whatever the other weights are; Gateway API sends it nothing.
+- Redirect, direct-response, no-backend and `delegate` rows show no share (blank).
 - A ref the route's status reports as unresolved shows its share as **failing** only when KGWUI-013/014 attributes the failure to it. Unattributed candidates show their share as written plus "may fail". The rule-level bar marks the rule as having an unresolved ref.
 - Failure wording follows the protocol: "requests fail" for HTTP and gRPC, "connections fail" for TCP and TLS. No status code is promised.
 - Mirror rows show their mirror percent, not a share.
@@ -129,8 +132,10 @@ A row's problem is the most severe signal along its **whole chain**. Error beats
 1. **Gateway and listener:** Gateway `Accepted`/`Programmed`, listener conditions, and Gateway-scoped findings: xDS rejects (`pkg/health/xds.go:272`), proxy readiness and disconnects (`pkg/health/proxystats.go:162`, `pkg/health/checks.go`).
 2. **Route:** the parent status for this attachment (`Accepted`, `ResolvedRefs`), stale or missing status ("waiting for the controller", D-014), and the existing route findings (dropped or replaced rules).
 3. **Delegation:** the view C state on delegated rows (§4.2).
-4. **Backend:** KGWUI-002 (Backend not accepted), KGWUI-013/014 when attributed to this ref, and KGWUI-023 (no ready endpoints) for this backend **port**.
-5. **Coverage:** "unknown" when a check this row depends on is unavailable, for example the endpoints capability is off, denied or failing for a Service ref. Never "healthy".
+4. **Backend:** KGWUI-002 (Backend not accepted), KGWUI-013/014 when attributed to this ref, and KGWUI-023 (no ready endpoints) for this backend **port**. A port with no ready endpoint takes its severity from KGWUI-023 (warning), not from the counts; while 023 is held the row is "unknown" with the hold, never healthy.
+5. **Coverage:** "unknown" when a check this row depends on is unavailable, for example the endpoints capability is off, denied or failing for a Service ref. A missing Service or Service port with the capability on is "unknown" (waiting). Never "healthy".
+
+A delegated row takes its root's unattributed `ResolvedRefs` failure without consulting the root's own 013/014 candidates. This can over-report an error on a delegated path, never hide one.
 
 Backend-resource refs (kgateway `Backend`) have no endpoints; their endpoint cell is "not applicable", and their state comes from the Backend's conditions (builder Q7).
 
@@ -144,11 +149,13 @@ Rows sort problem-first by default (error, warning, unknown, healthy), then by G
 - `gateway` (ns/name, repeatable), `listener`, `route` (group/kind/ns/name, matches any route in the chain), `backend` (group/kind/ns/name, repeatable, `core` for the empty group as in `pkg/api/params.go:28`), `namespace`, `state` (error, warning, unknown, healthy), `kind` (route kind), `mirror` (include, only, exclude), `q` (text over hostnames, route and backend names);
 - `sort` (`problem.asc` default; `gateway`, `route`, `backend`, `hostname`), `cursor`, `limit` (1–200, default 50), as in `pkg/api/params.go:50-128`.
 
-**Response:** the rows, plus a **summary of the whole filtered result**: affected paths, distinct routes, Gateways and backends, per state. One broken shared backend then reads as "1 backend, 37 routes, 4 Gateways", not 37 failures. The summary also says when coverage is incomplete ("endpoints not read") so a count never implies complete coverage.
+**Response:** the rows, plus a **summary of the whole filtered result**: affected paths, distinct routes, Gateways and backends, per state. One broken shared backend then reads as "1 backend, 37 routes, 4 Gateways", not 37 failures. The summary also says when coverage is incomplete ("endpoints not read") so a count never implies complete coverage. It carries:
+- `facets`: the Gateways and route namespaces of all visible rows, each computed with every filter except its own; the quick chips read their options from it.
+- `notComputed`: `no-attachments` when the install has no computed views. The page explains it; a class-only install has no paths.
 
 **Entry points set the filter:** nav → all Gateways; Gateway detail → `gateway=`; backend detail → `backend=`; route detail → `route=`. Every filter, the sort and the cursor live in the URL (`web/packages/shell/src/explore/listQuery.ts:92-124`). Changing a filter resets the cursor.
 
-**Scale:** 1000s of rows render in the existing virtualised table. Filters are chips, per the team's UI rules.
+**Scale:** 1000s of rows stay usable through server paging (at most 200 rows per page) and filters, in the existing object table. Filters are chips, per the team's UI rules.
 
 ## 6. Gateway map
 
@@ -156,18 +163,20 @@ The user wants the map "as interactive as possible" (2026-11-10).
 
 ### 6.1 Behaviour
 
-The map is a "Map" tab on Gateway detail, with four columns: Gateway → listeners → routes → backends. Node states use the one health vocabulary (colour + icon + text). It reads the same filter params as the path list, server-side, with `gateway=` fixed. Delegated routes appear in the routes column under their root, marked as delegated.
+The map is a "Map" tab on Gateway detail, with Gateway → listeners → routes → (rules) → backends columns. It shows the whole Gateway and ignores the Overview tab's listener picker. Node states use the one health vocabulary (colour + icon + text). It reads the same filter params as the path list, server-side, with `gateway=` fixed. Delegated routes appear at rest in the routes column under their root, marked as delegated.
 
 Interactions (user, 2026-11-10):
 1. **Pan, zoom, fit to view and a minimap.**
 2. **Hover highlights** every path through a node and dims the rest. Edge thickness follows the share where share is shown (§4.4).
 3. **Side panel on click:** the node's state, problems, endpoints and links, without leaving the map.
-4. **Expand and collapse:** a route opens into its rules, and a delegating route into its children.
-5. **Focus mode:** a pinned node reduces the map to its upstream and downstream paths. The selection is in the URL.
+4. **Expand and collapse:** a route opens into its rules (URL `expand`), and a delegating route hides its children (URL `collapse`). The rule column is always reserved, so backends never move on expand.
+5. **Focus mode:** a pinned node reduces the map to its upstream and downstream paths. The node is in the URL (`focus`); a focus on a node not on the map says so.
 6. **Search** to locate a node, and **filter chips** (problems only, kind, namespace) that update the map live.
 7. **Animated flow** on healthy edges and broken edges drawn as broken. Off under `prefers-reduced-motion`.
 8. **Keyboard navigation** between connected nodes. A table toggle shows the same rows as the path list, as the accessible equivalent.
-9. **Export** of the current view as PNG or SVG.
+9. **Export** as PNG or SVG of the whole drawn graph (filters, focus and collapse applied), not the viewport.
+
+**Edge and node state.** At rest an edge takes the worst state of its rows. Under hover or selection, a lit edge takes the worst state of the rows it shares with the active node. An edge is **broken** (dashed, error icon) only when every row on it fails, and never under a state filter, since the loaded rows are then not all of them. An edge where some rows fail is a solid error stroke with a hollow ring, so it differs from broken without colour. A node takes the worst state of the signals naming it; a rule node, which no signal names, takes the worst state of its rows. Neither ever defaults to healthy (D-006).
 
 **Large Gateways open filtered (our call):** when the Gateway has more than 60 routes or 60 backends, the map opens on "Problems only" with a prompt to narrow. The threshold is a constant, tuned on the Large fixture.
 
@@ -177,7 +186,7 @@ The canvas uses React Flow (`@xyflow/react`, MIT), the first graph dependency in
 
 The layout is our own: fixed columns, with nodes in a column ordered by the barycentre of their connected nodes to reduce crossings. No layout engine is added (ELK alone is about 1.4 MB). Expand and collapse re-run the layout for the changed columns only.
 
-The map loads lazily as its own chunk, so pages without it don't pay for it.
+The map loads lazily as its own chunk, with the graph and layout code, so pages without it don't pay for it. The chunk's budget is 80 kB gzipped (React Flow is about 60 kB), held by a bundle-size test.
 
 ## 7. Route trace
 
@@ -207,7 +216,7 @@ Each rule has a marked "Filters" area that today shows the filters as written. P
 - Every Service or other kind written as a backendRef by an admitted route of the install, **whether or not its attachment succeeded**, and every backend a non-route consumer names (§8.3). A backend with refs but no successful path shows "0 confirmed exposures" and the attachment's failure or uncertainty.
 - Unreferenced Services are not listed: at the Extreme tier that would be 25,000 rows of noise.
 
-**Page:** `/i/:id/backends`, nav item "Backends". **API:** `GET /api/v1/installs/{id}/backends` with `kind`, `namespace`, `state`, `used` (yes, no), `gateway`, `q`, `sort` (`problem.asc` default, `name`, `used`), cursor and limit. Chips as in the mockup: Problems, Services, Backend resources, Unused, Namespace, Gateway.
+**Page:** `/i/:id/backends`, nav item "Backends". **API:** `GET /api/v1/installs/{id}/backends` with `kind`, `namespace`, `state`, `used` (yes, no), `gateway`, `q`, `sort` (`problem.asc` default, `name`, `used`), cursor and limit. Chips as in the mockup: Problems, Services, Backend resources, Unused, Namespace, Gateway. Problems keeps error, warning and unknown, as on Traffic. The response carries `facets` (Gateways and namespaces over visible rows, each without its own filter), as `/paths` does (§5).
 
 Columns: backend, kind (Service, or `Backend · <spec.type>`), endpoints (ready/total for the referenced ports, or "not applicable"), used by (routes, Gateways, other consumers), problem.
 
@@ -240,10 +249,10 @@ Every endpoint summary carries a source, a read time and a completeness: complet
 ### 9.3 Detail: the scoped reader (our call; Codex #9)
 
 The cached facts strip addresses, serving and terminating (D-057), and the mockup's per-address table needs them. Backend detail therefore reads that one Service's EndpointSlices on request.
-- **Interface in the core, implementation in the Kubernetes provider (D-016).** `ScopedReader.Endpoints(ctx, install, service) (EndpointsResult, error)`. A provider without it reports "unavailable", and the section shows the cached counts only.
+- **Interface in the core, implementation in the Kubernetes provider (D-016).** `endpoints.ScopedReader.Endpoints(ctx, installID string, svc objects.Ref) (endpoints.Result, error)`, implemented by `cache.NewScopedReader` and passed to the API with `api.WithScopedReader`. A provider without it (`endpoints.NoReader`) reports "unavailable", and the section shows the cached counts only.
 - **Read:** a namespaced LIST with `kubernetes.io/service-name=<name>`, paged with `limit=10` slices and at most 10 pages. A slice holds at most 100 endpoints by default, so a page decodes at most about 1,000 endpoints. A continuation beyond the last page, or more than 1,000 endpoints in all, marks the result **partial**.
 - **Process-wide bounds:** at most 4 reads in flight, and duplicate requests coalesce. Each read times out after 2 s. The memo keeps at most 32 Services for 5 s each, least recently used first, and at most 1,000 endpoints per Service. Over a bound the section says "partial", "timed out" or "busy, retry".
-- **Memo size (6.3):** ≤ 1 MiB by byte budget, evicting least recently used first; 32 Services fit at the measured density (0.64 MiB IPv4, 0.82 MiB IPv6), and FQDNs with prefix-free Pod names keep about 8 (`TestMemoRetained`).
+- **Memo size:** ≤ 1 MiB by byte budget, evicting least recently used first while over it; a result larger than the budget is never kept. 32 Services fit at the measured density (0.64 MiB IPv4, 0.82 MiB IPv6), and FQDNs with prefix-free Pod names keep about 8 (`TestMemoRetained`).
 - **Authorisation first:** the caller must be allowed to see the backend, on every request and on memo hits too, before any read (§13).
 - **Shown per endpoint:** address, port, ready, serving, terminating, and the target Pod name when the slice names it.
 - **RBAC:** list EndpointSlices, which the chart already grants for the endpoints capability. There is no watch and no retained state beyond the memo.
@@ -316,7 +325,7 @@ Both are additive Go API. Nothing kgwctl uses today changes type or meaning (Cod
 ### 12.2 Namespace-scoped inputs (#19)
 
 `cache.Config.Namespaces []string`. Nil or empty means cluster-wide, as today. The list is deduplicated and sorted.
-- Namespaced served kinds, Services, EndpointSlices and the selected Pods and Deployments get one informer (or one LIST) per namespace. Cluster-scoped kinds (GatewayClass, Namespace) are attempted cluster-wide and reported in `Access` as usual.
+- Namespaced served kinds, Services, EndpointSlices and the selected Pods and Deployments get one informer (or one LIST) per namespace. Cluster-scoped kinds (GatewayClass, Namespace) are attempted cluster-wide and reported in `Access` as usual. Events, an optional input, stay cluster-wide.
 - `Snapshot.Access` keeps its type, `map[GVR]Access`, as the aggregate: `ok` only when every namespace is `ok`, else the worst state. A new `Snapshot.NamespaceAccess map[GVR]map[string]Access` holds the detail. Fingerprints include it.
 - **Consumers:** Snellius does not set `Namespaces`, so nothing changes for it. A library user reads `NamespaceAccess` to say which namespaces it could not read. A check whose input is denied in some namespaces reports "unknown" for objects there, never healthy.
 - **Install detection outside the list:** an install whose controller is not observed is reported as "controller not observed", which is different from a known install outside scope. Assignment still runs on what is visible (answer to #19's open question; our call).
@@ -329,12 +338,12 @@ The next tag after 6.1 is a minor.
 The Authorizer is allow-all today (D-013). A path exposes more than its route and backend: Gateway, ListenerSet, listener, hostnames, and delegation ancestors.
 
 **Built regardless (the seam):**
-- Each topology row carries its dependency set (§4.3).
+- Each topology row carries its dependency set (§4.3). A delegated row carries the root eligibility of every hop in its chain (the view A outcome dependencies, such as Namespaces and targets, that decide whether a root reaches that route), merged into its deps as `explore.Index.DelegRows` does. In name mode it also carries the child HTTPRoute ref.
 - Every request authorises each row by `allowDeps` (`pkg/api/visible.go:88`) on its dependencies, after the viewer-independent memo and before counting and paging. Memo hits are authorised too.
 - Backend detail authorises the backend before reading anything, the scoped reader included.
 - With allow-all this costs one fast path (`allowsAll`), as today.
 
-**Approved by the user, 2026-11-10 (D-077):** on the new pages, a row whose dependencies the viewer may not all see is left out, not shown as a placeholder. Summaries, counts and filter options count only visible rows, and the summary says "some paths are hidden from you" when any were. This supersedes D-013's count rule for the new pages only; existing pages keep their rules until per-user authorisation (Phase 10). D-013's restricted-finding rule (severity and identity of a hidden resource's finding) stays on the findings pages.
+**Approved by the user, 2026-11-10 (D-077):** on the new pages, a row whose dependencies the viewer may not all see is left out, not shown as a placeholder. Summaries, counts and filter options count only visible rows, and the summary says "some paths are hidden from you" when any row was hidden, even outside the active filter. This supersedes D-013's count rule for the new pages only; existing pages keep their rules until per-user authorisation (Phase 10). D-013's restricted-finding rule (severity and identity of a hidden resource's finding) stays on the findings pages.
 
 
 ## 14. Budgets (Codex #14, builder Q4)
@@ -347,13 +356,17 @@ The Authorizer is allow-all today (D-013). A path exposes more than its route an
   - the health projection memo;
   - the scoped reader's memo (≤ 1 MiB by byte budget; 32 Services × 1,000 endpoints fit at the measured density).
 - **Row gate:** at 48 bytes, 8 MiB is about 175,000 rows. The topology memo gets its own cap of 2 MiB per install generation. Above the cap, the paths endpoint pages straight from derivation without a memo and reports it in the response.
-- **Measured after warming every API cache:** the bench gains an API-level pass. It requests paths, backends and backend detail for every install, many distinct Services, and overlapping generations, then measures retained heap. The engine-only bench cannot see these memos.
+- **Measured with the API memos in place:** the bench has an API-level pass. It requests paths, backends and backend detail for every install and many distinct Services, then measures retained heap. The engine-only bench cannot see these memos.
+- **D-057 method:** the gated figure is the **settled** heap right after a publication, with no request since. Each of five child processes measures it together with the engine figure (same process, same snapshot), and the median gates. The measurement world is built with GC off, then GC is restored before measuring, so span fragmentation does not swing the figure. The heap after warming the memos again is reported, not gated. Large worlds are gated; Extreme is reported.
 - **Fixtures:** the scale generator already makes GRPCRoute, TCPRoute and TLSRoute at 5 % each, mostly with one rule and one ref (`internal/testutil/scale/scale.go:257-262, 632-654`). The Large and worst fixtures gain multi-rule, multi-ref and delegated routes so rules × refs expansion is exercised.
-- **Per request:** at Large, the cold and warm paths endpoint, and concurrent cold backend details, are measured for time and bytes allocated. These are new request gates, separate from D-039's recompute gates. Starting targets, tuned in 6.2: paths under 200 ms and 32 MiB allocated cold, under 20 ms and 2 MiB warm; backend detail under 4 MiB allocated, the scoped read included.
-  - Tuned in 6.2 (`bench-6.2.txt`), paths cold: under 100 ms and 32 MiB allocated (measured 31 ms at large-paths, 28.4 MiB at large-contradicting-worst, restricted).
-  - Tuned in 6.2, paths warm: under 5 ms and 2 MiB allocated (measured 1.2 ms, 1.7 MiB at large-contradicting-worst, restricted).
+- **Per request:** at Large, the cold and warm paths endpoint, and concurrent cold backend details, are measured for time and bytes allocated. These are request gates, separate from D-039's recompute gates, with the median gated under allow-all and a restricting Authorizer:
+  - paths cold (fresh memo): under 100 ms and 32 MiB allocated;
+  - paths warm (memo hit): under 5 ms and 2 MiB allocated;
+  - route detail with its trace, on the root with the widest delegation tree: the same cold and warm gates (`TestBudgetRouteDetail`);
+  - backend detail, concurrent and cold, the scoped read of 1,000 endpoints included: under 4 MiB allocated (`TestBudgetBackendDetail`).
+  Times gate on the reference machine (D-044); allocation gates everywhere.
 - **Overshoot:** a sub-phase that overshoots shrinks first. For example, it drops the topology memo or derives GRPC, TCP and TLS rules on request. It asks the user before proposing a budget raise.
-- The SPA gains `@xyflow/react` (about 50 kB gzipped), loaded lazily with the map. The other pages add no dependency.
+- The SPA gains `@xyflow/react` (about 60 kB gzipped), loaded lazily with the map in one chunk with a budget of 80 kB gzipped (§6.2). This is a bundle-size test, not a D-057 gate. The other pages add no dependency.
 
 ## 15. Proposed decisions
 

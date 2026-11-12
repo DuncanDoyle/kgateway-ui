@@ -80,6 +80,17 @@ The UI honours the controller's `discoveryNamespaceSelectors`. It only counts re
 
 [docs/findings.md](docs/findings.md) has one entry per finding code: its cause, its evidence and how to fix it. "Learn more" on a finding's page opens that entry. A `since` the UI derives resets when the UI restarts.
 
+## Traffic and backends
+
+These pages answer "where does this traffic go, and is it getting there?" They add views, not checks: every problem shown comes from an existing finding, condition or capability state.
+
+- **Traffic** (`/i/{id}/traffic`) lists every path of an install, one row per Gateway, listener, route, rule and backendRef. Problems sort first. Filter by Gateway, route, backend, namespace, state, kind or text; the summary counts the affected routes, Gateways and backends. API: `GET /api/v1/installs/{id}/paths`.
+- **Backends** (`/i/{id}/backends`) lists every kgateway Backend and every backend a route or GatewayExtension names, with ready endpoints per port. Backend detail shows how the backend is exposed, its endpoints read on request from that Service's EndpointSlices, the port chain, and why a reference to it fails.
+- **Route trace.** Route detail, for HTTPRoute, GRPCRoute, TCPRoute and TLSRoute, shows each rule's match and backends, with each backend's share of the rule and its state.
+- **Gateway map.** The Map tab on Gateway detail draws Gateway → listeners → routes → backends. Hover or select a node to light its paths, expand a route into its rules, collapse delegated routes, or show only one node's paths. A Gateway with more than 60 routes or backends opens on problems only.
+  - Keyboard: the map is one tab stop. Arrow keys move along the paths, Enter opens details, Escape closes them. The Table button shows the same paths as a table.
+  - Export: SVG or PNG of the whole drawn map, with the current filters, focus and collapse applied.
+
 ## Extending
 
 Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds and runs; the types it names are in [acme.go](examples/downstream/acme.go). It takes the stock binary's flags from `pkg/cli` and embeds its own web build: a build from the Go module cache embeds only a placeholder page.
@@ -249,6 +260,10 @@ Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new n
 Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v1 and the finding anchors do not change.
 
 ## Upgrade notes
+
+### Traffic flow and backends (Phase 6)
+
+API v1 changes are additive. New endpoints: `…/paths`, `…/backends` and `…/backends/{group}/{kind}/{ns}/{name}`. Route detail serves GRPCRoute, TCPRoute and TLSRoute instead of 404, and `BackendRefDTO` gains optional `share`, `shareState`, `problem` and `endpoints`. The install nav gains Traffic and Backends.
 
 ### Backend judgement in the kgateway pack (sub-phase 6.3)
 
