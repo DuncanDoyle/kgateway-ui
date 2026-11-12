@@ -15,6 +15,9 @@ const themes = [
   { name: "Control room light", mode: "light" },
 ] as const;
 
+// NACK's Cluster reject reaches every proxy of the install, so traffic/traffic is an error there (KGWUI-001).
+test.skip(process.env.NACK === "1", "needs traffic/traffic's proxy to accept its config (no NACK fixture)");
+
 async function pickTheme(page: Page, theme: (typeof themes)[number]) {
   await page.getByRole("button", { name: /^Theme:/ }).click();
   await page.getByRole("menuitemradio", { name: theme.name, exact: true }).click();
