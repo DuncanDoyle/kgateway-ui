@@ -4,8 +4,9 @@
 package paths
 
 import (
+	"cmp"
 	"encoding/binary"
-	"hash/fnv"
+	"math"
 	"slices"
 	"strconv"
 	"unsafe"
@@ -65,38 +66,32 @@ func (t *Topology) RowID(r Row) string {
 
 // rowHash is FNV-1a over the identity RowID names.
 func (t *Topology) rowHash(r Row) uint64 {
-	h := fnv.New64a()
-	str := func(s string) {
-		_, _ = h.Write([]byte(s)) // a hash.Hash never fails
-		_, _ = h.Write([]byte{0})
-	}
-	ref := func(x objects.Ref) { str(x.Group); str(x.Kind); str(x.Namespace); str(x.Name) }
-	num := func(n int64) { str(strconv.FormatInt(n, 10)) }
+	h := fnvOffset
 	a := &t.atts[r.att]
-	ref(t.Refs[a.gateway])
-	ref(t.Refs[a.resource])
-	str(t.listeners[a.listener].Name)
-	num(int64(a.parent))
+	h.ref(t.Refs[a.gateway])
+	h.ref(t.Refs[a.resource])
+	h.str(t.listeners[a.listener].Name)
+	h.num(int64(a.parent))
 	for _, ri := range t.chain(r) {
-		ref(t.Refs[t.routes[ri].ref])
+		h.ref(t.Refs[t.routes[ri].ref])
 	}
-	for _, m := range t.ctxs[r.ctx].matches {
-		str("m")
-		if m.Path != nil {
-			str(m.Path.Type)
-			str(m.Path.Value)
+	h.matches(t.ctxs[r.ctx].matches)
+	h.num(int64(r.rule))
+	h.num(int64(r.ref))
+	h.num(int64(r.mirror))
+	return uint64(h)
+}
+
+// compareSpec orders rows of one rule as written: each backendRef before its
+// mirrors, the refs in order, then the rule's own mirrors.
+func compareSpec(aRef, aMirror, bRef, bMirror int16) int {
+	rank := func(ref, mirror int16) int {
+		if ref < 0 && mirror >= 0 {
+			return math.MaxInt16 + 1
 		}
-		for _, k := range slices.Concat(m.Headers, []objects.KeyMatch{{}}, m.QueryParams) {
-			str(k.Type)
-			str(k.Name)
-			str(k.Value)
-		}
-		str(m.Method)
+		return int(ref)
 	}
-	num(int64(r.rule))
-	num(int64(r.ref))
-	num(int64(r.mirror))
-	return h.Sum64()
+	return cmp.Or(cmp.Compare(rank(aRef, aMirror), rank(bRef, bMirror)), cmp.Compare(aMirror, bMirror))
 }
 
 // number sets each row's dup: its place among the earlier rows that hash alike.

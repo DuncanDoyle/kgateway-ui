@@ -66,6 +66,8 @@ type Page struct {
 	Rows       []int32
 	Next, Prev string
 	Summary    Summary
+	// Digest is the whole ordered result's Projection.Digest, every page's alike.
+	Digest uint64
 }
 
 // Summary counts the filtered rows a viewer may see (design §5, §13). Routes
@@ -195,6 +197,7 @@ func Run(t *Topology, p *Projection, q Query, visible func(explore.DepSet) bool)
 		slices.SortStableFunc(es, func(a, b int32) int { return qq.primary(t, a, b) })
 	}
 	pg := qq.page(t, p, es)
+	pg.Digest = p.Digest(es)
 	pg.Summary = tl.summary()
 	pg.Summary.Facets = fc.facets(t)
 	return pg, nil
@@ -396,8 +399,12 @@ func (q *query) compareAnchor(t *Topology, p *Projection, i int32, a *anchor) in
 	if q.Sort == SortBackend || q.Sort == SortHostname {
 		c = compareVals(t.val(r, q.Sort), a.val, q.Desc)
 	}
-	return cmp.Or(c, cmp.Compare(stateRank(st), stateRank(a.state)), t.Gateway(r).Compare(a.gateway),
-		cmp.Compare(t.Listener(r).Name, a.listener), t.compareChain(r, a.chain), cmp.Compare(t.Rule(r).Index, a.rule), cmp.Compare(i, a.row))
+	if c := cmp.Or(c, cmp.Compare(stateRank(st), stateRank(a.state)), t.Gateway(r).Compare(a.gateway),
+		cmp.Compare(t.Listener(r).Name, a.listener), t.compareChain(r, a.chain), cmp.Compare(t.Rule(r).Index, a.rule),
+		compareSpec(r.ref, r.mirror, a.ref, a.mirror)); c != 0 {
+		return c
+	}
+	return cmp.Or(cmp.Compare(t.rowHash(r), a.hash), cmp.Compare(r.dup, a.dup))
 }
 
 // compareChain orders the row's chain against refs, as compareChains does.
@@ -415,7 +422,7 @@ func (t *Topology) compareChain(r Row, refs []objects.Ref) int {
 func anchorOf(t *Topology, p *Projection, i int32, sort string) *anchor {
 	r := t.Rows[i]
 	return &anchor{val: t.val(r, sort), state: p.Problems[i].State, gateway: t.Gateway(r), listener: t.Listener(r).Name,
-		chain: t.Chain(r), rule: t.Rule(r).Index, row: i}
+		chain: t.Chain(r), rule: t.Rule(r).Index, ref: r.ref, mirror: r.mirror, hash: t.rowHash(r), dup: r.dup}
 }
 
 // page slices the sorted rows es around the cursor, as pkg/explore does. A

@@ -23,6 +23,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/paths"
 )
@@ -337,29 +338,60 @@ func TestPathsRowIDs(t *testing.T) {
 	}
 }
 
-// Pages cut from one publication share a revision; a new publication, as
-// when one route recovers and another fails, gives a different one, so a
-// walk across pages can tell its pages apart even when every count agrees.
-func TestPathsRevision(t *testing.T) {
+// A walk over one Gateway's pages completes while another Gateway's paths
+// change before every page: only a change in this result changes its revision.
+func TestPathsRevisionFollowsResult(t *testing.T) {
 	h := newHarness(t, setup{endpoints: true}, pathsWorld()...)
-	first := get[PathsResponse](t, h.srv, pathsURL+"?limit=2", 200)
+	route := func(name string, parent objects.ParentRef) *unstructured.Unstructured {
+		return testutil.WithRules(testutil.HTTPRoute("shop", name, []objects.ParentRef{parent}, testutil.AcceptedBy(parent, testutil.Controller)),
+			backendRule([]any{svcRef("cart-svc")}))
+	}
+	publish := func(u *unstructured.Unstructured) {
+		createAndWait(h.ctx, t, h.dyn, h.cache, testutil.ServedUpstream(), u)
+		h.e.Compute()
+	}
+	const edge, other = pathsURL + "?gateway=infra/edge&limit=1", pathsURL + "?gateway=infra/other"
+	first := get[PathsResponse](t, h.srv, edge, 200)
+	otherBefore := get[PathsResponse](t, h.srv, other, 200)
 	if first.Revision == "" || first.Next == "" {
 		t.Fatalf("first page revision %q next %q", first.Revision, first.Next)
 	}
-	if second := get[PathsResponse](t, h.srv, pathsURL+"?limit=2&cursor="+first.Next, 200); second.Revision != first.Revision {
-		t.Fatalf("second page revision %q, want %q", second.Revision, first.Revision)
+	walked := len(first.Rows)
+	for n, cur := 0, first.Next; cur != ""; n++ {
+		publish(route("busy-"+strconv.Itoa(n), otherRef))
+		p := get[PathsResponse](t, h.srv, edge+"&cursor="+cur, 200)
+		if p.Revision != first.Revision {
+			t.Fatalf("page %d: revision %q after a change elsewhere, want %q", n+2, p.Revision, first.Revision)
+		}
+		if walked, cur = walked+len(p.Rows), p.Next; walked > first.Summary.Paths {
+			t.Fatalf("the walk passed %d rows: %v", first.Summary.Paths, pathKeys(p))
+		}
 	}
-	h.clk.set(testutil.Now)
-	h.e.Compute()
-	again := get[PathsResponse](t, h.srv, pathsURL+"?limit=2&cursor="+first.Next, 200)
-	if again.Revision == first.Revision {
-		t.Fatalf("revision %q unchanged by a new publication", again.Revision)
+	if walked != first.Summary.Paths {
+		t.Fatalf("walked %d rows, want %d", walked, first.Summary.Paths)
 	}
-	// Another process at the same Seq, as across a restart, has another revision.
-	restarted := httptest.NewServer(NewHandler(h.e, fstest.MapFS{}, nil, WithBoot("other-boot")))
-	t.Cleanup(restarted.Close)
-	if r := get[PathsResponse](t, restarted, pathsURL+"?limit=2", 200).Revision; r == again.Revision {
-		t.Fatalf("revision %q is the same in another process", r)
+	if got := get[PathsResponse](t, h.srv, other, 200); got.Revision == otherBefore.Revision || got.Summary.Paths == otherBefore.Summary.Paths {
+		t.Fatalf("the other Gateway's result did not change: %q, %d paths", got.Revision, got.Summary.Paths)
+	}
+	// Equal content gives an equal revision from another handler, as after a restart.
+	handler := func(authz Authorizer) *httptest.Server {
+		s := httptest.NewServer(NewHandler(h.e, fstest.MapFS{}, authz, WithPacks(kgateway.Name),
+			WithInstallFeatures(func(install.Install) []string { return kgateway.Features() })))
+		t.Cleanup(s.Close)
+		return s
+	}
+	if r := get[PathsResponse](t, handler(nil), edge, 200).Revision; r != first.Revision {
+		t.Fatalf("another handler's revision %q, want %q", r, first.Revision)
+	}
+	// A viewer who may not see infra/edge gets a revision no change there moves (design §13).
+	restricted := handler(AuthorizerFunc(hideEdge))
+	hidden := get[PathsResponse](t, restricted, pathsURL, 200)
+	publish(route("new-on-edge", edgeRef))
+	if got := get[PathsResponse](t, h.srv, edge, 200); got.Revision == first.Revision || got.Summary.Paths != first.Summary.Paths+1 {
+		t.Fatalf("a new path on infra/edge: revision %q, %d paths", got.Revision, got.Summary.Paths)
+	}
+	if got := get[PathsResponse](t, restricted, pathsURL, 200); got.Revision != hidden.Revision || !got.Summary.Hidden {
+		t.Fatalf("restricted revision %q after a hidden change, want %q", got.Revision, hidden.Revision)
 	}
 }
 

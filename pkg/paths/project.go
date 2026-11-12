@@ -85,10 +85,12 @@ type Projection struct {
 	Problems  []Problem
 	Shares    []Share
 	Endpoints []*Endpoints
-	// Order are the row indexes, problem first, then Gateway, listener, route and rule.
+	// Order are the row indexes, problem first, then Gateway, listener, route, rule and RowID.
 	Order []int32
 	// Next is ProjectInput.Next: the projection is not reused once it is due.
 	Next engine.Deadline
+	// digests are each row's content digest, made once per projection for Digest.
+	digests []uint64
 }
 
 // gatewayCodes are the Gateway-scoped findings that describe its proxies.
@@ -166,6 +168,8 @@ type projector struct {
 	na map[int32]*Endpoints
 	// entries are entryChecks' table; nil until first used.
 	entries map[[2]objects.Ref][]computed.Class
+	// setDigests are the interned signal sets' digests, by their first signal.
+	setDigests map[*Signal]uint64
 }
 
 // Project maps each row of t to its problem: the worst existing signal along
@@ -173,7 +177,8 @@ type projector struct {
 func Project(t *Topology, in ProjectInput) *Projection {
 	p := &projector{t: t, in: in, findings: map[objects.Ref][]*health.Finding{}, atts: make([]attSignals, len(t.atts)),
 		ctxs: map[int32][]Signal{}, edges: map[[2]objects.Ref]*Signal{}, refs: map[objects.Ref][]refFinding{}, ports: map[portKey]*portHealth{},
-		backends: map[objects.Ref]*unstructured.Unstructured{}, shares: map[*objects.Rule][]Share{}, sets: map[string][]Signal{}, na: map[int32]*Endpoints{}}
+		backends: map[objects.Ref]*unstructured.Unstructured{}, shares: map[*objects.Rule][]Share{}, sets: map[string][]Signal{}, na: map[int32]*Endpoints{},
+		setDigests: map[*Signal]uint64{}}
 	p.facts.snap = in.Snapshot
 	for i := range in.Model.Health.Findings {
 		f := &in.Model.Health.Findings[i]
@@ -187,7 +192,7 @@ func Project(t *Topology, in ProjectInput) *Projection {
 		}
 	}
 	out := &Projection{Problems: make([]Problem, len(t.Rows)), Shares: make([]Share, len(t.Rows)), Endpoints: make([]*Endpoints, len(t.Rows)),
-		Order: make([]int32, len(t.Rows)), Next: in.Next}
+		Order: make([]int32, len(t.Rows)), Next: in.Next, digests: make([]uint64, len(t.Rows))}
 	var sigs []Signal
 	for i, r := range t.Rows {
 		sigs = p.row(sigs[:0], r, out, i)
@@ -201,13 +206,18 @@ func Project(t *Topology, in ProjectInput) *Projection {
 			pr.Signals = p.intern(sigs)
 		}
 		out.Problems[i] = pr
+		out.digests[i] = p.digest(r, out, i)
 		out.Order[i] = int32(i) // #nosec G115 -- a row count fits in int32
 	}
-	slices.SortStableFunc(out.Order, func(a, b int32) int {
+	// Ties fall to the rule as written, then RowID, which a cursor anchor holds (compareAnchor).
+	slices.SortFunc(out.Order, func(a, b int32) int {
 		ra, rb := t.Rows[a], t.Rows[b]
-		return cmp.Or(cmp.Compare(stateRank(out.Problems[a].State), stateRank(out.Problems[b].State)),
+		if c := cmp.Or(cmp.Compare(stateRank(out.Problems[a].State), stateRank(out.Problems[b].State)),
 			t.Gateway(ra).Compare(t.Gateway(rb)), cmp.Compare(t.Listener(ra).Name, t.Listener(rb).Name),
-			t.compareChains(ra, rb), cmp.Compare(t.Rule(ra).Index, t.Rule(rb).Index))
+			t.compareChains(ra, rb), cmp.Compare(t.Rule(ra).Index, t.Rule(rb).Index), compareSpec(ra.ref, ra.mirror, rb.ref, rb.mirror)); c != 0 {
+			return c
+		}
+		return cmp.Or(cmp.Compare(t.rowHash(ra), t.rowHash(rb)), cmp.Compare(ra.dup, rb.dup))
 	})
 	return out
 }
@@ -234,7 +244,7 @@ func (p *projector) intern(sigs []Signal) []Signal {
 // topology and the model are not counted.
 func (p *Projection) Bytes() int {
 	n := int(unsafe.Sizeof(Projection{})) + cap(p.Problems)*int(unsafe.Sizeof(Problem{})) + cap(p.Shares)*int(unsafe.Sizeof(Share{}))
-	n += cap(p.Endpoints)*int(unsafe.Sizeof((*Endpoints)(nil))) + cap(p.Order)*4
+	n += cap(p.Endpoints)*int(unsafe.Sizeof((*Endpoints)(nil))) + cap(p.Order)*4 + cap(p.digests)*8
 	sets := map[*Signal]bool{}
 	for _, pr := range p.Problems {
 		if len(pr.Signals) > 0 && !sets[&pr.Signals[0]] {

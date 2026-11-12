@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/DuncanDoyle/snellius/pkg/explore"
@@ -17,8 +18,9 @@ const maxCursor = 4096
 
 // wireCursor is the JSON inside a cursor, as pkg/explore's: the sort, the
 // direction, B for a prev cursor, V the anchor's sort value, then its row
-// identity: problem P, Gateway G, listener L, chain C, and R its rule index
-// and row. Refs are (namespace, name, group, kind).
+// identity: problem P, Gateway G, listener L, chain C, R its rule, ref and
+// mirror indexes and RowID's place among alike rows, and H RowID's hash. Refs
+// are (namespace, name, group, kind).
 type wireCursor struct {
 	S string       `json:"s"`
 	D string       `json:"d"`
@@ -29,10 +31,13 @@ type wireCursor struct {
 	L string       `json:"l"`
 	C [][]string   `json:"c"`
 	R []int        `json:"r"`
+	H uint64       `json:"h"`
 }
 
 // anchor is a row's sort key: its sort value and its identity in the
 // problem-first order. It need not exist in the table a cursor is used on.
+// The last tie-break is the row's content identity, not its index, so a
+// cursor keeps its place across topologies that add or drop other rows.
 type anchor struct {
 	val      sortVal
 	state    health.State
@@ -40,7 +45,10 @@ type anchor struct {
 	listener string
 	chain    []objects.Ref
 	rule     int
-	row      int32
+	// ref and mirror are as in Row; -1 for none.
+	ref, mirror int16
+	hash        uint64
+	dup         uint16
 }
 
 // sortVal is a backend or hostname sort value; has is false for none.
@@ -69,7 +77,8 @@ func refOf(s []string) (objects.Ref, bool) {
 
 // encodeCursor returns the cursor anchored at a.
 func encodeCursor(sort string, desc, before bool, a *anchor) string {
-	w := wireCursor{S: sort, D: direction(desc), B: before, P: a.state, G: wireRef(a.gateway), L: a.listener, R: []int{a.rule, int(a.row)}}
+	w := wireCursor{S: sort, D: direction(desc), B: before, P: a.state, G: wireRef(a.gateway), L: a.listener,
+		R: []int{a.rule, int(a.ref), int(a.mirror), int(a.dup)}, H: a.hash}
 	for _, r := range a.chain {
 		w.C = append(w.C, wireRef(r))
 	}
@@ -107,10 +116,12 @@ func decodeCursor(c, sort string, desc bool) (a anchor, before bool, err error) 
 		return a, false, badCursor("from another sort")
 	}
 	var ok bool
-	if a.gateway, ok = refOf(w.G); !ok || !slices.Contains(states, w.P) || len(w.C) == 0 || len(w.R) != 2 || w.R[0] < 0 || w.R[1] < 0 {
+	if a.gateway, ok = refOf(w.G); !ok || !slices.Contains(states, w.P) || len(w.C) == 0 || len(w.R) != 4 ||
+		w.R[0] < 0 || w.R[1] < -1 || w.R[2] < -1 || w.R[3] < 0 {
 		return a, false, badCursor("bad anchor")
 	}
-	a.state, a.listener, a.rule, a.row = w.P, w.L, w.R[0], int32(min(w.R[1], 1<<31-1)) // #nosec G115 -- clamped to int32
+	a.state, a.listener, a.rule, a.hash = w.P, w.L, w.R[0], w.H
+	a.ref, a.mirror, a.dup = int16(min(w.R[1], math.MaxInt16)), int16(min(w.R[2], math.MaxInt16)), uint16(min(w.R[3], math.MaxUint16)) // #nosec G115 -- clamped to each type
 	for _, s := range w.C {
 		r, ok := refOf(s)
 		if !ok {

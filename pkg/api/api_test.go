@@ -277,8 +277,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	}
 	// Every detected install is kgateway's, as in extension.New; with class-only installs, only the stamped ones.
 	features := func(install.Install) []string { return kgateway.Features() }
-	// A fixed boot keeps path revisions, a per-process value, stable in goldens.
-	base := []HandlerOption{WithPacks(kgateway.Name), WithBoot("test")}
+	base := []HandlerOption{WithPacks(kgateway.Name)}
 	if s.classOnly {
 		features = packFeatures
 		base = append(base, WithInstallKinds(packKinds))
