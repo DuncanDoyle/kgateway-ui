@@ -635,15 +635,15 @@ func backendSignals(sigs []Signal, m *engine.InstallModel, ref objects.Ref, b *u
 		}
 	}
 	if j := m.Rules.BackendJudge(); b != nil && j != nil && len(sigs) == n {
-		switch v, c := j.JudgeBackend(b); {
-		case v == computed.BackendRejected:
+		switch v, c := j.JudgeBackend(b); v {
+		case computed.BackendRejected:
 			code := "Accepted"
 			if c != nil {
 				code = c.Type
 			}
 			// The Backend's own condition, as a Gateway's: kind gateway names an object's own status.
 			sigs = append(sigs, Signal{Kind: SignalGateway, Code: code, Ref: ref, State: health.StateError})
-		case v == computed.BackendUnknown:
+		case computed.BackendUnknown:
 			sigs = append(sigs, Signal{Kind: SignalWaiting, Code: "Accepted", Ref: ref, State: health.StateUnknown})
 		}
 	}
