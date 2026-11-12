@@ -6,7 +6,6 @@ import { installApi, live } from "../../api/hooks";
 import type { PathRow, PathSummary, PathsResponse } from "../../api/types";
 import { apiQuery } from "../../explore/listQuery";
 import type { HealthState } from "../../theme/tokens";
-import { refParam } from "../explore/detailParts";
 
 // region Helpers
 /** Rows per /paths request; the server's maximum limit. */
@@ -99,30 +98,19 @@ async function fetchPages(
   return { key: url, pages: prev?.pages ?? pages, inconsistent: true };
 }
 
-/** A path's identity: Gateway, ListenerSet, listener, route chain, rule, backend, port and mirror. */
-const rowKey = (r: PathRow) =>
-  JSON.stringify([
-    refParam(r.gateway),
-    r.listenerSet && refParam(r.listenerSet),
-    r.listener.name,
-    r.routes.map(refParam),
-    r.rule,
-    r.backend && refParam(r.backend),
-    r.port,
-    r.mirror,
-  ]);
-
 const RANK: Record<HealthState, number> = { healthy: 0, unknown: 1, warning: 2, error: 3 };
 
-/** The rows with each path once, in first-seen order, keeping the copy with the worst state. */
+/**
+ * The rows with each server row id once, in first-seen order, keeping the copy with the worst state.
+ * Rows that look alike but differ in id are distinct paths; a row without an id is always kept.
+ */
 export function dedupeRows(rows: PathRow[]): PathRow[] {
   const at = new Map<string, number>();
   const out: PathRow[] = [];
   for (const r of rows) {
-    const k = rowKey(r);
-    const i = at.get(k);
+    const i = r.id === undefined ? undefined : at.get(r.id);
     if (i === undefined) {
-      at.set(k, out.length);
+      if (r.id !== undefined) at.set(r.id, out.length);
       out.push(r);
     } else if (RANK[r.problem.state] > RANK[(out[i] as PathRow).problem.state]) out[i] = r;
   }

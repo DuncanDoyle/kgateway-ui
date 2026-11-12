@@ -150,6 +150,7 @@ function page(n: number, total: number, collectedAt = (_: number) => now()): Pat
   const count = Math.max(0, Math.min(200, total - n * 200));
   const rows = Array.from({ length: count }, (_, k) => ({
     ...base,
+    id: `id${n * 200 + k}`,
     routes: [{ ...(base.routes[0] as LinkedRef), name: `r${n * 200 + k}` }],
   }));
   const next = (n + 1) * 200 < total ? `p${n + 1}` : undefined;
@@ -208,7 +209,12 @@ function serveResult(rows: () => PathRow[], summary: () => PathSummary, onPage?:
 }
 const named = (k: number, state: PathRow["problem"]["state"] = "healthy"): PathRow => {
   const base = edgePaths().rows[0] as PathRow;
-  return { ...base, routes: [{ ...(base.routes[0] as LinkedRef), name: `r${k}` }], problem: { state, signals: [] } };
+  return {
+    ...base,
+    id: `id${k}`,
+    routes: [{ ...(base.routes[0] as LinkedRef), name: `r${k}` }],
+    problem: { state, signals: [] },
+  };
 };
 const hookWrapper = ({ children }: { children: React.ReactNode }) => (
   <SWRConfig value={testSWR()}>{children}</SWRConfig>
@@ -264,15 +270,28 @@ it("the same path on two pages collapses to one row with the worse state", () =>
     ["r1", "error"],
     ["r2", "healthy"],
   ]);
-  // A different rule, port or mirror flag is another path.
-  expect(
-    dedupeRows([
-      named(1),
-      { ...named(1), rule: named(1).rule + 1 },
-      { ...named(1), port: (named(1).port ?? 0) + 1 },
-      { ...named(1), mirror: !named(1).mirror },
-    ]),
-  ).toHaveLength(4);
+});
+
+it("two distinct rows that look alike both reach the map and its table", async () => {
+  // Two delegation refs in one rule and two inherited contexts through one chain: only the server id tells them apart.
+  const base = named(1);
+  const delegate = (id: string, child: string): PathRow => ({
+    ...base,
+    id,
+    action: "delegate",
+    backend: undefined,
+    delegation: { mode: "name", namespace: "shop", name: child },
+  });
+  const inherited = (id: string): PathRow => ({ ...base, id, delegated: true, matches: null });
+  const rows = [delegate("d1", "child-a"), delegate("d2", "child-b"), inherited("c1"), inherited("c2")];
+  serveResult(
+    () => rows,
+    () => ({ ...edgePaths().summary, paths: rows.length }),
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current.rows.map((r) => r.id)).toEqual(["d1", "d2", "c1", "c2"]);
 });
 
 it("2,500 matching paths load 2,000 in ten requests and say so", async () => {
