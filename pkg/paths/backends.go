@@ -55,8 +55,6 @@ type Backend struct {
 	// Problem is the worst of its path problems, its own signals and the
 	// attachment signals of routes that write it with no path to it.
 	Problem Problem
-	// hiddenUse is set when a route or consumer the viewer may not see uses it.
-	hiddenUse bool
 }
 
 // Used is the number of visible routes and consumers that use b.
@@ -148,7 +146,7 @@ func (b *backends) rows() {
 		route := t.Refs[t.routes[chain[len(chain)-1]].ref]
 		b.rowRoutes[i] = insert(b.rowRoutes[i], route, compareRefs)
 		if b.in.Visible != nil && !b.in.Visible(t.Deps(r)) {
-			b.set.Hidden, it.hiddenUse = true, true
+			b.set.Hidden = true
 			continue
 		}
 		b.listed[i] = true
@@ -227,7 +225,7 @@ func (b *backends) written() {
 				}
 			}
 			if !b.can(row.Ref) {
-				b.set.Hidden, it.hiddenUse = true, true
+				b.set.Hidden = true
 				continue
 			}
 			it.Routes = insert(it.Routes, row.Ref, compareRefs)
@@ -326,7 +324,7 @@ func (b *backends) consumers() {
 			continue
 		}
 		if !b.can(c.Consumer) {
-			b.set.Hidden, it.hiddenUse = true, true
+			b.set.Hidden = true
 			continue
 		}
 		b.listed[b.index[c.BackendRef]] = true
@@ -604,8 +602,8 @@ func (q *BackendQuery) matches(b *Backend, qs string, skip facet) bool {
 	case q.Kind != "" && b.Ref.Kind != q.Kind,
 		q.Namespace != "" && skip != facetNamespace && b.Ref.Namespace != q.Namespace,
 		len(q.States) > 0 && !slices.Contains(q.States, b.Problem.State),
-		// A backend a hidden route or consumer uses is never shown as unused.
-		q.Used == UsedYes && b.Used() == 0, q.Used == UsedNo && (b.Used() > 0 || b.hiddenUse),
+		// Use counts visible routes and consumers only, so a hidden one changes nothing (D-077).
+		q.Used == UsedYes && b.Used() == 0, q.Used == UsedNo && b.Used() > 0,
 		qs != "" && !strings.Contains(strings.ToLower(b.Ref.Namespace+"/"+b.Ref.Name), qs):
 		return false
 	}

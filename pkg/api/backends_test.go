@@ -401,8 +401,9 @@ func TestBackendDetailUnsplitAndPartial(t *testing.T) {
 	}
 }
 
-// §13: a backend only hidden routes write is not listed, and an in-scope
-// Backend a hidden route uses is never shown as unused.
+// §13, D-077: a backend only hidden routes write is not listed, and an
+// in-scope Backend only a hidden route uses has no visible consumers: it is
+// listed under used=no and counted there by the facets, as an unused one is.
 func TestBackendsHiddenRoutesOnly(t *testing.T) {
 	_, srv, _ := startWith(t, backendsSetup(hideKinds("HTTPRoute", "unattached", "to-back"), nil), backendsWorld()...)
 	all := get[BackendsResponse](t, srv, backendsURL+"?limit=200", 200)
@@ -410,13 +411,21 @@ func TestBackendsHiddenRoutesOnly(t *testing.T) {
 	if _, ok := rows["lonely-svc"]; ok || !all.Hidden {
 		t.Fatalf("lonely-svc listed through a hidden route, or hidden unset: %v", all.Hidden)
 	}
-	if _, ok := rows["be-used"]; !ok {
-		t.Fatal("the in-scope Backend be-used is not listed")
+	if r, ok := rows["be-used"]; !ok || r.Routes != 0 || r.Consumers != 0 {
+		t.Fatalf("the in-scope Backend be-used %+v, want listed with no visible use", r)
 	}
-	for _, r := range get[BackendsResponse](t, srv, backendsURL+"?used=no", 200).Rows {
-		if r.Ref.Name == "be-used" {
-			t.Fatal("be-used, used by a hidden route, is shown as unused")
+	unused := get[BackendsResponse](t, srv, backendsURL+"?used=no&limit=200", 200)
+	shop := 0
+	for _, r := range unused.Rows {
+		if r.Ref.Namespace == "shop" {
+			shop++
 		}
+	}
+	if _, ok := rowsByName(unused)["be-used"]; !ok {
+		t.Fatal("be-used, with no visible consumer, is not listed under used=no")
+	}
+	if i := slices.IndexFunc(unused.Facets.Namespaces, func(n BackendNamespaceFacetDTO) bool { return n.Name == "shop" }); i < 0 || unused.Facets.Namespaces[i].Backends != shop {
+		t.Fatalf("used=no namespace facets %+v, want shop = %d", unused.Facets.Namespaces, shop)
 	}
 }
 
