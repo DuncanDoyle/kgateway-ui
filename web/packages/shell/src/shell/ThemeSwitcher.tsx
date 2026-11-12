@@ -1,7 +1,14 @@
+import styled from "@emotion/styled";
 import { Check, Palette } from "lucide-react";
 import { useThemeSwitch } from "../theme/ThemeProvider";
 import { Anchor, Menu, MenuButton, useMenu } from "./menu";
 import { Tooltip } from "./Tooltip";
+
+// region Styles
+/** The icon button keeps its size; the install nav gives way on narrow windows. */
+const Fixed = styled(Anchor)`
+  flex: none;
+`;
 
 // region Component
 /** Compact icon dropdown listing every theme (team rule: not a light/dark toggle). */
@@ -9,7 +16,7 @@ export function ThemeSwitcher() {
   const { themes, current, setTheme } = useThemeSwitch();
   const menu = useMenu();
   return (
-    <Anchor ref={menu.anchorRef}>
+    <Fixed ref={menu.anchorRef}>
       <Tooltip label={`Theme: ${current.name}`} placement="end">
         <MenuButton
           ref={menu.buttonRef}
@@ -42,6 +49,6 @@ export function ThemeSwitcher() {
           ))}
         </Menu>
       ) : null}
-    </Anchor>
+    </Fixed>
   );
 }
