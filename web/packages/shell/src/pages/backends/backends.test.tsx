@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 // region List
-it("the Problems, Services, Backend resources, Unused, Namespace and Gateway chips map to the list params", async () => {
+it("the Problems, Services, Backend resources, No visible users, Namespace and Gateway chips map to the list params", async () => {
   serve({ [`${API}/backends`]: () => list() });
   mount(`/i/${ID}/backends`);
   const table = await screen.findByRole("table", { name: "Backends" });
@@ -92,7 +92,7 @@ it("the Problems, Services, Backend resources, Unused, Namespace and Gateway chi
   await userEvent.click(chip("Backend resources"));
   await waitFor(() => expect(last()?.getAll("kind")).toEqual(["Backend"]));
   expect(chip("Services")).toHaveAttribute("aria-pressed", "false");
-  await userEvent.click(chip("Unused"));
+  await userEvent.click(chip("No visible users"));
   await waitFor(() => expect(last()?.get("used")).toBe("no"));
   // The namespace and Gateway chips come from the list's facets.
   await userEvent.click(chip("shop"));
@@ -133,7 +133,8 @@ it("rows show kind, endpoints per port, users and the problem; a row opens backe
   expect(row("shop/mirror-svc")).toHaveTextContent("No port referenced");
   expect(row("shop/be1")).toHaveTextContent("Backend · Static");
   expect(row("shop/be1")).toHaveTextContent("Not applicable");
-  expect(row("shop/be-unused")).toHaveTextContent("Unused");
+  // used=no counts visible users only, so the cell never claims nothing uses it.
+  expect(row("shop/be-unused")).toHaveTextContent("No visible users");
   // Routes write it, but no accepted attachment reaches it.
   expect(row("shop/lonely-svc")).toHaveTextContent("0 confirmed paths");
   expect(row("shop/authz")).toHaveTextContent("2 others");
@@ -235,7 +236,7 @@ it("a Backend's status line says it is not accepted, and its page keeps conditio
   serveDetail(d, `${API}/backends/gateway.kgateway.dev/Backend/shop/be-used`);
   mount(`/i/${ID}/backends/gateway.kgateway.dev/Backend/shop/be-used`);
   expect(await statusLine()).toHaveTextContent(
-    "Nothing uses this backend; the controller does not accept it, so requests fail.",
+    "Nothing you can see uses this backend; the controller does not accept it, so requests fail.",
   );
   expect(screen.getByRole("tab", { name: "YAML" })).toBeInTheDocument();
   expect(screen.getByText("Backend type")).toBeInTheDocument();
@@ -256,7 +257,9 @@ it("an unused Backend whose own Accepted condition is False reads not accepted, 
   d.consumers = [];
   serveDetail(d, `${API}/backends/gateway.kgateway.dev/Backend/shop/be-used`);
   mount(`/i/${ID}/backends/gateway.kgateway.dev/Backend/shop/be-used`);
-  expect(await statusLine()).toHaveTextContent(/^ErrorNothing uses this backend; the controller does not accept it\.$/);
+  expect(await statusLine()).toHaveTextContent(
+    /^ErrorNothing you can see uses this backend; the controller does not accept it\.$/,
+  );
 });
 
 it("a Service has no YAML tab; its facts, port chain and per-proxy slot show", async () => {

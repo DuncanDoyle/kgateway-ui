@@ -16,7 +16,7 @@ export const backendsCopy = {
   show: "Show", // S677
   problems: "Problems", // S678
   services: "Services", // S679
-  unused: "Unused", // S680
+  unused: "No visible users", // S680
   namespaces: "Backend namespaces", // S681
   hidden: "Some backends are hidden from you.", // S682
 };
@@ -38,7 +38,7 @@ export const usedByCopy = {
     ]
       .filter(Boolean)
       .join(" · "), // S752
-  none: "Unused", // S687
+  none: "No visible users", // S687
   noneConfirmed: "0 confirmed paths", // S688
 };
 
@@ -57,7 +57,7 @@ export const statusCopy = {
   routes: (routes: number, gateways: number) =>
     `${plural(routes, ["route", "routes"])} on ${plural(gateways, ["Gateway", "Gateways"])} ${routes === 1 ? "sends" : "send"} traffic here`, // S690
   others: (n: number) => `${plural(n, ["other object", "other objects"])} ${n === 1 ? "uses" : "use"} it`, // S691
-  unused: "Nothing uses this backend", // S692
+  unused: "Nothing you can see uses this backend", // S692
   noReady: (fail: string) => `no endpoint is ready, so ${fail}`, // S693
   notAccepted: (fail: string) => `the controller does not accept it, so ${fail}`, // S694
   /** A Backend no route uses, with its own Accepted condition False: no traffic to fail. */
