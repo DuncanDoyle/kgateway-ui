@@ -1294,3 +1294,29 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** This supersedes D-013's count rule on the new pages only. Existing pages keep their rules until Phase 10, and D-013's restricted-finding rule stays on the findings pages.
 
 **Alternatives:** Placeholders for hidden rows, as D-013 counts: rejected, because a path's dependencies would leak through its placeholder.
+
+## D-078 — Phase 6 as built: deviations from the design (2026-11-12, phase 6)
+**Status:** rulings made while the user was away; pending user review
+
+**Context:** Phase 6 ran largely while the user was away. Where the build met a question the design did not settle, a ruling was made and logged; the design (`docs/phases/phase-6/design.md`) now describes the result.
+
+**Decision:** These rulings stand until the user reviews them:
+1. A zero-ready port takes its severity from KGWUI-023 (warning), not the counts; unknown during the hold (§4.5). If wrong: a broken backend shows as a warning, as on the findings page.
+2. Any weight-0 ref is "no traffic", not only when all weights are 0 (§4.4). If wrong: one test changes.
+3. Delegated rows take the root's unattributed `ResolvedRefs` failure without the root's 013/014 candidates (§4.5). If wrong: a false error on a delegated path, never a hidden one.
+4. Rule decoding is opt-in (`objects.DecodeRouteRules`), off the recompute hot path, to protect the heap (D-039).
+5. The topology memo reuses on snapshot `Source` and views generation together, and holds no model or snapshot pointers (§4.3). If wrong: a stale topology until the next change.
+6. Summaries gain `facets` and `notComputed`; a class-only install gets an explanation, not paths (§5). If wrong: those installs see no paths.
+7. The path and backend lists page on the server (≤ 200 rows) instead of a virtualised table (§5). If wrong: a later virtualisation pass.
+8. The scoped-reader memo has a 1 MiB byte budget (§9.3). If wrong: fewer Services kept warm for 5 s.
+9. D-057 gates the settled heap after a publication, measured in-child with the engine figure, world built with GC off; Extreme is reported, not gated (§14). At phase close the settled worst world is +46.6 of 48 MiB (warm again +47.4, reported). If wrong: a real process's heap fragmentation can pass the budget.
+10. The map chunk budget is 80 kB gzipped, not ~50 kB; React Flow alone is ≈ 60 kB (§6.2). If wrong: 20 kB more on the map tab only.
+11. Delegated children show at rest; a delegating route collapses (`collapse`); the rule column is always reserved so backends never move (§6.1). If wrong: a wider resting map.
+12. Edge state is the worst row, a lit edge the worst shared row; broken only when every row fails, never under a state filter; partial error has a hollow ring (§6.1). If wrong: one styling rule to revisit.
+13. Export covers the whole drawn graph, not the viewport (§6.1).
+14. Events stay cluster-wide under `Config.Namespaces` (§12.2). If wrong: a namespace-only user sees Events "denied".
+15. No `@axe-core/playwright` scan (a new dependency needs approval); role, name and focus assertions stand in for it.
+
+**Consequences:** Nothing here changes a budget, a finding code or the meaning of API v1. Each item can be reversed on its own.
+
+**Alternatives:** Wait for the user at each question: rejected under the away rule; only pushes, posts and approvals were queued.
