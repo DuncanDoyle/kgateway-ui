@@ -384,21 +384,31 @@ it("two distinct rows that look alike both reach the map and its table", async (
   expect(result.current.rows.map((r) => r.id)).toEqual(["d1", "d2", "c1", "c2"]);
 });
 
-it("2,500 matching paths load 2,000 in ten requests and say so", async () => {
-  serve((u) => page(pageOf(u), 2500));
-  mount("?tab=map");
-  await screen.findByTestId("gateway-map");
-  expect(await screen.findByTestId("map-truncated")).toHaveTextContent(
-    "Showing 2,000 of 2,500 paths. Narrow the filters to see the rest.",
-  );
-  await waitFor(() => expect(pathCalls()).toHaveLength(10));
-  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([
-    null,
-    ...Array.from({ length: 9 }, (_, k) => `p${k + 1}`),
-  ]);
-  // One route node per loaded row, plus the Gateway, listener and backend.
-  await waitFor(() => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(2003));
-});
+// Drawing 2,003 nodes in jsdom takes ~2 s on a laptop and over 5 s on a busy CI runner.
+const drawLimit = { timeout: 15_000 };
+
+it(
+  "2,500 matching paths load 2,000 in ten requests and say so",
+  async () => {
+    serve((u) => page(pageOf(u), 2500));
+    mount("?tab=map");
+    await screen.findByTestId("gateway-map", {}, drawLimit);
+    expect(await screen.findByTestId("map-truncated", {}, drawLimit)).toHaveTextContent(
+      "Showing 2,000 of 2,500 paths. Narrow the filters to see the rest.",
+    );
+    await waitFor(() => expect(pathCalls()).toHaveLength(10), drawLimit);
+    expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([
+      null,
+      ...Array.from({ length: 9 }, (_, k) => `p${k + 1}`),
+    ]);
+    // One route node per loaded row, plus the Gateway, listener and backend.
+    await waitFor(
+      () => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(2003),
+      drawLimit,
+    );
+  },
+  2 * drawLimit.timeout,
+);
 
 // region Task 45: hover, side panel, find, chips, large Gateways
 
@@ -446,10 +456,12 @@ it("a Gateway with more than 60 routes opens on problems only after its first pa
     return { ...p, summary: { ...p.summary, routes: u.searchParams.has("state") ? 3 : 61 } };
   });
   mount("?tab=map");
-  await waitFor(() =>
-    expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe(
-      "error,warning,unknown",
-    ),
+  await waitFor(
+    () =>
+      expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe(
+        "error,warning,unknown",
+      ),
+    drawLimit,
   );
   expect(await screen.findByTestId("map-large")).toHaveTextContent(
     "This Gateway has 61 routes and 4 backends, so the map shows problems only. Narrow by kind or namespace, or clear Problems only to load every path.",
