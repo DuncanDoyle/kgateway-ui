@@ -14,6 +14,7 @@ import { PROBLEM_STATES } from "../backends/BackendsPage";
 import { PathTable } from "../traffic/PathTable";
 import { StaleGate } from "../traffic/StaleGate";
 import { focusSubgraph } from "./focus";
+import type { MapExporter } from "./GatewayMap";
 import { gatewayGraph, kindLabel, type MapNode } from "./graph";
 import { MapToolbar, problemsOnly } from "./MapToolbar";
 import { MapBox, MapNote } from "./map.css";
@@ -229,6 +230,8 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const [panelFocus, setPanelFocus] = useState(false);
   const node = selected ? graph.nodes.find((n) => n.id === selected) : undefined;
   const area = useRef<HTMLDivElement>(null);
+  // The map registers its exporter here once drawn; export code loads with the map's chunk.
+  const exporter = useRef<MapExporter>(undefined);
   const onSelect = useCallback((id?: string) => {
     setSelected(id);
     setPanelFocus(!!id);
@@ -309,6 +312,7 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         found={{ at: Math.max(at, 1), of: found.length }}
         table={table}
         onTable={(on) => setFilter({ view: on ? "table" : null })}
+        onExport={(kind) => void exporter.current?.(kind)}
       />
       <Notes role="status" data-testid="map-notes">
         {prompt ? <span data-testid="map-large">{mapCopy.large(prompt.routes, prompt.backends)}</span> : null}
@@ -362,6 +366,7 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
               centre={centre}
               view={`${paths.query ?? ""}|${focusId ?? ""}`}
               onToggle={onToggle}
+              exporter={exporter}
               stylesOverride={stylesOverride}
             />
           </Suspense>

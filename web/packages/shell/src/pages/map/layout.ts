@@ -5,6 +5,9 @@ import { COLUMNS, type MapGraph, type NodeKind } from "./graph";
 export const COL_W = 340;
 export const ROW_H = 96;
 export const INDENT = 24;
+/** A node card's fixed size, in canvas pixels. */
+export const NODE_W = 220;
+export const NODE_H = 72;
 /** Down-and-up barycentre sweeps per layout. */
 const SWEEPS = 4;
 

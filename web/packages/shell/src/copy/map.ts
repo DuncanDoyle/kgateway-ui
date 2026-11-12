@@ -52,4 +52,11 @@ export const mapCopy = {
   showDelegated: "Show delegated routes", // S809
   hiddenDelegated: (n: number) => `+${n} delegated`, // S810
   focusGone: "The focused node is not on the map.", // S811
+  exportSvg: "Export SVG", // S812
+  exportPng: "Export PNG", // S813
+  exportSvgTip: "Save this map as an SVG file", // S814
+  exportPngTip: "Save this map as a PNG image", // S815
+  exportTitle: (gateway: string, at: string) => `Gateway ${gateway} · ${at}`, // S816
+  legendPartial: "Some paths fail", // S817
+  legendBroken: "Every path fails", // S818
 };

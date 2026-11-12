@@ -1,6 +1,6 @@
 import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { Keyboard, Search, Table2 } from "lucide-react";
+import { FileCode2, ImageDown, Keyboard, Search, Table2 } from "lucide-react";
 import type { PathFacets } from "../../api/types";
 import { mapCopy } from "../../copy/map";
 import { trafficCopy } from "../../copy/traffic";
@@ -83,6 +83,31 @@ const Toggle = styled.button`
     background: color-mix(in srgb, ${(p) => p.theme.color.accentText} ${CHIP_PRESSED_ACTIVE_PCT}%, ${(p) => p.theme.color.surface});
   }
 `;
+/** An export button: an icon the size of the keyboard hint, with a control's border. */
+const IconButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  cursor: pointer;
+  color: ${(p) => p.theme.color.text};
+  background: ${(p) => p.theme.color.surface};
+  border: 1px solid ${(p) => p.theme.color.borderStrong};
+  border-radius: ${(p) => p.theme.radius.sm};
+  &:hover {
+    border-color: ${(p) => p.theme.color.text};
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.surface});
+  }
+  &:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
+  }
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
+`;
 /** The keyboard hint: an icon whose tooltip lists the map's keys. */
 const Hint = styled.span`
   display: inline-flex;
@@ -135,6 +160,8 @@ interface MapToolbarProps {
   /** The rows show as a table instead of the map. */
   table: boolean;
   onTable: (table: boolean) => void;
+  /** Saves the map as drawn as an SVG or a PNG file. */
+  onExport: (kind: "svg" | "png") => void;
   stylesOverride?: SerializedStyles;
 }
 
@@ -152,6 +179,7 @@ export function MapToolbar({
   found,
   table,
   onTable,
+  onExport,
   stylesOverride,
 }: MapToolbarProps) {
   const problems = problemsOnly(params);
@@ -208,6 +236,17 @@ export function MapToolbar({
           />
         ) : null}
         <span className="end">
+          {/* Export saves the map, so the table view hides it; it keeps its space so nothing moves. */}
+          <Tooltip label={mapCopy.exportSvgTip} placement="end" stylesOverride={table ? hidden : undefined}>
+            <IconButton type="button" aria-label={mapCopy.exportSvg} onClick={() => onExport("svg")}>
+              <FileCode2 size={16} aria-hidden="true" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label={mapCopy.exportPngTip} placement="end" stylesOverride={table ? hidden : undefined}>
+            <IconButton type="button" aria-label={mapCopy.exportPng} onClick={() => onExport("png")}>
+              <ImageDown size={16} aria-hidden="true" />
+            </IconButton>
+          </Tooltip>
           <Tooltip label={mapCopy.keys} placement="end" wrap stylesOverride={table ? hidden : undefined}>
             <Hint tabIndex={0} role="note" aria-label={mapCopy.keyboard} data-testid="map-keys">
               <Keyboard size={16} aria-hidden="true" />

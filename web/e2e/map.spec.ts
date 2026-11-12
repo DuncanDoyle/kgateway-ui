@@ -397,6 +397,47 @@ test("under Problems only an edge whose loaded rows all fail is not drawn broken
   await expect(map.locator(".react-flow__edge-path.broken")).toHaveCount(0);
 });
 
+test("healthy edges flow, other edges never do, and reduced motion stops the flow", async ({ page }) => {
+  const map = await openMap(page);
+  const flows = map.locator(".map-edge-flow");
+  await expect(flows.first()).toBeAttached();
+  expect(await flows.first().evaluate((el) => getComputedStyle(el).animationName)).not.toBe("none");
+  // Every flow overlay sits on a healthy edge.
+  const on = await flows.evaluateAll((els) =>
+    els.map((el) => el.parentElement?.querySelector(".react-flow__edge-path")?.classList.contains("state-healthy")),
+  );
+  expect(on.every(Boolean)).toBe(true);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(flows).toHaveCount(0);
+});
+
+test("Export SVG and Export PNG download the map, named for the Gateway and date", async ({ page }) => {
+  await openMap(page);
+  const date = new Date().toISOString().slice(0, 10);
+  for (const [name, ext] of [
+    [mapCopy.exportSvg, "svg"],
+    [mapCopy.exportPng, "png"],
+  ] as const) {
+    const wait = page.waitForEvent("download");
+    await page.getByRole("button", { name, exact: true }).click();
+    const file = await wait;
+    expect(file.suggestedFilename()).toBe(`gateway-map-traffic-traffic-${date}.${ext}`);
+    const chunks = (await (await file.createReadStream()).toArray()) as Uint8Array[];
+    const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let at = 0;
+    for (const c of chunks) {
+      bytes.set(c, at);
+      at += c.length;
+    }
+    expect(bytes.length, `${ext} size`).toBeGreaterThan(1000);
+    if (ext === "svg") expect(new TextDecoder().decode(bytes)).toContain("<svg");
+    // PNG signature.
+    else expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    const dir = process.env.MAP_SHOTS;
+    if (dir) await file.saveAs(`${dir}/map-export.${ext}`);
+  }
+});
+
 for (const theme of themes) {
   test(`an expanded route and focus mode in the ${theme.mode} theme`, async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });

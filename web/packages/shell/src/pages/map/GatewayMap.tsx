@@ -3,12 +3,7 @@ import type { SerializedStyles } from "@emotion/react";
 import { useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
 import {
-  BaseEdge,
   Controls,
-  type Edge,
-  EdgeLabelRenderer,
-  type EdgeProps,
-  getBezierPath,
   Handle,
   MiniMap,
   type Node,
@@ -18,23 +13,30 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { Minus, Plus } from "lucide-react";
-import { type FocusEvent, type KeyboardEvent, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FocusEvent,
+  type KeyboardEvent,
+  type RefObject,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { mapCopy } from "../../copy/map";
 import { cellCopy } from "../../copy/traffic";
 import { HealthBadge } from "../../health/HealthBadge";
-import { HealthIcon } from "../../health/HealthIcon";
-import { StaleView, useShownState } from "../../health/staleView";
+import { StaleView } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
 import type { HealthState } from "../../theme/tokens";
-import { kindLabel, type MapEdge, type MapGraph, type MapNode, throughNode } from "./graph";
+import { MapEdgeLine, type MapFlowEdge, reducedMotion, strokeWidth } from "./edges";
+import { download, exportFileName, exportPNG, exportSVG } from "./export";
+import { kindLabel, type MapGraph, type MapNode, throughNode } from "./graph";
 import { ARROWS, type ArrowKey, nextNode } from "./keyboard";
-import { changedColumns, layoutColumns, type Point } from "./layout";
+import { changedColumns, layoutColumns, NODE_H, NODE_W, type Point } from "./layout";
 import { MapCanvas } from "./map.css";
 
 // region Styles
-const NODE_W = 220;
-const NODE_H = 72;
-
 const Card = styled.div<{ $selected: boolean }>`
   position: relative;
   box-sizing: border-box;
@@ -105,11 +107,11 @@ type MapNodeData = {
   hidden?: number;
 };
 type MapFlowNode = Node<MapNodeData, "map">;
-type MapEdgeData = Pick<MapEdge, "state" | "broken" | "share"> & { dim: boolean };
-type MapFlowEdge = Edge<MapEdgeData, "map">;
 
-/** Stroke width: 1.5 px, or 1.5–6 px by share where the share is shown (design §4.4). */
-const strokeWidth = (share?: number) => (share === undefined ? 1.5 : 1.5 + (Math.min(100, share) / 100) * 4.5);
+/** Saves the map as drawn (graph, layout, theme) as an SVG or a PNG file. */
+export type MapExporter = (kind: "svg" | "png") => Promise<void>;
+/** PNG pixels per canvas pixel. */
+const PNG_SCALE = 2;
 
 /** A node's accessible name: kind, name and state, plus how many of its paths fail when any do. */
 function nodeLabel(g: MapGraph, n: MapNode, stale: boolean): string {
@@ -121,8 +123,6 @@ function nodeLabel(g: MapGraph, n: MapNode, stale: boolean): string {
 /** The map node a key or focus event comes from, when the event's target is the node itself. */
 const nodeId = (t: EventTarget | null) =>
   t instanceof HTMLElement && t.classList.contains("react-flow__node") ? (t.dataset.id ?? undefined) : undefined;
-
-const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** A node card: kind, name and state as icon + colour + text; the state is unknown in a stale view. */
 function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
@@ -161,42 +161,6 @@ function MapNodeCard({ data }: NodeProps<MapFlowNode>) {
   );
 }
 
-/**
- * An edge in its state's stroke and pattern: solid healthy, dotted warning, dash-dot unknown. A broken edge
- * (every row fails) is dashed with a filled error icon; a partly failing one is solid with a hollow error ring.
- * Unknown in a stale view.
- */
-function MapEdgeLine({ id, sourceX, sourceY, targetX, targetY, data, style }: EdgeProps<MapFlowEdge>) {
-  const state = useShownState(data?.state ?? "unknown");
-  const broken = state === "error" && !!data?.broken;
-  // A partly failing edge keeps a solid stroke but carries a hollow error ring, so it never reads as healthy.
-  const partial = state === "error" && !broken;
-  const [path, x, y] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-  });
-  return (
-    <>
-      <BaseEdge id={id} path={path} style={style} className={`state-${state}${broken ? " broken" : ""}`} />
-      {broken || partial ? (
-        <EdgeLabelRenderer>
-          <div
-            className={`map-edge-mark ${broken ? "broken" : "partial"}${data?.dim ? " dim" : ""}`}
-            data-edge={id}
-            style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
-          >
-            {broken ? <HealthIcon state="error" size={14} /> : null}
-          </div>
-        </EdgeLabelRenderer>
-      ) : null}
-    </>
-  );
-}
-
 const nodeTypes = { map: MapNodeCard };
 const edgeTypes = { map: MapEdgeLine };
 
@@ -212,6 +176,8 @@ interface GatewayMapProps {
   view: string;
   /** Opens or closes a route node: shows or hides its delegated routes, or, for a route that delegates none, its rules. */
   onToggle?: (id: string) => void;
+  /** Set to this map's exporter while it is drawn, for the toolbar's export buttons. */
+  exporter?: RefObject<MapExporter | undefined>;
   stylesOverride?: SerializedStyles;
 }
 
@@ -220,7 +186,16 @@ interface GatewayMapProps {
  * Hovering or focusing a node lights every path through it and dims the rest; a click, Enter or Space selects it.
  * Arrow keys move focus between connected nodes; one node at a time is in the tab order.
  */
-export function GatewayMap({ graph, selected, onSelect, centre, view, onToggle, stylesOverride }: GatewayMapProps) {
+export function GatewayMap({
+  graph,
+  selected,
+  onSelect,
+  centre,
+  view,
+  onToggle,
+  exporter,
+  stylesOverride,
+}: GatewayMapProps) {
   const theme = useTheme();
   const stale = useContext(StaleView);
   const [hovered, setHovered] = useState<string>();
@@ -267,6 +242,20 @@ export function GatewayMap({ graph, selected, onSelect, centre, view, onToggle, 
     laid.current = { view, graph, at: next };
     return next;
   }, [graph, view]);
+  // Export draws the graph on the map, at rest (no hover), in the layout and theme on screen.
+  useEffect(() => {
+    if (!exporter) return;
+    exporter.current = async (kind) => {
+      const now = new Date();
+      const svg = exportSVG(graph, at, theme, { at: now, stale });
+      const gateway = graph.nodes.find((n) => n.kind === "gateway")?.name ?? "";
+      const blob = kind === "svg" ? new Blob([svg], { type: "image/svg+xml" }) : await exportPNG(svg, PNG_SCALE);
+      download(blob, exportFileName(gateway, kind, now));
+    };
+    return () => {
+      exporter.current = undefined;
+    };
+  }, [exporter, graph, at, theme, stale]);
   const active = hovered ?? focused ?? selected;
   const has = (id?: string) => !!id && graph.nodes.some((n) => n.id === id);
   const tabStop = has(last) ? last : has(selected) ? selected : graph.nodes.find((n) => n.kind === "gateway")?.id;

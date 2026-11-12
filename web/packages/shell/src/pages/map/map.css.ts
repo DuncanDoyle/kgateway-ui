@@ -1,7 +1,14 @@
-import type { SerializedStyles } from "@emotion/react";
+import { keyframes, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 
 // region Styles
+/** One dash period (4 + 20) per cycle, so the loop is seamless. */
+const flow = keyframes`
+  to {
+    stroke-dashoffset: -24;
+  }
+`;
+
 /** The map's height, shared by the loading fallback so nothing moves when the canvas arrives. */
 export const MAP_H = "clamp(420px, 70vh, 760px)";
 
@@ -73,6 +80,15 @@ export const MapCanvas = styled(MapBox)`
   .react-flow__edge-path.state-error.broken {
     stroke-dasharray: 8 6;
   }
+  /* Flow on a healthy edge: short background-coloured gaps that drift from source to target. */
+  .map-edge-flow {
+    fill: none;
+    stroke: ${(p) => p.theme.color.bg};
+    stroke-opacity: 0.6;
+    stroke-dasharray: 4 20;
+    pointer-events: none;
+    animation: ${flow} 1.6s linear infinite;
+  }
   .map-edge-mark {
     position: absolute;
     pointer-events: none;
@@ -104,6 +120,9 @@ export const MapCanvas = styled(MapBox)`
     .react-flow__edge,
     .map-edge-mark {
       transition: none;
+    }
+    .map-edge-flow {
+      display: none;
     }
   }
   .react-flow__minimap {
