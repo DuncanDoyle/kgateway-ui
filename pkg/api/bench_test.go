@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -60,7 +59,7 @@ func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer, mut ...func(*c
 // snapshotHandler is tierHandler over snap, which is already sorted.
 func snapshotHandler(snap *cache.Snapshot, tier scale.Tier, authz Authorizer) (http.Handler, *engine.Model) {
 	e, m := snapshotEngine(snap, tier)
-	return NewHandler(e, fstest.MapFS{}, authz), m
+	return pathsHandler(e, m, authz), m
 }
 
 // snapshotEngine is snapshotHandler's engine and its model.
