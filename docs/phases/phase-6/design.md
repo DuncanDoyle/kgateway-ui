@@ -182,7 +182,7 @@ Interactions (user, 2026-11-10):
 
 **Edge and node state.** At rest an edge takes the worst state of its rows. Under hover or selection, a lit edge takes the worst state of the rows it shares with the active node. An edge is **broken** (dashed, error icon) only when every row on it fails, and never under a state filter, since the loaded rows are then not all of them. An edge where some rows fail is a solid error stroke with a hollow ring, so it differs from broken without colour. A node takes the worst state of the signals naming it; a rule node, which no signal names, takes the worst state of its rows. Neither ever defaults to healthy (D-006).
 
-**Consistent walk:** every `/paths` page carries an additive `revision`, the model publication's Seq, which fixes its topology and projection. The map restarts its walk when a page's revision differs (6.7).
+**Consistent walk:** every `/paths` page carries an additive `revision`: a per-process boot value and the model publication's Seq, which fixes its topology and projection, so a walk across a restart restarts too. The map restarts its walk when a page's revision differs (6.7).
 
 **Large Gateways open filtered (our call):** when the Gateway has more than 60 routes or 60 backends, the map opens on "Problems only" with a prompt to narrow. The threshold is a constant, tuned on the Large fixture.
 
