@@ -452,6 +452,8 @@ export interface PathSignal {
   state: HealthState;
   /** On a route detail backendRef: the serves index of the attachment the signal came from. */
   attachment?: number;
+  /** The listener of ref a listener's signal is about, waiting ones included. */
+  listener?: string;
 }
 /** A path's worst state and its signals that are not healthy. */
 export interface PathProblem {
@@ -491,6 +493,8 @@ export interface Endpoints {
   ready?: number;
   total?: number;
   items?: Endpoint[];
+  /** The cache's ready count, only when a complete read finds none ready while the cache counts some. */
+  cachedReady?: number;
 }
 /**
  * One path: Gateway → listener → hostnames → route chain → rule → backend.
@@ -498,6 +502,8 @@ export interface Endpoints {
  * matches is null on a delegated row whose view C match is unknown ("match unknown").
  */
 export interface PathRow {
+  /** The row's identity, unique among the rows of one revision. */
+  id?: string;
   gateway: LinkedRef;
   listenerSet?: LinkedRef;
   listener: PathListener;
@@ -556,6 +562,8 @@ export interface PathFacets {
 /** GET …/paths. */
 export interface PathsResponse {
   install: string;
+  /** The publication the page was cut from; pages of one walk agree on it. */
+  revision?: string;
   rows: PathRow[];
   next?: string;
   prev?: string;

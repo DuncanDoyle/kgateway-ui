@@ -776,7 +776,17 @@ const listenerSetDetail = shape<ListenerSetDetail>(
   { health: healthState },
 );
 const endpoints = shape<Endpoints>(
-  { source: "!", port: "?", runtime: "?", readAt: "!", complete: "!", ready: "?", total: "?", items: "?" },
+  {
+    source: "!",
+    port: "?",
+    runtime: "?",
+    readAt: "!",
+    complete: "!",
+    ready: "?",
+    total: "?",
+    items: "?",
+    cachedReady: "?",
+  },
   {
     port: shape<BackendPort>({ port: "!", name: "?" }),
     runtime: shape<EndpointsRuntime>({ install: "!", gateway: "!", proxy: "!", instance: "!" }, { gateway: linkedRef }),
@@ -796,7 +806,7 @@ const endpoints = shape<Endpoints>(
   },
 );
 const pathSignal = shape<PathSignal>(
-  { kind: "!", code: "?", title: "?", ref: "?", state: "!", attachment: "?" },
+  { kind: "!", code: "?", title: "?", ref: "?", state: "!", attachment: "?", listener: "?" },
   { ref: linkedRef },
   {
     kind: {
@@ -1209,6 +1219,7 @@ const gatewayDetail = shape<GatewayDetail>(
 const pathCounts = shape<PathCounts>({ paths: "!", routes: "!", gateways: "!", backends: "!" });
 const pathRow = shape<PathRow>(
   {
+    id: "?",
     gateway: "!",
     listenerSet: "?",
     listener: "!",
@@ -1254,7 +1265,7 @@ const pathRow = shape<PathRow>(
   },
 );
 const pathsResponse = shape<PathsResponse>(
-  { install: "!", rows: "!", next: "?", prev: "?", summary: "!", collectedAt: "!" },
+  { install: "!", revision: "?", rows: "!", next: "?", prev: "?", summary: "!", collectedAt: "!" },
   {
     rows: pathRow,
     summary: shape<PathSummary>(
