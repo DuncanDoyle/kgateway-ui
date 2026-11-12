@@ -50,7 +50,7 @@ type Backend struct {
 	// not-applicable summary for a Backend.
 	Endpoints []*Endpoints
 	// Own are its own distinct signals, as Problem orders them: endpoints,
-	// KGWUI-002 and the judge's waiting.
+	// KGWUI-002, else the judge's verdict.
 	Own []Signal
 	// Problem is the worst of its path problems, its own signals and the
 	// attachment signals of routes that write it with no path to it.

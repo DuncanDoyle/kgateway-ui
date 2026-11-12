@@ -429,6 +429,20 @@ func TestBackendsHiddenRoutesOnly(t *testing.T) {
 	}
 }
 
+// §4.5, D-006: an in-scope Backend nothing uses, with a current
+// Accepted=False, is an error in the list and on its detail.
+func TestBackendsUnusedRejected(t *testing.T) {
+	bad := testutil.Backend("shop", "be-bad", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")})
+	_, srv, _ := startWith(t, backendsSetup(nil, nil), append(backendsWorld(), bad)...)
+	if r, ok := rowsByName(get[BackendsResponse](t, srv, backendsURL+"?limit=200", 200))["be-bad"]; !ok || r.Routes != 0 || r.Problem.State != "error" {
+		t.Fatalf("be-bad row %+v", r)
+	}
+	d := get[BackendDetail](t, srv, detailURL("gateway.kgateway.dev", "Backend", "be-bad"), 200)
+	if d.Problem.State != "error" || !slices.ContainsFunc(d.Status, func(s SignalDTO) bool { return s.Code == "Accepted" && s.State == "error" }) {
+		t.Fatalf("be-bad detail problem %+v status %+v", d.Problem, d.Status)
+	}
+}
+
 // §8.1, §13: the list's facets are the Gateways and namespaces of the visible
 // backends; each applies every filter but its own, so a selected value keeps
 // the others selectable.

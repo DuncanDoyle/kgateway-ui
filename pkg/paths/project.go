@@ -618,8 +618,9 @@ func (p *projector) backend(sigs []Signal, ref objects.Ref, port int32, traffic 
 }
 
 // backendSignals appends the signals of kgateway Backend ref, whose object is
-// b (nil when not in use) and whose findings are found: its KGWUI-002, else
-// waiting when the rule set's judge cannot judge it.
+// b (nil when unknown) and whose findings are found: its KGWUI-002, else the
+// rule set judge's verdict: an error when rejected, waiting when it cannot judge.
+// KGWUI-002 covers only Backends a route uses, so an unused one relies on the judge.
 func backendSignals(sigs []Signal, m *engine.InstallModel, ref objects.Ref, b *unstructured.Unstructured, found []*health.Finding) []Signal {
 	n := len(sigs)
 	for _, f := range found {
@@ -628,7 +629,15 @@ func backendSignals(sigs []Signal, m *engine.InstallModel, ref objects.Ref, b *u
 		}
 	}
 	if j := m.Rules.BackendJudge(); b != nil && j != nil && len(sigs) == n {
-		if v, _ := j.JudgeBackend(b); v == computed.BackendUnknown {
+		switch v, c := j.JudgeBackend(b); {
+		case v == computed.BackendRejected:
+			code := "Accepted"
+			if c != nil {
+				code = c.Type
+			}
+			// The Backend's own condition, as a Gateway's: kind gateway names an object's own status.
+			sigs = append(sigs, Signal{Kind: SignalGateway, Code: code, Ref: ref, State: health.StateError})
+		case v == computed.BackendUnknown:
 			sigs = append(sigs, Signal{Kind: SignalWaiting, Code: "Accepted", Ref: ref, State: health.StateUnknown})
 		}
 	}
