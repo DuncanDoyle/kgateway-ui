@@ -43,11 +43,13 @@ const EndpointsOn = "on"
 
 // Signal is one existing signal on a row's chain. Code is a finding code, a
 // condition type, a capability state or a view C reason; Ref is its object.
+// Listener names the listener of Ref a listener's signal is about; "" otherwise.
 type Signal struct {
-	Kind  string
-	Code  string
-	Ref   objects.Ref
-	State health.State
+	Kind     string
+	Code     string
+	Ref      objects.Ref
+	State    health.State
+	Listener string
 }
 
 // Problem is a row's worst signal state and the signals that are not healthy.
@@ -215,7 +217,7 @@ func (p *projector) intern(sigs []Signal) []Signal {
 		p.key = append(append(append(p.key, s.Kind...), 0), s.Code...)
 		p.key = append(append(append(append(append(p.key, 0), s.Ref.Group...), 0), s.Ref.Kind...), 0)
 		p.key = append(append(append(append(append(p.key, s.Ref.Namespace...), 0), s.Ref.Name...), 0), s.State...)
-		p.key = append(p.key, 1)
+		p.key = append(append(append(p.key, 0), s.Listener...), 1)
 	}
 	if set, ok := p.sets[string(p.key)]; ok {
 		return set
@@ -393,6 +395,7 @@ func (p *projector) attachmentInto(s *attSignals, a int32, root objects.Ref) {
 		}
 	}
 	name := t.listeners[at.listener].Name
+	n := len(s.sigs)
 	if i := slices.IndexFunc(listeners, func(l objects.ListenerStatus) bool { return l.Name == name }); i >= 0 {
 		s.sigs = conditions(s.sigs, SignalListener, res, resObj, listeners[i].Conditions, "Accepted", "Programmed")
 		if c := objects.FindCondition(listeners[i].Conditions, "ResolvedRefs"); c != nil && c.Status == metav1.ConditionFalse && !objects.IsStale(resObj, *c) {
@@ -400,6 +403,9 @@ func (p *projector) attachmentInto(s *attSignals, a int32, root objects.Ref) {
 		}
 	} else {
 		s.sigs = append(s.sigs, Signal{Kind: SignalWaiting, Code: "listener", Ref: res, State: health.StateUnknown})
+	}
+	for k := n; k < len(s.sigs); k++ {
+		s.sigs[k].Listener = name
 	}
 	for _, f := range p.findings[gw] {
 		if st := sevState(f.Severity); gatewayCodes[f.Code] && st != health.StateHealthy {

@@ -272,7 +272,7 @@ func note(d paths.DelegState) string {
 func problemDTO(l linker, titles map[titleKey]string, p paths.Problem) ProblemDTO {
 	out := ProblemDTO{State: p.State, Signals: make([]SignalDTO, 0, len(p.Signals))}
 	for _, s := range p.Signals {
-		d := SignalDTO{Kind: s.Kind, Code: s.Code, State: s.State}
+		d := SignalDTO{Kind: s.Kind, Code: s.Code, State: s.State, Listener: s.Listener}
 		if s.Kind == paths.SignalFinding && l.v.can(s.Ref) {
 			d.Title = titles[titleKey{s.Code, s.Ref}]
 		}

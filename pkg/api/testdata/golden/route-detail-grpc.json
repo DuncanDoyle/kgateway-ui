@@ -320,6 +320,7 @@
                   "attachment": 1,
                   "code": "Programmed",
                   "kind": "listener",
+                  "listener": "web",
                   "ref": {
                     "group": "gateway.networking.k8s.io",
                     "kind": "Gateway",
@@ -378,6 +379,7 @@
                   "attachment": 1,
                   "code": "Programmed",
                   "kind": "listener",
+                  "listener": "web",
                   "ref": {
                     "group": "gateway.networking.k8s.io",
                     "kind": "Gateway",

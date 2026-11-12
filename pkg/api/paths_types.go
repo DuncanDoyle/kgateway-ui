@@ -92,6 +92,7 @@ type ProblemDTO struct {
 // Title is a finding signal's message, as the findings API shows it.
 // Attachment, on a route detail backendRef only, indexes the serves entry an
 // attachment's Gateway, listener or parent status signal came from.
+// Listener names the listener of Ref a listener's signal is about, waiting ones included.
 type SignalDTO struct {
 	Kind       string       `json:"kind"`
 	Code       string       `json:"code,omitempty"`
@@ -99,6 +100,7 @@ type SignalDTO struct {
 	Ref        *LinkedRef   `json:"ref,omitempty"`
 	State      health.State `json:"state"`
 	Attachment *int         `json:"attachment,omitempty"`
+	Listener   string       `json:"listener,omitempty"`
 }
 
 // PathCountsDTO counts filtered visible paths and the distinct routes,

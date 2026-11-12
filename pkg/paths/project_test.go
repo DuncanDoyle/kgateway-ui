@@ -138,6 +138,29 @@ func TestProjectListenerNotProgrammed(t *testing.T) {
 	}
 }
 
+// A listener's signals name it: on a healthy Gateway, a listener whose
+// Programmed is missing is waiting, and the signal says which listener; a
+// Gateway's own signals name none.
+func TestProjectListenerSignalsNameListener(t *testing.T) {
+	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{1}, 1)
+	gw := testutil.Gateway("infra", "edge", "kgateway", nil, testutil.Listener{Name: "http", Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}})
+	_, p, _ := project(t, endpointsSnap(t, svcs, eps, gw, accepted("r", svc("cart"))), "on")
+	pr := p.Problems[0]
+	if pr.State != health.StateUnknown || !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool {
+		return s.Kind == paths.SignalWaiting && s.Code == "Programmed" && s.Listener == "http"
+	}) {
+		t.Fatalf("problem %+v", pr)
+	}
+	gw = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}, testutil.Listener{Name: "http", Conds: ready})
+	_, p, _ = project(t, endpointsSnap(t, svcs, eps, gw, accepted("r", svc("cart"))), "on")
+	if pr := p.Problems[0]; !slices.ContainsFunc(pr.Signals, func(s paths.Signal) bool {
+		return s.Kind == paths.SignalWaiting && s.Code == "Programmed" && s.Listener == ""
+	}) {
+		t.Fatalf("gateway signal %+v", pr)
+	}
+}
+
 // With one of two Service ports ready, only the other port's rows have a
 // problem, and each row counts its port as KGWUI-023 does.
 func TestProjectPerPort(t *testing.T) {
