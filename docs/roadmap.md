@@ -1,6 +1,6 @@
 # Snellius — Roadmap
 
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-12
 
 **Program:** [kgateway-tooling program.md](https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md)
 
@@ -103,7 +103,7 @@ Rough sub-phases:
 Why now: about 60% of the code is already generic, and the refactor is cheaper before the Policies phase adds kgateway policy semantics. Hooks run per install or per stage, so there is no measurable performance cost. Memory is the tight budget (+39.3 of 48 MiB retained heap), so the core owns the shared cache.
 
 ### Phase 6 — Traffic Flow & Backends
-**Status:** Not started
+**Status:** Complete (2026-11-12, local branch) — `docs/phases/phase-6/phase-6-complete.md`
 **Docs:** `docs/phases/phase-6/`
 
 - Where a route actually sends traffic: Services and Backends, weights, endpoint health and endpoint discovery status.

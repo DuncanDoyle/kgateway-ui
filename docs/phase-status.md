@@ -4,7 +4,7 @@
 Phase: 6 — Traffic Flow & Backends
 Base: 657378ad
 Docs: docs/phases/phase-6/
-Status: implementing (design and plan approved 2026-11-10; plan approved on condition that Claude and Codex agree, which they did). Branch `duncandoyle/phase6`, worktree `../snellius-phase6`. Field research done (private); proxy endpoint view after GA (D-069, #35)
+Status: complete pending user review (push, PR, tag). Design and plan approved 2026-11-10. Branch `duncandoyle/phase6`, worktree `../snellius-phase6`. Record: phases/phase-6/phase-6-complete.md. Proxy endpoint view after GA (D-069, #35)
 
 ### Queue
 Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a time:
@@ -13,22 +13,20 @@ Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a tim
 - [x] 6.3 backends (Tasks 33–39) — closed 2026-11-11, phases/phase-6/phase-6.3-complete.md
 - [x] 6.4 route trace, all route kinds (Tasks 40–42) — closed 2026-11-11, phases/phase-6/phase-6.4-complete.md
 - [x] 6.5 Gateway map, core (Tasks 43–47) — closed 2026-11-11, phases/phase-6/phase-6.5-complete.md
-- [ ] 6.6 Gateway map, the rest; phase close (Tasks 48–50) — Task 50 part 2 waits on Docker
+- [x] 6.6 Gateway map, the rest; phase close (Tasks 48–50) — closed 2026-11-12, phases/phase-6/phase-6.6-complete.md (e2e matrix and reel ran on `ec258bb`, after 6.7)
 - [x] 6.7 phase review fixes (stabilization; reviews/phase-codex.md #1–#9) — closed 2026-11-12, phases/phase-6/phase-6.7-complete.md
 
 ### Exit gates
-- [ ] tests/vet pass (observed)
-- [ ] all queue items done or deferred
+- [x] tests/vet pass (observed: `make test`, `make lint`, web 976/976 at 6.7; e2e on three pairs at `ec258bb`)
+- [x] all queue items done or deferred
 - [x] design+plan cross-model review + triage (reviews/design-codex.md, reviews/plan-codex.md)
 - [x] phase cross-model review + triage (reviews/phase-codex.md; 9 accepted → 6.7)
-- [ ] decisions.md / design / plan in sync with code
-- [ ] snellius.dev matches the user-visible changes (program P-006; `npm run sync:findings` for finding codes)
-- [ ] phase-6-complete.md written, roadmap updated, tracked items closed
+- [x] decisions.md / design / plan in sync with code (D-078; design status set to approved, as built)
+- [ ] snellius.dev matches the user-visible changes (program P-006; `npm run sync:findings` for finding codes) — not done; syncs at the release
+- [x] phase-6-complete.md written, roadmap updated, tracked items closed (open items listed in the record)
 
 ## Sub-phase
-Sub-phase: 6.6 — Gateway map, the rest; phase close (planned) — Task 50 part 2 (e2e matrix, map export specs, reel) waits on Docker
-Base: b246dcc
-Brief: phases/phase-6/phase-6.6-brief.md
+Sub-phase: none active (6.6 and 6.7 closed 2026-11-12)
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
@@ -57,6 +55,7 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - Smaller Phase 2 and Phase 3 items (parked tasks, test gaps, layout at 720 px, P4 polish) — src: phases/phase-2/phase-2-complete.md and phases/phase-3/phase-3-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-12: Phase 6 closed locally (phases/phase-6/phase-6-complete.md). Nothing is pushed. The user decides on push, PR, tag and when Phase 7 starts; this file stays on Phase 6 until then. Items queued for the user are in the record's Deferred / open (the D-077 Findings API leak, finding-copy and dependency questions, D-078 review).
 - [x] Q 5.7 (planned, before Phase 6): checks report what they are waiting on (E9, #33, D-068) — closed 2026-11-10, merged in #34, pre-release `v0.7.0-alpha.1`, phases/phase-5/phase-5.7-complete.md. snellius.dev syncs at `v0.7.0`
 - 2026-11-09: Phase 5 closed (phases/phase-5/phase-5-complete.md), merged in #31 and released as `v0.6.0`. Phase 6 is next; read the program file and set Base when it starts.
 - [x] Q 4.3 (Phase 4 stabilization, v0.5.1): data age reads the server's clock, so cluster clock skew no longer fakes or hides staleness — closed 2026-11-08, phases/phase-4/phase-4.3-complete.md

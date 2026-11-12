@@ -1,6 +1,6 @@
 # Phase 6 — Traffic Flow & Backends: Design
 
-**Status:** Draft, revised after the builder check and the Codex design review (`reviews/design-codex.md`). Awaiting user approval. Shaped with the user in a mockup session on 2026-11-10. Calls marked (our call) are open to change.
+**Status:** Approved 2026-11-10; as built at Phase 6 close (2026-11-12, deviations in D-078). Revised after the builder check and the Codex design review (`reviews/design-codex.md`). Shaped with the user in a mockup session on 2026-11-10. Calls marked (our call) are open to change.
 **Date:** 2026-11-10
 **Base:** `657378ad` (recorded at phase start; the design adds no code)
 **Roadmap:** `docs/roadmap.md`, Phase 6
