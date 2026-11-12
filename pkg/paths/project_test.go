@@ -521,9 +521,7 @@ func TestProjectDelegatedChildStatus(t *testing.T) {
 	unsupportedInvalid.Conds = append(slices.Clone(unsupported.Conds), testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "Invalid"))
 	// The parentRef written without its namespace: 2.3 writes no entry under the synthesized key.
 	unkeyed := []objects.ParentRef{{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "api"}}
-	// expectRejection stands in for view C expecting the hostname stage's
-	// rejection, as when another context of the child under api is
-	// hostname-rejected: the child-entry check calls UnsupportedValue compatible.
+	// Injected: real view C keeps no traffic context beside a compatible UnsupportedValue (hostnames reject every context; path-capped ones are only counted).
 	expectRejection := func(i *engine.InstallModel) {
 		for k := range i.Computed.Checks {
 			if c := &i.Computed.Checks[k]; c.ID.Kind == computed.KindChildEntry {
