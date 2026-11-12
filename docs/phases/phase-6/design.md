@@ -139,6 +139,8 @@ A delegated row takes its root's unattributed `ResolvedRefs` failure without con
 
 Backend-resource refs (kgateway `Backend`) have no endpoints; their endpoint cell is "not applicable", and their state comes from the Backend's conditions (builder Q7).
 
+A listener's signals, waiting ones included, carry the listener's name in an additive `listener` field, so the map can blame the listener rather than its Gateway (6.7).
+
 Rows sort problem-first by default (error, warning, unknown, healthy), then by Gateway, listener, route and rule. The order is global, applied before paging.
 
 ## 5. Path list
@@ -152,6 +154,8 @@ Rows sort problem-first by default (error, warning, unknown, healthy), then by G
 **Response:** the rows, plus a **summary of the whole filtered result**: affected paths, distinct routes, Gateways and backends, per state. One broken shared backend then reads as "1 backend, 37 routes, 4 Gateways", not 37 failures. The summary also says when coverage is incomplete ("endpoints not read") so a count never implies complete coverage. It carries:
 - `facets`: the Gateways and route namespaces of all visible rows, each computed with every filter except its own; the quick chips read their options from it.
 - `notComputed`: `no-attachments` when the install has no computed views. The page explains it; a class-only install has no paths.
+
+Each row carries an additive `id`, unique among one revision's rows: a hash of its attachment, chain, effective matches, rule, ref and mirror, so it reveals no hidden row (6.7).
 
 **Entry points set the filter:** nav → all Gateways; Gateway detail → `gateway=`; backend detail → `backend=`; route detail → `route=`. Every filter, the sort and the cursor live in the URL (`web/packages/shell/src/explore/listQuery.ts:92-124`). Changing a filter resets the cursor.
 
@@ -177,6 +181,8 @@ Interactions (user, 2026-11-10):
 9. **Export** as PNG or SVG of the whole drawn graph (filters, focus and collapse applied), not the viewport.
 
 **Edge and node state.** At rest an edge takes the worst state of its rows. Under hover or selection, a lit edge takes the worst state of the rows it shares with the active node. An edge is **broken** (dashed, error icon) only when every row on it fails, and never under a state filter, since the loaded rows are then not all of them. An edge where some rows fail is a solid error stroke with a hollow ring, so it differs from broken without colour. A node takes the worst state of the signals naming it; a rule node, which no signal names, takes the worst state of its rows. Neither ever defaults to healthy (D-006).
+
+**Consistent walk:** every `/paths` page carries an additive `revision`, the model publication's Seq, which fixes its topology and projection. The map restarts its walk when a page's revision differs (6.7).
 
 **Large Gateways open filtered (our call):** when the Gateway has more than 60 routes or 60 backends, the map opens on "Problems only" with a prompt to narrow. The threshold is a constant, tuned on the Large fixture.
 
@@ -255,6 +261,7 @@ The cached facts strip addresses, serving and terminating (D-057), and the mocku
 - **Memo size:** ≤ 1 MiB by byte budget, evicting least recently used first while over it; a result larger than the budget is never kept. 32 Services fit at the measured density (0.64 MiB IPv4, 0.82 MiB IPv6), and FQDNs with prefix-free Pod names keep about 8 (`TestMemoRetained`).
 - **Authorisation first:** the caller must be allowed to see the backend, on every request and on memo hits too, before any read (§13).
 - **Shown per endpoint:** address, port, ready, serving, terminating, and the target Pod name when the slice names it.
+- **Disagreement:** a complete read with no ready endpoint, while the cache counts some, sets the additive `cachedReady` and makes the detail unknown at best with a waiting KGWUI-023 signal; no finding is added (6.7).
 - **RBAC:** list EndpointSlices, which the chart already grants for the endpoints capability. There is no watch and no retained state beyond the memo.
 
 ### 9.4 Port chain (Codex #8)

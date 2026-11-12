@@ -1316,6 +1316,7 @@ Measured on the reference machine, 5 runs per world:
 13. Export covers the whole drawn graph, not the viewport (§6.1).
 14. Events stay cluster-wide under `Config.Namespaces` (§12.2). If wrong: a namespace-only user sees Events "denied".
 15. No `@axe-core/playwright` scan (a new dependency needs approval); role, name and focus assertions stand in for it.
+16. Reversed in 6.7: the Backends `used` filter and its facets count visible routes and consumers only. A Backend only hidden objects use is listed under `used=no` ("no visible consumers"); excluding it there revealed the hidden use (D-077).
 
 **Consequences:** Nothing here changes a budget, a finding code or the meaning of API v1. Each item can be reversed on its own.
 
