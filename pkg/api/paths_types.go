@@ -148,9 +148,12 @@ type NamespaceFacetDTO struct {
 	Paths int    `json:"paths"`
 }
 
-// PathsResponse is GET …/paths.
+// PathsResponse is GET …/paths. Revision names the model publication the
+// page was cut from, which fixes its topology and projection: pages of one
+// walk agree on it, and a walk whose pages differ must restart.
 type PathsResponse struct {
 	Install     string         `json:"install"`
+	Revision    string         `json:"revision,omitempty"`
 	Rows        []PathRowDTO   `json:"rows"`
 	Next        string         `json:"next,omitempty"`
 	Prev        string         `json:"prev,omitempty"`

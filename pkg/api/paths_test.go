@@ -335,6 +335,25 @@ func TestPathsRowIDs(t *testing.T) {
 	}
 }
 
+// Pages cut from one publication share a revision; a new publication, as
+// when one route recovers and another fails, gives a different one, so a
+// walk across pages can tell its pages apart even when every count agrees.
+func TestPathsRevision(t *testing.T) {
+	h := newHarness(t, setup{endpoints: true}, pathsWorld()...)
+	first := get[PathsResponse](t, h.srv, pathsURL+"?limit=2", 200)
+	if first.Revision == "" || first.Next == "" {
+		t.Fatalf("first page revision %q next %q", first.Revision, first.Next)
+	}
+	if second := get[PathsResponse](t, h.srv, pathsURL+"?limit=2&cursor="+first.Next, 200); second.Revision != first.Revision {
+		t.Fatalf("second page revision %q, want %q", second.Revision, first.Revision)
+	}
+	h.clk.set(testutil.Now)
+	h.e.Compute()
+	if again := get[PathsResponse](t, h.srv, pathsURL+"?limit=2&cursor="+first.Next, 200); again.Revision == first.Revision {
+		t.Fatalf("revision %q unchanged by a new publication", again.Revision)
+	}
+}
+
 // A child view C reaches only under unknown contexts has a null match on the
 // wire, never its rule as written, and the note unknown.
 func TestPathsUnknownMatchIsNull(t *testing.T) {
