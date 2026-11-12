@@ -376,7 +376,13 @@ func (b *backends) finish() {
 				it.Type = objects.DecodeBackend(u).Type
 			}
 			it.Endpoints = []*Endpoints{{Complete: EndpointsNotApplicable}}
-			it.Own = backendSignals(nil, b.in.Model, it.Ref, u, b.found[it.Ref])
+			// KGWUI-002 exists only for a Backend a route uses; with no visible route
+			// the judge alone decides, so a hidden route's use shows nothing (D-077).
+			found := b.found[it.Ref]
+			if len(it.Routes) == 0 {
+				found = nil
+			}
+			it.Own = backendSignals(nil, b.in.Model, it.Ref, u, found)
 		}
 		it.Own = merge("", nil, it.Own).Signals
 		it.Problem = merge(it.Problem.State, b.sets[i], it.Own)

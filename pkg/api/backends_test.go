@@ -429,6 +429,44 @@ func TestBackendsHiddenRoutesOnly(t *testing.T) {
 	}
 }
 
+// D-077: a rejected Backend only a hidden route uses looks exactly like an
+// unused rejected one, in the list (state, signals, state filter) and on its
+// detail, with current evidence and with observedGeneration 0.
+func TestBackendsHiddenUseLooksUnused(t *testing.T) {
+	for _, gen := range []int64{1, 0} {
+		cond := testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")
+		cond.ObservedGeneration = gen
+		world := slices.DeleteFunc(backendsWorld(), func(o runtime.Object) bool {
+			u, ok := o.(*unstructured.Unstructured)
+			return ok && u.GetKind() == "Backend" && u.GetName() == "be-used"
+		})
+		world = append(world, testutil.Backend("shop", "be-used", []metav1.Condition{cond}), testutil.Backend("shop", "be-bad", []metav1.Condition{cond}))
+		_, srv, _ := startWith(t, backendsSetup(hideKinds("HTTPRoute", "unattached", "to-back"), nil), world...)
+		// signals is a problem's signals without their object.
+		signals := func(p ProblemDTO) []string {
+			var out []string
+			for _, s := range p.Signals {
+				out = append(out, s.Kind+"/"+s.Code+"/"+string(s.State)+"/"+s.Title)
+			}
+			return out
+		}
+		rows := rowsByName(get[BackendsResponse](t, srv, backendsURL+"?limit=200", 200))
+		used, bad := rows["be-used"], rows["be-bad"]
+		if used.Problem.State != bad.Problem.State || !slices.Equal(signals(used.Problem), signals(bad.Problem)) {
+			t.Errorf("gen %d: be-used %+v differs from be-bad %+v", gen, used.Problem, bad.Problem)
+		}
+		filtered := rowsByName(get[BackendsResponse](t, srv, backendsURL+"?limit=200&state="+string(bad.Problem.State), 200))
+		if _, ok := filtered["be-used"]; !ok {
+			t.Errorf("gen %d: state=%s lists be-bad but not be-used", gen, bad.Problem.State)
+		}
+		du := get[BackendDetail](t, srv, detailURL("gateway.kgateway.dev", "Backend", "be-used"), 200)
+		db := get[BackendDetail](t, srv, detailURL("gateway.kgateway.dev", "Backend", "be-bad"), 200)
+		if du.Problem.State != db.Problem.State || !slices.Equal(signals(du.Problem), signals(db.Problem)) {
+			t.Errorf("gen %d: detail be-used %+v differs from be-bad %+v", gen, du.Problem, db.Problem)
+		}
+	}
+}
+
 // §4.5, D-006: an in-scope Backend nothing uses, with a current
 // Accepted=False, is an error in the list and on its detail.
 func TestBackendsUnusedRejected(t *testing.T) {
