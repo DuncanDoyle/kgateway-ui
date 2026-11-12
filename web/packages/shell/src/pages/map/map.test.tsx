@@ -290,6 +290,30 @@ it("a walk completes while other publications land between its pages, since its 
   expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", "p2"]);
 });
 
+it("a walk whose cursor an upgraded server rejects restarts from page one and completes", async () => {
+  // The old server cuts page one with an old-format cursor; the upgraded server rejects it with 400.
+  let upgraded = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const u = new URL(url, "http://ui");
+      if (u.searchParams.get("cursor") === "old1") {
+        return new Response(JSON.stringify({ error: "bad cursor" }), { status: 400 });
+      }
+      const p = page(pageOf(u), 450);
+      const next = !upgraded && p.next ? "old1" : p.next;
+      upgraded = true;
+      return new Response(JSON.stringify({ ...p, next, revision: "same" }), { status: 200 });
+    }),
+  );
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current).toMatchObject({ error: undefined, inconsistent: false, partial: false });
+  expect(result.current.rows).toHaveLength(450);
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "old1", null, "p1", "p2"]);
+});
+
 it("a loaded map outlives a walk that keeps changing, with its own counts, until a steady walk replaces it", async () => {
   // tag names the result's content; churn gives every page its own revision.
   let tag = "first";

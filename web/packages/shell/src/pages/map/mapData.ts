@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { type ApiError, apiFetch } from "../../api/client";
+import { ApiError, apiFetch } from "../../api/client";
 import { forInstall, withQuery } from "../../api/exploreHooks";
 import { installApi, live } from "../../api/hooks";
 import type { PathRow, PathSummary, PathsResponse } from "../../api/types";
@@ -65,11 +65,22 @@ const sameResult = (a: PathsResponse, b: PathsResponse) =>
   a.summary.paths === b.summary.paths &&
   JSON.stringify(a.summary.byState) === JSON.stringify(b.summary.byState);
 
+/** Page next of url; undefined when the server rejects the cursor with a 400, as one cut before an upgrade. */
+async function fetchPage(url: string, next: string): Promise<PathsResponse | undefined> {
+  if (!next) return apiFetch(url);
+  try {
+    return await apiFetch(`${url}&cursor=${encodeURIComponent(next)}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 400) return undefined;
+    throw e;
+  }
+}
+
 /**
  * Loads the pages of url one after another, up to MAP_MAX_ROWS rows, reporting each as it arrives.
  * The cursor is a keyset anchor, so a row whose state changes mid-walk can move before it and be skipped
- * (D-006). Every page carries the result's revision and summary; when either differs from page one's, the walk
- * restarts.
+ * (D-006). Every page carries the result's revision and summary; when either differs from page one's, or the
+ * server rejects a cursor, the walk restarts.
  * After WALK_RETRIES restarts the previous result is kept (or, on a first load, the last walk), marked inconsistent.
  * The walk stops after any page once wanted(page one) is false.
  */
@@ -86,8 +97,8 @@ async function fetchPages(
     let consistent = true;
     for (let next: string | undefined = ""; next !== undefined && rows < MAP_MAX_ROWS; ) {
       if (pages[0] && !wanted(pages[0])) return { key: url, pages, inconsistent: false, stopped: true };
-      const page: PathsResponse = await apiFetch(next ? `${url}&cursor=${encodeURIComponent(next)}` : url);
-      if (pages[0] && !sameResult(pages[0], page)) {
+      const page = await fetchPage(url, next);
+      if (!page || (pages[0] && !sameResult(pages[0], page))) {
         consistent = false;
         break;
       }
