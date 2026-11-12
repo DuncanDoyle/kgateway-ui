@@ -599,6 +599,20 @@ it("a result that kept changing shows a quiet notice", async () => {
   await waitFor(() => expect(screen.getByTestId("map-partial")).toHaveTextContent(/^Showing 200 of [\d,]+ paths\.$/));
 });
 
+it("a large result that kept changing counts only the rows it loaded", async () => {
+  let calls = 0;
+  serve((u) => ({ ...page(pageOf(u), 2500), revision: `r${calls++}` }));
+  mount("?tab=map");
+  expect(await screen.findByTestId("map-inconsistent")).toBeInTheDocument();
+  // Every walk stopped after page one, so 200 rows are shown, never MAP_MAX_ROWS.
+  await waitFor(() =>
+    expect(screen.getByTestId("map-truncated")).toHaveTextContent(
+      "Showing 200 of 2,500 paths. Narrow the filters to see the rest.",
+    ),
+  );
+  expect(pathCalls()).toHaveLength(6);
+});
+
 it("a node with one healthy path says so in the singular", async () => {
   serve(() => edgePaths());
   mount("?tab=map");

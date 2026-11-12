@@ -19,7 +19,7 @@ import type { MapExporter } from "./GatewayMap";
 import { gatewayGraph, kindLabel, type MapNode } from "./graph";
 import { MapToolbar, problemsOnly } from "./MapToolbar";
 import { MapBox, MapNote } from "./map.css";
-import { LARGE_GATEWAY, MAP_MAX_ROWS, useMapPaths } from "./mapData";
+import { LARGE_GATEWAY, useMapPaths } from "./mapData";
 import { SidePanel } from "./SidePanel";
 
 // region Styles
@@ -333,13 +333,13 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
       />
       <Notes role="status" data-testid="map-notes">
         {prompt ? <span data-testid="map-large">{mapCopy.large(prompt.routes, prompt.backends)}</span> : null}
-        {paths.truncated && summary ? (
-          <span data-testid="map-truncated">{mapCopy.truncated(MAP_MAX_ROWS, summary.paths)}</span>
+        {/* Every count is the rows loaded; "Loading the rest" only while a walk runs. */}
+        {paths.partial && paths.walking && summary ? (
+          <span data-testid="map-partial">{mapCopy.partial(paths.rows.length, summary.paths)}</span>
+        ) : paths.truncated && summary ? (
+          <span data-testid="map-truncated">{mapCopy.truncated(paths.rows.length, summary.paths)}</span>
         ) : paths.partial && summary ? (
-          // "Loading the rest" only while a walk runs; a walk that ended short says what it shows.
-          <span data-testid="map-partial">
-            {(paths.walking ? mapCopy.partial : mapCopy.shown)(paths.rows.length, summary.paths)}
-          </span>
+          <span data-testid="map-partial">{mapCopy.shown(paths.rows.length, summary.paths)}</span>
         ) : null}
         {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
         {exportFailed ? (
