@@ -37,11 +37,10 @@ func (h *fnv1a) num(n int64) {
 	h.bytes(strconv.AppendInt(b[:0], n, 10))
 }
 
-// word hashes n's eight bytes.
+// word mixes n in whole: a multiply and a shift per word, not per byte.
 func (h *fnv1a) word(n uint64) {
-	for i := range 8 {
-		*h = (*h ^ fnv1a(n>>(8*i)&0xff)) * fnvPrime
-	}
+	*h = (*h ^ fnv1a(n)) * 0x9e3779b97f4a7c15
+	*h ^= *h >> 29
 }
 
 // count hashes *n, or "-" when n is nil.
@@ -80,13 +79,13 @@ func (h *fnv1a) matches(ms []objects.Match) {
 	}
 }
 
-// digest is row i's content as a client shows it: its identity, listener,
+// digest is row i's content as a client shows it: its identity id, listener,
 // hostnames, rule, target, view C state, problem, share and endpoint counts.
 // Equal content gives an equal digest, in any process; endpoint read times are left out.
-func (p *projector) digest(r Row, out *Projection, i int) uint64 {
+func (p *projector) digest(r Row, id uint64, out *Projection, i int) uint64 {
 	t := p.t
 	h := fnvOffset
-	h.word(t.rowHash(r))
+	h.word(id)
 	h.num(int64(r.dup))
 	ln := t.Listener(r)
 	h.str(ln.Protocol)

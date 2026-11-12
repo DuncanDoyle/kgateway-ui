@@ -193,8 +193,11 @@ func Project(t *Topology, in ProjectInput) *Projection {
 	}
 	out := &Projection{Problems: make([]Problem, len(t.Rows)), Shares: make([]Share, len(t.Rows)), Endpoints: make([]*Endpoints, len(t.Rows)),
 		Order: make([]int32, len(t.Rows)), Next: in.Next, digests: make([]uint64, len(t.Rows))}
+	// ids are the rows' RowID hashes, made once for the digests and the order's ties.
+	ids := make([]uint64, len(t.Rows))
 	var sigs []Signal
 	for i, r := range t.Rows {
+		ids[i] = t.rowHash(r)
 		sigs = p.row(sigs[:0], r, out, i)
 		pr := Problem{State: health.StateHealthy}
 		for _, s := range sigs {
@@ -206,7 +209,7 @@ func Project(t *Topology, in ProjectInput) *Projection {
 			pr.Signals = p.intern(sigs)
 		}
 		out.Problems[i] = pr
-		out.digests[i] = p.digest(r, out, i)
+		out.digests[i] = p.digest(r, ids[i], out, i)
 		out.Order[i] = int32(i) // #nosec G115 -- a row count fits in int32
 	}
 	// Ties fall to the rule as written, then RowID, which a cursor anchor holds (compareAnchor).
@@ -217,7 +220,7 @@ func Project(t *Topology, in ProjectInput) *Projection {
 			t.compareChains(ra, rb), cmp.Compare(t.Rule(ra).Index, t.Rule(rb).Index), compareSpec(ra.ref, ra.mirror, rb.ref, rb.mirror)); c != 0 {
 			return c
 		}
-		return cmp.Or(cmp.Compare(t.rowHash(ra), t.rowHash(rb)), cmp.Compare(ra.dup, rb.dup))
+		return cmp.Or(cmp.Compare(ids[a], ids[b]), cmp.Compare(ra.dup, rb.dup))
 	})
 	return out
 }
