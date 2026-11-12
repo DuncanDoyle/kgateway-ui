@@ -87,4 +87,4 @@ The chosen options are applied in the code. Picked by a separate Claude subagent
 | 79 | S751 | `copy/backends.ts:49` | Endpoints cell: a cached Service no route writes a port for | none | No referenced port | No port referenced | No port written | Port not set | No port | 2 (plain word order) |
 | 80 | S750 | `copy/backends.ts:150` | Section title for a non-Service backend's facts, e.g. Backend facts | `{kind}` | {kind} facts | About this {kind} | {kind} details | {kind} | Facts | 1 (matches "Service facts", S746) |
 
-Sub-phase 6.7 (`used=no` counts visible users only) replaces S680 and S687 with "No visible users" and S692 with "Nothing you can see uses this backend", as picked in the 6.7 re-review triage.
+Sub-phase 6.7 (`used=no` counts visible users only) replaces S680 and S687 with "No visible users" and S692 with "Nothing you can see uses this backend", as picked in the 6.7 re-review triage. It adds S823, the endpoints source's note when a complete read contradicts the cache: "The cache says {cached} ready, but the latest read found none. State unknown."

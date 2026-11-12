@@ -127,6 +127,8 @@ export const endpointsCopy = {
   perProxy: "Per-proxy endpoints are not shown.", // S724
   noPorts: "No port of this backend is referenced.", // S725
   table: (port: string) => `Endpoints on ${port}`, // S742
+  /** A complete read found none ready on a port the cache counts ready. */
+  disagree: (cached: number) => `The cache says ${cached} ready, but the latest read found none. State unknown.`, // S823
 };
 
 export const portChainCopy = {

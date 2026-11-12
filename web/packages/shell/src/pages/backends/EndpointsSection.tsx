@@ -138,6 +138,9 @@ export function EndpointsSection({ sources, noSuchPorts = [], onRetry, stylesOve
                 <span data-testid="endpoints-summary">{s.text}</span>
                 {s.cached ? <span className="muted">{endpointsCopy.cachedNote}</span> : null}
                 {e.complete === "partial" ? <span className="muted">{endpointsCopy.partialNote}</span> : null}
+                {e.cachedReady !== undefined ? (
+                  <span data-testid="endpoints-disagree">{endpointsCopy.disagree(e.cachedReady)}</span>
+                ) : null}
                 {e.complete === "busy" || e.complete === "timed-out" ? (
                   <QuietButton type="button" onClick={onRetry}>
                     {endpointsCopy.retry}

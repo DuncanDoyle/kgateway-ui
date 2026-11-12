@@ -323,6 +323,20 @@ it("a port the Service lacks says so, with no read time", async () => {
   expect(screen.getAllByTestId("endpoints-source")[0]).toHaveTextContent(/Read /);
 });
 
+it("a complete read that finds none ready where the cache counts some says the two disagree", async () => {
+  const d = detail(serviceGolden);
+  d.sources = [{ ...(d.sources[0] as Endpoints), complete: "complete", ready: 0, total: 2, items: [], cachedReady: 2 }];
+  d.problem = { state: "unknown", signals: [{ kind: "waiting", code: "KGWUI-023", state: "unknown" } as PathSignal] };
+  serveDetail(d);
+  mount(`/i/${ID}/backends/-/Service/shop/named-svc`);
+  await statusLine();
+  const src = screen.getByTestId("endpoints-source");
+  expect(within(src).getByTestId("endpoints-summary")).toHaveTextContent(/^0\/2 ready$/);
+  expect(within(src).getByTestId("endpoints-disagree")).toHaveTextContent(
+    "The cache says 2 ready, but the latest read found none. State unknown.",
+  );
+});
+
 it("a complete read lists each endpoint with ready, serving, terminating and its Pod", async () => {
   const d = detail(serviceGolden);
   d.sources = [
