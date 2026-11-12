@@ -247,6 +247,18 @@ it("a Backend's status line says it is not accepted, and its page keeps conditio
   expect(screen.queryByText(/^Read /)).toBeNull();
 });
 
+it("an unused Backend whose own Accepted condition is False reads not accepted, not a path problem", async () => {
+  const d = detail(backendGolden);
+  // The server sends the Backend's own condition as a gateway-kind signal when no route uses it.
+  d.status = [{ kind: "gateway", code: "Accepted", state: "error" } as PathSignal];
+  d.problem = { state: "error", signals: [] };
+  d.exposure.summary = { ...d.exposure.summary, routes: 0, gateways: 0 };
+  d.consumers = [];
+  serveDetail(d, `${API}/backends/gateway.kgateway.dev/Backend/shop/be-used`);
+  mount(`/i/${ID}/backends/gateway.kgateway.dev/Backend/shop/be-used`);
+  expect(await statusLine()).toHaveTextContent(/^ErrorNothing uses this backend; the controller does not accept it\.$/);
+});
+
 it("a Service has no YAML tab; its facts, port chain and per-proxy slot show", async () => {
   serveDetail(detail(serviceGolden));
   mount(`/i/${ID}/backends/-/Service/shop/named-svc`);

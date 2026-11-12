@@ -60,6 +60,8 @@ export const statusCopy = {
   unused: "Nothing uses this backend", // S692
   noReady: (fail: string) => `no endpoint is ready, so ${fail}`, // S693
   notAccepted: (fail: string) => `the controller does not accept it, so ${fail}`, // S694
+  /** A Backend no route uses, with its own Accepted condition False: no traffic to fail. */
+  notAcceptedUnused: "the controller does not accept it", // S822
   missing: "it is not seen in the cluster yet", // S695
   missingPort: "a referenced port is not seen on the Service yet", // S748
   checking: "its endpoints are still being checked", // S696
@@ -86,6 +88,9 @@ export function statusPhrase(s: PathSignal, fail: string, cached = false): strin
       return statusCopy.waiting;
     case "coverage":
       return statusCopy.notRead;
+    case "gateway":
+      // The Backend's own condition, sent when no route uses it.
+      return s.code === "Accepted" ? statusCopy.notAcceptedUnused : statusCopy.pathProblem;
     default:
       return statusCopy.pathProblem;
   }
