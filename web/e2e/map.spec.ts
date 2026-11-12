@@ -353,7 +353,7 @@ test("expanding a route opens its rule between it and its backends, keeps the ot
   await expect(page).not.toHaveURL(/expand=/);
 });
 
-test("focus on a backend by keyboard keeps only its paths, survives a reload, and Clear focus or Back leaves it", async ({
+test("focus on a backend by keyboard keeps only its paths, survives a reload, and Show the whole map or Back leaves it", async ({
   page,
 }) => {
   const d = await paths(page, "");

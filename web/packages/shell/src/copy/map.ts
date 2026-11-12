@@ -45,8 +45,8 @@ export const mapCopy = {
   hideRules: "Hide rules", // S802
   expandNode: (name: string) => `Expand ${name}`, // S803
   collapseNode: (name: string) => `Collapse ${name}`, // S804
-  focus: "Focus on this", // S805
-  clearFocus: "Clear focus", // S806
+  focus: "Show only its paths", // S805
+  clearFocus: "Show the whole map", // S806
   focused: (kind: string, name: string) => `Showing only the paths through ${kind} ${name}.`, // S807
   hideDelegated: "Hide delegated routes", // S808
   showDelegated: "Show delegated routes", // S809
@@ -59,7 +59,7 @@ export const mapCopy = {
   exportTitle: (gateway: string, at: string) => `Gateway ${gateway} · ${at}`, // S816
   legendPartial: "Some paths fail", // S817
   legendBroken: "Every path fails", // S818
-  exportWait: "Export is available once the map has loaded", // S819
+  exportWait: "Export needs a loaded map", // S819
   exportFailed: (format: string) => `Could not export the map as ${format}.`, // S820
   dismiss: "Dismiss", // S821
 };

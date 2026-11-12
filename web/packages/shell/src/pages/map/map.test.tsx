@@ -755,12 +755,12 @@ it("expand and focus live in the URL: a reload restores both, and back and forwa
   // Focus on a backend from its side panel.
   fireEvent.click(within(flowNode(map, "shop/be1")).getByTestId("map-node"));
   const panel = await screen.findByTestId("map-panel");
-  fireEvent.click(within(panel).getByRole("button", { name: "Focus on this" }));
+  fireEvent.click(within(panel).getByRole("button", { name: "Show only its paths" }));
   await waitFor(() => expect(search().get("focus")).toBe(BE1));
   const focused = ["infra/edge", "http", "shop/backends", "PathPrefix /", "shop/be1"];
   await waitFor(() => expect(new Set(nodeNames(screen.getByTestId("gateway-map")))).toEqual(new Set(focused)));
   expect(screen.getByTestId("map-focus")).toHaveTextContent("Showing only the paths through Backend shop/be1.");
-  expect(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Clear focus" })).toBeVisible();
+  expect(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Show the whole map" })).toBeVisible();
 
   // A reload of the same URL restores both.
   const url = screen.getByTestId("location").textContent ?? "";
@@ -781,7 +781,7 @@ it("expand and focus live in the URL: a reload restores both, and back and forwa
   );
   await waitFor(() => expect(search().getAll("expand")).toEqual([BACKENDS]));
   fireEvent.click(within(flowNode(screen.getByTestId("gateway-map"), "shop/be1")).getByTestId("map-node"));
-  fireEvent.click(within(await screen.findByTestId("map-panel")).getByRole("button", { name: "Focus on this" }));
+  fireEvent.click(within(await screen.findByTestId("map-panel")).getByRole("button", { name: "Show only its paths" }));
   await waitFor(() => expect(search().get("focus")).toBe(BE1));
   await user.click(screen.getByRole("button", { name: "test-back" }));
   await waitFor(() => expect(search().get("focus")).toBeNull());
@@ -789,8 +789,8 @@ it("expand and focus live in the URL: a reload restores both, and back and forwa
   await waitFor(() => expect(nodeNames(screen.getByTestId("gateway-map"))).toHaveLength(all.length + 1));
   await user.click(screen.getByRole("button", { name: "test-forward" }));
   await waitFor(() => expect(new Set(nodeNames(screen.getByTestId("gateway-map")))).toEqual(new Set(focused)));
-  // Clear focus is the way out, and collapse restores the map.
-  await user.click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Clear focus" }));
+  // Show the whole map is the way out, and collapse restores the map.
+  await user.click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Show the whole map" }));
   await waitFor(() => expect(search().get("focus")).toBeNull());
   fireEvent.click(
     within(flowNode(screen.getByTestId("gateway-map"), "shop/backends")).getByRole("button", {
@@ -815,7 +815,7 @@ it("a delegating route shows its delegated route at rest and can be collapsed; E
   await waitFor(() => expect(nodeNames(map)).not.toContain("shop/child"));
   expect(search().getAll("collapse")).toEqual([API_ROUTE]);
   expect(within(flowNode(map, "shop/api")).getByTestId("map-node")).toHaveTextContent("+1 delegated");
-  fireEvent.click(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Focus on this" }));
+  fireEvent.click(within(screen.getByTestId("map-panel")).getByRole("button", { name: "Show only its paths" }));
   await waitFor(() => expect(screen.getByTestId("map-focus")).toBeInTheDocument());
   const user = userEvent.setup();
   // The first Escape closes the panel, the second leaves focus mode.
@@ -841,7 +841,7 @@ it("find locates a route its collapsed parent hides: the parent opens and the ro
   );
 });
 
-it("a focus on a node not on the map says so and offers Clear focus; stale expand ids are dropped", async () => {
+it("a focus on a node not on the map says so and offers Show the whole map; stale expand ids are dropped", async () => {
   serve(() => edgePaths());
   mount(`?tab=map&focus=r%3Agone&expand=${encodeURIComponent("r:gateway.networking.k8s.io/HTTPRoute/shop/gone")}`);
   const map = await screen.findByTestId("gateway-map");
@@ -849,7 +849,9 @@ it("a focus on a node not on the map says so and offers Clear focus; stale expan
   // The whole map shows.
   expect(nodeNames(map)).toContain("shop/backends");
   await waitFor(() => expect(search().getAll("expand")).toEqual([]));
-  await userEvent.setup().click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Clear focus" }));
+  await userEvent
+    .setup()
+    .click(within(screen.getByTestId("map-focus")).getByRole("button", { name: "Show the whole map" }));
   await waitFor(() => expect(search().get("focus")).toBeNull());
 });
 
@@ -908,7 +910,7 @@ it("the export buttons are inert, and say why, until the map is drawn", async ()
     const b = screen.getByRole("button", { name });
     expect(b).toHaveAttribute("aria-disabled", "true");
     await user.hover(b);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Export is available once the map has loaded");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Export needs a loaded map");
     await user.unhover(b);
   }
 });
