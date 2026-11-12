@@ -143,7 +143,18 @@ func (p *projector) digest(r Row, id uint64, out *Projection, i int) uint64 {
 	return uint64(h)
 }
 
-// setDigest hashes an interned signal set once per projection.
+// title is the message the API shows as a finding signal's title: the first
+// finding on ref with code and a message, as pkg/api's signalTitles picks it.
+func (p *projector) title(code string, ref objects.Ref) string {
+	for _, f := range p.findings[ref] {
+		if f.Code == code && f.Message != "" {
+			return f.Message
+		}
+	}
+	return ""
+}
+
+// setDigest hashes an interned signal set, finding titles included, once per projection.
 func (p *projector) setDigest(sigs []Signal) uint64 {
 	if len(sigs) == 0 {
 		return 0
@@ -158,6 +169,9 @@ func (p *projector) setDigest(sigs []Signal) uint64 {
 		h.ref(s.Ref)
 		h.str(string(s.State))
 		h.str(s.Listener)
+		if s.Kind == SignalFinding {
+			h.str(p.title(s.Code, s.Ref))
+		}
 	}
 	p.setDigests[&sigs[0]] = uint64(h)
 	return uint64(h)

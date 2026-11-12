@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -18,8 +19,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -392,6 +395,58 @@ func TestPathsRevisionFollowsResult(t *testing.T) {
 	}
 	if got := get[PathsResponse](t, restricted, pathsURL, 200); got.Revision != hidden.Revision || !got.Summary.Hidden {
 		t.Fatalf("restricted revision %q after a hidden change, want %q", got.Revision, hidden.Revision)
+	}
+}
+
+// A rejected Backend's reason changes from Invalid to UnsupportedValue: same
+// rows, counts and states, but the finding title the row shows changes, so
+// the revision does too.
+func TestPathsRevisionFollowsTitles(t *testing.T) {
+	rejected := func(reason string) *unstructured.Unstructured {
+		return testutil.Backend("shop", "be1", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, reason)})
+	}
+	var objs []runtime.Object
+	for _, o := range explorerWorld() {
+		if u, ok := o.(*unstructured.Unstructured); ok && u.GetKind() == "Backend" && u.GetName() == "be1" {
+			o = rejected("Invalid")
+		}
+		objs = append(objs, o)
+	}
+	h := newHarness(t, setup{}, objs...)
+	const url = pathsURL + "?backend=gateway.kgateway.dev/Backend/shop/be1"
+	title := func(p PathsResponse) string {
+		for _, r := range p.Rows {
+			for _, s := range r.Problem.Signals {
+				if s.Code == health.CodeConditionFalse {
+					return s.Title
+				}
+			}
+		}
+		return ""
+	}
+	before := get[PathsResponse](t, h.srv, url, 200)
+	if title(before) == "" || before.Summary.Paths == 0 {
+		t.Fatalf("no KGWUI-002 title on be1's rows: %+v", before.Rows)
+	}
+	gvr := schema.GroupVersionResource{Group: "gateway.kgateway.dev", Version: "v1alpha1", Resource: "backends"}
+	if _, err := h.dyn.Resource(gvr).Namespace("shop").Update(h.ctx, rejected("UnsupportedValue"), metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	h.awaitCache(t, "be1 UnsupportedValue", func(s *cache.Snapshot) bool {
+		for _, o := range s.Objects[gvr] {
+			if o.GetName() == "be1" && strings.Contains(fmt.Sprint(o.Object["status"]), "UnsupportedValue") {
+				return true
+			}
+		}
+		return false
+	})
+	h.e.Compute()
+	after := get[PathsResponse](t, h.srv, url, 200)
+	if title(after) == title(before) || !reflect.DeepEqual(after.Summary.ByState, before.Summary.ByState) {
+		t.Fatalf("explanation unchanged or counts moved: %q → %q, %+v → %+v", title(before), title(after), before.Summary.ByState, after.Summary.ByState)
+	}
+	if after.Revision == before.Revision {
+		t.Fatalf("revision %q unchanged though the rows' finding title changed", after.Revision)
 	}
 }
 
