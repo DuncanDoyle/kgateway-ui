@@ -2,7 +2,7 @@ import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
 import type { PathRow, PathsResponse } from "../../api/types";
 import { mapCopy } from "../../copy/map";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
-import { esc, exportFileName, exportSVG } from "./export";
+import { esc, exportFileName, exportPNG, exportSVG } from "./export";
 import { gatewayGraph, type MapGraph } from "./graph";
 import { layoutColumns } from "./layout";
 
@@ -70,8 +70,12 @@ it("exportSVG gives each edge state its own pattern, and marks error edges as br
   const dash = (id: string) => doc.querySelector(`path[data-edge="${id}"]`)?.getAttribute("stroke-dasharray");
   expect([dash("h"), dash("w"), dash("u"), dash("p"), dash("b")]).toEqual([null, "2 5", "10 4 2 4", null, "8 6"]);
   // A broken edge carries a filled error chip, a partly failing one a hollow ring.
-  const marks = doc.querySelectorAll("svg > g:nth-of-type(2) > circle");
-  expect([...marks].map((c) => c.getAttribute("fill"))).toEqual([
+  const marks = [...doc.querySelectorAll("[data-mark]")];
+  expect(marks.map((m) => [m.getAttribute("data-for"), m.getAttribute("data-mark")])).toEqual([
+    ["p", "partial"],
+    ["b", "broken"],
+  ]);
+  expect(marks.map((m) => m.querySelector("circle")?.getAttribute("fill"))).toEqual([
     controlRoomLight.color.bg,
     controlRoomLight.color.status.error.iconBg,
   ]);
@@ -106,14 +110,44 @@ it("export file names carry the Gateway and the date, safe for a file system", (
   expect(exportFileName("a b/<c>", "png", AT)).toBe("gateway-map-a-b-c-2026-11-12.png");
 });
 
-// MAP_EXPORT_DIR=<dir> writes a light and a dark sample of the golden edge Gateway for review.
-it("writes review samples when MAP_EXPORT_DIR is set", async () => {
-  const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env;
-  const dir = env?.MAP_EXPORT_DIR;
-  if (!dir) return;
-  const fsName = "node:fs";
-  const fs = (await import(/* @vite-ignore */ fsName)) as { writeFileSync: (p: string, d: string) => void };
-  const g = gatewayGraph(gateway, rows);
-  for (const t of [controlRoomLight, controlRoomDark])
-    fs.writeFileSync(`${dir}/map-${t.mode}.svg`, exportSVG(g, layoutColumns(g), t, { at: AT }));
+describe("exportPNG", () => {
+  /** Stubs the browser pieces jsdom lacks; returns the canvas sizes drawn. */
+  function browser(ctx: boolean, blob: boolean) {
+    const sizes: [number, number][] = [];
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    Object.defineProperty(HTMLImageElement.prototype, "decode", { configurable: true, value: async () => {} });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+      sizes.push([this.width, this.height]);
+      return ctx ? ({ drawImage() {} } as unknown as CanvasRenderingContext2D) : null;
+    } as HTMLCanvasElement["getContext"]);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb) => cb(blob ? new Blob(["png"]) : null));
+    return sizes;
+  }
+  const svgOf = (w: number, h: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"></svg>`;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // jsdom has no image decode; remove the stand-in.
+    Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+  });
+
+  it("draws at scale, and smaller when a side or the area would pass the canvas limits", async () => {
+    const sizes = browser(true, true);
+    await exportPNG(svgOf(1000, 500), 2);
+    await exportPNG(svgOf(10000, 500), 2);
+    await exportPNG(svgOf(5000, 5000), 2);
+    expect(sizes[0]).toEqual([2000, 1000]);
+    expect(sizes[1]).toEqual([16384, 819]);
+    const [w, h] = sizes[2] as [number, number];
+    expect(w * h).toBeLessThanOrEqual(16_000_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects when the canvas has no 2D context or makes no image", async () => {
+    browser(false, true);
+    await expect(exportPNG(svgOf(100, 100), 2)).rejects.toThrow();
+    vi.restoreAllMocks();
+    browser(true, false);
+    await expect(exportPNG(svgOf(100, 100), 2)).rejects.toThrow();
+  });
 });

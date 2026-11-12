@@ -896,3 +896,53 @@ it("collapsing the parent of the focused route moves the focus to the parent", a
   expect(search().getAll("collapse")).toEqual([API_ROUTE]);
   expect(screen.getByTestId("map-focus")).toHaveTextContent("Showing only the paths through HTTPRoute shop/api.");
 });
+
+// region Task 49: export
+it("the export buttons are inert, and say why, until the map is drawn", async () => {
+  // The first page never arrives, so the map stays on its fallback.
+  serve(() => new Promise<PathsResponse>(() => {}));
+  mount("?tab=map");
+  await screen.findByTestId("map-fallback");
+  const user = userEvent.setup();
+  for (const name of ["Export SVG", "Export PNG"]) {
+    const b = screen.getByRole("button", { name });
+    expect(b).toHaveAttribute("aria-disabled", "true");
+    await user.hover(b);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Export is available once the map has loaded");
+    await user.unhover(b);
+  }
+});
+
+it("Export SVG downloads the map; a failed PNG export shows a note until dismissed", async () => {
+  serve(() => edgePaths());
+  const names: string[] = [];
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    names.push(this.download);
+  });
+  mount("?tab=map");
+  await screen.findByTestId("gateway-map");
+  const user = userEvent.setup();
+  const svg = screen.getByRole("button", { name: "Export SVG" });
+  await waitFor(() => expect(svg).toHaveAttribute("aria-disabled", "false"));
+  await user.click(svg);
+  await waitFor(() => expect(names).toEqual([expect.stringMatching(/^gateway-map-infra-edge-\d{4}-\d\d-\d\d\.svg$/)]));
+  expect(screen.queryByTestId("map-export-error")).toBeNull();
+  // The image cannot be decoded, so the PNG export rejects.
+  Object.defineProperty(HTMLImageElement.prototype, "decode", {
+    configurable: true,
+    value: () => Promise.reject(new Error("decode")),
+  });
+  try {
+    await user.click(screen.getByRole("button", { name: "Export PNG" }));
+    const note = await screen.findByTestId("map-export-error");
+    expect(note).toHaveTextContent("Could not export the map as PNG.");
+    expect(within(screen.getByTestId("map-notes")).getByTestId("map-export-error")).toBe(note);
+    expect(names).toHaveLength(1);
+    await user.click(within(note).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("map-export-error")).toBeNull();
+  } finally {
+    Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+  }
+});

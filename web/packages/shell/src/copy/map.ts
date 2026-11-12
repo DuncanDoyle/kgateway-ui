@@ -59,4 +59,7 @@ export const mapCopy = {
   exportTitle: (gateway: string, at: string) => `Gateway ${gateway} · ${at}`, // S816
   legendPartial: "Some paths fail", // S817
   legendBroken: "Every path fails", // S818
+  exportWait: "Export is available once the map has loaded", // S819
+  exportFailed: (format: string) => `Could not export the map as ${format}.`, // S820
+  dismiss: "Dismiss", // S821
 };

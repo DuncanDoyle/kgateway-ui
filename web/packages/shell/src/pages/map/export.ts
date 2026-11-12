@@ -11,8 +11,9 @@ import { NODE_H, NODE_W, type Point } from "./layout";
 const PAD = 32;
 const HEAD = 44;
 const LEGEND = 40;
-/** The largest PNG side, in pixels; browsers refuse bigger canvases. */
+/** The largest PNG side and area, in pixels: within the canvas limits of current browsers (Safari caps area at 16.7 M). */
 const MAX_SIDE = 16384;
+const MAX_AREA = 16_000_000;
 /** Edge patterns, as the canvas draws them (map.css.ts). */
 const DASH: Partial<Record<HealthState, string>> = { warning: "2 5", unknown: "10 4 2 4" };
 const BROKEN_DASH = "8 6";
@@ -121,7 +122,7 @@ export function exportSVG(g: MapGraph, positions: Map<string, Point>, theme: The
     lines.push(
       `${line} data-edge="${esc(e.id)}" data-state="${shown.state}"${shown.broken ? ' data-broken=""' : ""}/>`,
     );
-    if (mark) marks.push(mark);
+    if (mark) marks.push(`<g data-mark="${shown.broken ? "broken" : "partial"}" data-for="${esc(e.id)}">${mark}</g>`);
   }
 
   const nodes = g.nodes.map((n) => {
@@ -153,13 +154,14 @@ export function exportSVG(g: MapGraph, positions: Map<string, Point>, theme: The
   );
 }
 
-/** Rasterises an SVG from exportSVG to a PNG at scale, smaller when the image would pass the browser's canvas limit. */
+/** Rasterises an SVG from exportSVG to a PNG at scale, smaller when the image would pass the browser's canvas limits. */
 export async function exportPNG(svg: string, scale: number): Promise<Blob> {
+  // Reads the root's width then height, in the order exportSVG writes them.
   const m = /<svg[^>]*\swidth="([\d.]+)"[^>]*\sheight="([\d.]+)"/.exec(svg);
   const w = Number(m?.[1] ?? 0);
   const h = Number(m?.[2] ?? 0);
   if (!w || !h) throw new Error("exportPNG: the SVG has no size");
-  const s = Math.min(scale, MAX_SIDE / Math.max(w, h));
+  const s = Math.min(scale, MAX_SIDE / Math.max(w, h), Math.sqrt(MAX_AREA / (w * h)));
   const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
   try {
     const img = new Image();
@@ -192,6 +194,6 @@ export function download(blob: Blob, name: string) {
   document.body.append(a);
   a.click();
   a.remove();
-  // The browser reads the URL when the click is handled; revoke after that task.
-  setTimeout(() => URL.revokeObjectURL(url));
+  // Some browsers start reading the URL after the click returns; revoke once the download has surely begun.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

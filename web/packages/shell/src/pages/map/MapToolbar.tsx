@@ -107,6 +107,15 @@ const IconButton = styled.button`
     outline: 2px solid ${(p) => p.theme.color.focus};
     outline-offset: 2px;
   }
+  /* Not ready: muted and inert, but still focusable so its tooltip can say why. */
+  &[aria-disabled="true"],
+  &[aria-disabled="true"]:hover,
+  &[aria-disabled="true"]:active {
+    cursor: not-allowed;
+    color: ${(p) => p.theme.color.textMuted};
+    border-color: ${(p) => p.theme.color.border};
+    background: ${(p) => p.theme.color.surface};
+  }
 `;
 /** The keyboard hint: an icon whose tooltip lists the map's keys. */
 const Hint = styled.span`
@@ -162,6 +171,8 @@ interface MapToolbarProps {
   onTable: (table: boolean) => void;
   /** Saves the map as drawn as an SVG or a PNG file. */
   onExport: (kind: "svg" | "png") => void;
+  /** The map is drawn and has paths; until then the export buttons are inert. */
+  exportReady: boolean;
   stylesOverride?: SerializedStyles;
 }
 
@@ -180,6 +191,7 @@ export function MapToolbar({
   table,
   onTable,
   onExport,
+  exportReady,
   stylesOverride,
 }: MapToolbarProps) {
   const problems = problemsOnly(params);
@@ -237,16 +249,28 @@ export function MapToolbar({
         ) : null}
         <span className="end">
           {/* Export saves the map, so the table view hides it; it keeps its space so nothing moves. */}
-          <Tooltip label={mapCopy.exportSvgTip} placement="end" stylesOverride={table ? hidden : undefined}>
-            <IconButton type="button" aria-label={mapCopy.exportSvg} onClick={() => onExport("svg")}>
-              <FileCode2 size={16} aria-hidden="true" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip label={mapCopy.exportPngTip} placement="end" stylesOverride={table ? hidden : undefined}>
-            <IconButton type="button" aria-label={mapCopy.exportPng} onClick={() => onExport("png")}>
-              <ImageDown size={16} aria-hidden="true" />
-            </IconButton>
-          </Tooltip>
+          {(
+            [
+              ["svg", mapCopy.exportSvg, mapCopy.exportSvgTip, FileCode2],
+              ["png", mapCopy.exportPng, mapCopy.exportPngTip, ImageDown],
+            ] as const
+          ).map(([kind, label, tip, Icon]) => (
+            <Tooltip
+              key={kind}
+              label={exportReady ? tip : mapCopy.exportWait}
+              placement="end"
+              stylesOverride={table ? hidden : undefined}
+            >
+              <IconButton
+                type="button"
+                aria-label={label}
+                aria-disabled={!exportReady}
+                onClick={() => exportReady && onExport(kind)}
+              >
+                <Icon size={16} aria-hidden="true" />
+              </IconButton>
+            </Tooltip>
+          ))}
           <Tooltip label={mapCopy.keys} placement="end" wrap stylesOverride={table ? hidden : undefined}>
             <Hint tabIndex={0} role="note" aria-label={mapCopy.keyboard} data-testid="map-keys">
               <Keyboard size={16} aria-hidden="true" />

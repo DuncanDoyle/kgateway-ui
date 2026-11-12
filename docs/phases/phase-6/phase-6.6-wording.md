@@ -1,6 +1,6 @@
 # Sub-phase 6.6 — Wording
 
-19 strings so far, five options each; new SPA copy of the Gateway map (`web/packages/shell/src/copy/map.ts`, `mapCopy`). Tasks 48–49 add their strings here.
+22 strings so far, five options each; new SPA copy of the Gateway map (`web/packages/shell/src/copy/map.ts`, `mapCopy`). Tasks 48–49 add their strings here.
 
 Option 1 is the drafted text. Choices are pending the wording pass. Ids run from S800, after the highest id in `phase-6.5-wording.md` (S799). Task 48 also reuses S625 "Delegated" (delegated route cards), S778 "Node details" and the 6.5 side panel strings unchanged. Task 49's export reuses the state labels, S794 (node titles), S625 and S810 (kind line) unchanged.
 
@@ -25,3 +25,6 @@ Option 1 is the drafted text. Choices are pending the wording pass. Ids run from
 | 17 | S816 | `copy/map.ts:59` | Title line at the top of an exported SVG or PNG | gateway (ns/name), at (YYYY-MM-DD HH:MM UTC) | Gateway {gateway} · {at} | {gateway} map, {at} | Paths through Gateway {gateway} at {at} | Gateway {gateway}, exported {at} | Map of Gateway {gateway} · {at} | pending |
 | 18 | S817 | `copy/map.ts:60` | Export legend: an error edge with a hollow ring (some of its paths fail) | none | Some paths fail | Partly failing | Some paths on it fail | Fails on some paths | Partial error | pending |
 | 19 | S818 | `copy/map.ts:61` | Export legend: a dashed error edge with a filled mark (every path on it fails) | none | Every path fails | Broken | All paths fail | Fails on every path | Every path on it fails | pending |
+| 20 | S819 | `copy/map.ts:62` | Tooltip of both export buttons while the map is not drawn yet (loading, large-Gateway prompt, no paths) | none | Export is available once the map has loaded | Wait for the map to load | You can export once the map is drawn | Export needs a loaded map | Not ready: the map is still loading | pending |
+| 21 | S820 | `copy/map.ts:63` | Note above the map when an export fails; stays until dismissed or retried | format (SVG or PNG) | Could not export the map as {format}. | The {format} export failed. | Export to {format} failed. Try again. | The map could not be saved as {format}. | Saving the map as {format} did not work. | pending |
+| 22 | S821 | `copy/map.ts:64` | Button that closes the export failure note | none | Dismiss | Close | Hide | OK | Clear | pending |

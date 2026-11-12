@@ -13,16 +13,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { Minus, Plus } from "lucide-react";
-import {
-  type FocusEvent,
-  type KeyboardEvent,
-  type RefObject,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type FocusEvent, type KeyboardEvent, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { mapCopy } from "../../copy/map";
 import { cellCopy } from "../../copy/traffic";
 import { HealthBadge } from "../../health/HealthBadge";
@@ -176,8 +167,8 @@ interface GatewayMapProps {
   view: string;
   /** Opens or closes a route node: shows or hides its delegated routes, or, for a route that delegates none, its rules. */
   onToggle?: (id: string) => void;
-  /** Set to this map's exporter while it is drawn, for the toolbar's export buttons. */
-  exporter?: RefObject<MapExporter | undefined>;
+  /** Receives this map's exporter while it is drawn, and undefined once it is gone; keep it stable. */
+  onExporter?: (exporter?: MapExporter) => void;
   stylesOverride?: SerializedStyles;
 }
 
@@ -193,7 +184,7 @@ export function GatewayMap({
   centre,
   view,
   onToggle,
-  exporter,
+  onExporter,
   stylesOverride,
 }: GatewayMapProps) {
   const theme = useTheme();
@@ -244,18 +235,16 @@ export function GatewayMap({
   }, [graph, view]);
   // Export draws the graph on the map, at rest (no hover), in the layout and theme on screen.
   useEffect(() => {
-    if (!exporter) return;
-    exporter.current = async (kind) => {
+    if (!onExporter) return;
+    onExporter(async (kind) => {
       const now = new Date();
       const svg = exportSVG(graph, at, theme, { at: now, stale });
       const gateway = graph.nodes.find((n) => n.kind === "gateway")?.name ?? "";
       const blob = kind === "svg" ? new Blob([svg], { type: "image/svg+xml" }) : await exportPNG(svg, PNG_SCALE);
       download(blob, exportFileName(gateway, kind, now));
-    };
-    return () => {
-      exporter.current = undefined;
-    };
-  }, [exporter, graph, at, theme, stale]);
+    });
+    return () => onExporter(undefined);
+  }, [onExporter, graph, at, theme, stale]);
   const active = hovered ?? focused ?? selected;
   const has = (id?: string) => !!id && graph.nodes.some((n) => n.id === id);
   const tabStop = has(last) ? last : has(selected) ? selected : graph.nodes.find((n) => n.kind === "gateway")?.id;

@@ -6,6 +6,7 @@ import type { LinkedRef, Page, PathRow, PathSummary } from "../../api/types";
 import { listCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { summaryCopy, trafficCopy } from "../../copy/traffic";
+import { HealthIcon } from "../../health/HealthIcon";
 import type { ParamChanges } from "../../shell/urlParams";
 import { QuietButton } from "../../states/controls";
 import { PageState } from "../../states/PageState";
@@ -41,6 +42,13 @@ const Notes = styled(MapNote)`
   button {
     height: auto;
     padding: 0 4px;
+  }
+  /* A failed export: icon, text and dismiss, in the error colour so it reads as a problem with or without colour. */
+  .failed {
+    display: inline-flex;
+    align-items: center;
+    gap: ${(p) => p.theme.space(1)};
+    color: ${(p) => p.theme.color.status.error.fg};
   }
 `;
 
@@ -230,8 +238,16 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
   const [panelFocus, setPanelFocus] = useState(false);
   const node = selected ? graph.nodes.find((n) => n.id === selected) : undefined;
   const area = useRef<HTMLDivElement>(null);
-  // The map registers its exporter here once drawn; export code loads with the map's chunk.
-  const exporter = useRef<MapExporter>(undefined);
+  // The map registers its exporter once drawn, so export code loads with the map's chunk. A failed export stays
+  // noted until dismissed or retried.
+  const [exporter, setExporter] = useState<MapExporter>();
+  const onExporter = useCallback((e?: MapExporter) => setExporter(() => e), []);
+  const [exportFailed, setExportFailed] = useState<"svg" | "png">();
+  const onExport = (kind: "svg" | "png") => {
+    if (!exporter) return;
+    setExportFailed(undefined);
+    exporter(kind).catch(() => setExportFailed(kind));
+  };
   const onSelect = useCallback((id?: string) => {
     setSelected(id);
     setPanelFocus(!!id);
@@ -312,7 +328,8 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
         found={{ at: Math.max(at, 1), of: found.length }}
         table={table}
         onTable={(on) => setFilter({ view: on ? "table" : null })}
-        onExport={(kind) => void exporter.current?.(kind)}
+        onExport={onExport}
+        exportReady={!!exporter && paths.rows.length > 0}
       />
       <Notes role="status" data-testid="map-notes">
         {prompt ? <span data-testid="map-large">{mapCopy.large(prompt.routes, prompt.backends)}</span> : null}
@@ -325,6 +342,15 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
           </span>
         ) : null}
         {paths.inconsistent ? <span data-testid="map-inconsistent">{mapCopy.inconsistent}</span> : null}
+        {exportFailed ? (
+          <span className="failed" data-testid="map-export-error">
+            <HealthIcon state="error" size={14} notice />
+            {mapCopy.exportFailed(exportFailed.toUpperCase())}
+            <QuietButton type="button" onClick={() => setExportFailed(undefined)}>
+              {mapCopy.dismiss}
+            </QuietButton>
+          </span>
+        ) : null}
         {focusId ? (
           <span data-testid="map-focus">
             {focusNode ? `${mapCopy.focused(kindLabel(focusNode), focusNode.name)} ` : `${mapCopy.focusGone} `}
@@ -366,7 +392,7 @@ export function MapTab({ installId, gateway, stylesOverride }: MapTabProps) {
               centre={centre}
               view={`${paths.query ?? ""}|${focusId ?? ""}`}
               onToggle={onToggle}
-              exporter={exporter}
+              onExporter={onExporter}
               stylesOverride={stylesOverride}
             />
           </Suspense>
