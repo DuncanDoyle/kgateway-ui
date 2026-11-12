@@ -36,6 +36,7 @@
             "namespace": "infra"
           },
           "hostnames": [],
+          "id": "3a4natvt4pcvm",
           "listener": {
             "name": "web",
             "port": 8080,

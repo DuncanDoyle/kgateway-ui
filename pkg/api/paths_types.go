@@ -54,8 +54,10 @@ type GRPCMatchDTO struct {
 // GRPCMatches to GRPCRoute rows; TCPRoute and TLSRoute rows have neither.
 // Matches is null on a delegated row whose view C match is unknown.
 // Share is set for shown, failing, may-fail and no-traffic shares;
-// MirrorPercent only on a mirror row.
+// MirrorPercent only on a mirror row. ID is the row's identity, unique among
+// the rows of one Revision: its attachment, path context, rule, ref and mirror.
 type PathRowDTO struct {
+	ID          string          `json:"id,omitempty"`
 	Gateway     LinkedRef       `json:"gateway"`
 	ListenerSet *LinkedRef      `json:"listenerSet,omitempty"`
 	Listener    PathListenerDTO `json:"listener"`

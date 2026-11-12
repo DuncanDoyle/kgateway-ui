@@ -32,6 +32,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "1o6ouwowcn2yq",
         "listener": {
           "name": "web",
           "port": 8080,
@@ -97,6 +98,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "3ou38103ftxf5",
         "listener": {
           "name": "web",
           "port": 8080,
@@ -167,6 +169,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "xaovj0atvbvh",
         "listener": {
           "name": "web",
           "port": 8080,
@@ -230,6 +233,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "me6vckegwr8v",
         "listener": {
           "name": "http",
           "port": 8080,
@@ -294,6 +298,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "2a0owv8oab2me",
         "listener": {
           "name": "http",
           "port": 8080,
@@ -358,6 +363,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "14kgh9nejolg6",
         "listener": {
           "name": "http",
           "port": 8080,
@@ -435,6 +441,7 @@
         "hostnames": [
           "ls.example.com"
         ],
+        "id": "1opxiqff8moh7",
         "listener": {
           "name": "extra",
           "port": 8081,
@@ -491,6 +498,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "ikfxhv7eadki",
         "listener": {
           "name": "http",
           "port": 8080,
@@ -533,6 +541,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "2kxxi31qlnz10",
         "listener": {
           "name": "http",
           "port": 8080,
@@ -600,6 +609,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "2jfx9tma4mr3j",
         "listener": {
           "name": "http",
           "port": 8080,
@@ -656,6 +666,7 @@
           "namespace": "infra"
         },
         "hostnames": [],
+        "id": "1h4d065o2v0f4",
         "listener": {
           "name": "http",
           "port": 8080,

@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -283,6 +285,53 @@ func TestPathsDelegated(t *testing.T) {
 	}
 	if deleg != 1 || child == 0 {
 		t.Fatalf("delegate rows %d, child rows %d: %v", deleg, child, pathKeys(got))
+	}
+}
+
+// Every row has an id, unique within the response's revision, and paging
+// returns each id once. Two delegation refs of one rule, and one child
+// reached under two inherited contexts, give rows that agree on Gateway,
+// chain, rule and target, which only the id tells apart.
+func TestPathsRowIDs(t *testing.T) {
+	inherit := func(u *unstructured.Unstructured) *unstructured.Unstructured {
+		u.SetAnnotations(map[string]string{objects.InheritParentMatcherAnnotation: "true"})
+		return u
+	}
+	objs := append(explorerWorld(),
+		testutil.WithRules(testutil.HTTPRoute("shop", "two", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/a", "/b"}, testutil.DelegateTo("shop", "c"), testutil.DelegateTo("shop", "d"))),
+		inherit(leaf("shop", "c", nil, "/c")), inherit(leaf("shop", "d", nil, "/d")))
+	_, srv, _ := startWith(t, setup{disputes: true}, withControllerVersion("v2.5.0", objs)...)
+	all := get[PathsResponse](t, srv, pathsURL+"?limit=200", 200)
+	ids, keys := map[string]bool{}, map[string]int{}
+	for _, r := range all.Rows {
+		if r.ID == "" || ids[r.ID] {
+			t.Fatalf("id %q empty or repeated: %v", r.ID, pathKeys(all))
+		}
+		ids[r.ID] = true
+		keys[pathKey(r)+" rule "+strconv.Itoa(r.Rule)]++
+	}
+	if !slices.ContainsFunc(slices.Collect(maps.Values(keys)), func(n int) bool { return n > 1 }) {
+		t.Fatalf("no rows that agree on everything but the id: %v", keys)
+	}
+	var paged []string
+	for cur := ""; ; {
+		p := get[PathsResponse](t, srv, pathsURL+"?limit=1&cursor="+cur, 200)
+		for _, r := range p.Rows {
+			paged = append(paged, r.ID)
+		}
+		if cur = p.Next; cur == "" {
+			break
+		}
+	}
+	if len(paged) != len(ids) {
+		t.Fatalf("paged %d ids, want %d", len(paged), len(ids))
+	}
+	for _, id := range paged {
+		if !ids[id] {
+			t.Fatalf("paged id %q repeated or not in the full list", id)
+		}
+		delete(ids, id)
 	}
 }
 

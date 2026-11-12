@@ -5,7 +5,9 @@ package paths
 
 import (
 	"encoding/binary"
+	"hash/fnv"
 	"slices"
+	"strconv"
 	"unsafe"
 
 	"github.com/DuncanDoyle/snellius/pkg/computed"
@@ -44,6 +46,67 @@ type Row struct {
 	depOff uint32
 	// mirror is the RequestMirror filter index on the ref, or on the rule when ref is -1; -1 for none.
 	mirror int16
+	// dup orders the rows whose identity hashes alike; it fills Row's padding.
+	dup uint16
+}
+
+// RowID is r's identity: a hash of what the row shows of its attachment
+// (Gateway, ListenerSet, listener, parentRef), chain, effective matches, rule,
+// ref and mirror, then its place among rows that hash alike. No two rows of
+// one Topology share it; equal input gives equal IDs. Being content, not a
+// position, it says nothing of rows a viewer may not see (design §13).
+func (t *Topology) RowID(r Row) string {
+	id := strconv.AppendUint(make([]byte, 0, 24), t.rowHash(r), 36)
+	if r.dup > 0 {
+		id = strconv.AppendUint(append(id, '-'), uint64(r.dup), 10)
+	}
+	return string(id)
+}
+
+// rowHash is FNV-1a over the identity RowID names.
+func (t *Topology) rowHash(r Row) uint64 {
+	h := fnv.New64a()
+	str := func(s string) {
+		_, _ = h.Write([]byte(s)) // a hash.Hash never fails
+		_, _ = h.Write([]byte{0})
+	}
+	ref := func(x objects.Ref) { str(x.Group); str(x.Kind); str(x.Namespace); str(x.Name) }
+	num := func(n int64) { str(strconv.FormatInt(n, 10)) }
+	a := &t.atts[r.att]
+	ref(t.Refs[a.gateway])
+	ref(t.Refs[a.resource])
+	str(t.listeners[a.listener].Name)
+	num(int64(a.parent))
+	for _, ri := range t.chain(r) {
+		ref(t.Refs[t.routes[ri].ref])
+	}
+	for _, m := range t.ctxs[r.ctx].matches {
+		str("m")
+		if m.Path != nil {
+			str(m.Path.Type)
+			str(m.Path.Value)
+		}
+		for _, k := range slices.Concat(m.Headers, []objects.KeyMatch{{}}, m.QueryParams) {
+			str(k.Type)
+			str(k.Name)
+			str(k.Value)
+		}
+		str(m.Method)
+	}
+	num(int64(r.rule))
+	num(int64(r.ref))
+	num(int64(r.mirror))
+	return h.Sum64()
+}
+
+// number sets each row's dup: its place among the earlier rows that hash alike.
+func (t *Topology) number() {
+	seen := make(map[uint64]uint16, len(t.Rows))
+	for i := range t.Rows {
+		h := t.rowHash(t.Rows[i])
+		t.Rows[i].dup = seen[h]
+		seen[h]++
+	}
 }
 
 // Input is everything Build reads for one install. A nil Index, Views or
@@ -148,6 +211,7 @@ func Build(in Input) *Topology {
 		b.member(&in.Views.Attachment.Members[i])
 	}
 	b.delegated()
+	t.number()
 	// The memo retains the tables, so they are copied to their length.
 	t.Rows, t.Refs, t.deps = slices.Clone(t.Rows), slices.Clone(t.Refs), slices.Clone(t.deps)
 	t.hostnames = slices.Clone(t.hostnames)

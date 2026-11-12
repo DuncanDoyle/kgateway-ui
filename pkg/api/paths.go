@@ -195,7 +195,7 @@ var actions = map[paths.Action]string{paths.ActionBackend: ActionBackend, paths.
 func pathRow(l linker, titles map[titleKey]string, t *paths.Topology, proj *paths.Projection, k int32) PathRowDTO {
 	r := t.Rows[k]
 	ln := t.Listener(r)
-	out := PathRowDTO{Gateway: l.linked(t.Gateway(r)), Listener: PathListenerDTO{Name: ln.Name, Protocol: ln.Protocol, Port: ln.Port},
+	out := PathRowDTO{ID: t.RowID(r), Gateway: l.linked(t.Gateway(r)), Listener: PathListenerDTO{Name: ln.Name, Protocol: ln.Protocol, Port: ln.Port},
 		Hostnames: t.Hostnames(r), Action: actions[t.Action(r)], Problem: problemDTO(l, titles, proj.Problems[k])}
 	if out.Hostnames == nil {
 		out.Hostnames = []string{}
