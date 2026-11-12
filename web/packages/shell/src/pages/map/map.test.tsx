@@ -1,7 +1,7 @@
-import { fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { SWRConfig } from "swr";
+import { SWRConfig, useSWRConfig } from "swr";
 import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import pathsGolden from "../../../../../../pkg/api/testdata/golden/paths.json";
@@ -266,7 +266,7 @@ it("a walk restarts when the revision changes between pages, even with the same 
     if (n === 1) flipped = true;
     const all = flipped ? after : before;
     const next = (n + 1) * 200 < all.length ? `p${n + 1}` : undefined;
-    const revision = flipped ? "boot.8" : "boot.7";
+    const revision = flipped ? "after" : "before";
     return { ...edgePaths(), rows: all.slice(n * 200, n * 200 + 200), next, summary, revision };
   });
   const params = new URLSearchParams();
@@ -278,18 +278,56 @@ it("a walk restarts when the revision changes between pages, even with the same 
   expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", null, "p1"]);
 });
 
-it("a result that keeps changing is walked three times, then shown marked inconsistent", async () => {
-  const base = edgePaths().summary;
-  let calls = 0;
-  serveResult(
-    () => Array.from({ length: 300 }, (_, k) => named(k)),
-    () => ({ ...base, paths: 300 + calls++ }),
-  );
+it("a walk completes while other publications land between its pages, since its result's revision holds", async () => {
+  // Each page is cut from a newer publication; nothing in this Gateway's result changed.
+  const t0 = Date.now();
+  serve((u) => ({ ...page(pageOf(u), 450, (n) => new Date(t0 + n * 1000).toISOString()), revision: "same" }));
   const params = new URLSearchParams();
   const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
-  await waitFor(() => expect(result.current.inconsistent).toBe(true));
-  expect(pathCalls()).toHaveLength(6);
-  expect(result.current.rows.length).toBeGreaterThan(0);
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current).toMatchObject({ inconsistent: false, partial: false });
+  expect(result.current.rows).toHaveLength(450);
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", "p2"]);
+});
+
+it("a loaded map outlives a walk that keeps changing, with its own counts, until a steady walk replaces it", async () => {
+  // tag names the result's content; churn gives every page its own revision.
+  let tag = "first";
+  let churn = false;
+  let calls = 0;
+  serve((u) => {
+    const p = page(pageOf(u), 2500);
+    const rows = p.rows.map((r) => ({ ...r, id: `${tag}-${r.id}` }));
+    return { ...p, rows, revision: churn ? `r${calls++}` : tag };
+  });
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => ({ paths: useMapPaths(ID, "infra/edge", params), swr: useSWRConfig() }), {
+    wrapper: hookWrapper,
+  });
+  const settled = async (requests: number) => {
+    await waitFor(() => expect(pathCalls()).toHaveLength(requests));
+    await waitFor(() => expect(result.current.paths.walking).toBe(false));
+  };
+  const poll = () => act(() => void result.current.swr.mutate((k) => typeof k === "string" && k.includes("/paths")));
+  await settled(10);
+  expect(result.current.paths).toMatchObject({ truncated: true, inconsistent: false });
+  expect(result.current.paths.rows).toHaveLength(2000);
+  // Three walks each stop after page one: the loaded 2,000 rows stay, marked, never a 200-row prefix.
+  [tag, churn] = ["churned", true];
+  vi.mocked(fetch).mockClear();
+  await poll();
+  await settled(6);
+  expect(result.current.paths.inconsistent).toBe(true);
+  expect(result.current.paths.rows).toHaveLength(2000);
+  expect(result.current.paths.rows.every((r) => r.id?.startsWith("first-"))).toBe(true);
+  // The churn stops: the next poll walks once and shows the new result.
+  [tag, churn] = ["steady", false];
+  vi.mocked(fetch).mockClear();
+  await poll();
+  await settled(10);
+  expect(result.current.paths.inconsistent).toBe(false);
+  expect(result.current.paths.rows).toHaveLength(2000);
+  expect(result.current.paths.rows.every((r) => r.id?.startsWith("steady-"))).toBe(true);
 });
 
 it("the same path on two pages collapses to one row with the worse state", () => {
