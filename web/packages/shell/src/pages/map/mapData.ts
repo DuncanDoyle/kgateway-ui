@@ -47,10 +47,10 @@ export function mapQuery(params: URLSearchParams, gateway: string): URLSearchPar
   return new URLSearchParams([["gateway", gateway], ...rest, ["limit", String(MAP_PAGE)]]);
 }
 
-/** Retries of a walk whose pages disagree on the result's counts. */
+/** Retries of a walk whose pages disagree on the result's revision or counts. */
 const WALK_RETRIES = 2;
 
-/** One walk over the pages; inconsistent when its pages never agreed on the result's counts. */
+/** One walk over the pages; inconsistent when its pages never agreed on the result. */
 interface MapResult {
   key: string;
   pages: PathsResponse[];
@@ -59,14 +59,17 @@ interface MapResult {
   stopped?: boolean;
 }
 
-/** True when two pages report the same counts for the whole result, so the result did not change between them. */
+/** True when two pages report the same revision and counts for the whole result, so it did not change between them. */
 const sameResult = (a: PathsResponse, b: PathsResponse) =>
-  a.summary.paths === b.summary.paths && JSON.stringify(a.summary.byState) === JSON.stringify(b.summary.byState);
+  a.revision === b.revision &&
+  a.summary.paths === b.summary.paths &&
+  JSON.stringify(a.summary.byState) === JSON.stringify(b.summary.byState);
 
 /**
  * Loads the pages of url one after another, up to MAP_MAX_ROWS rows, reporting each as it arrives.
  * The cursor is a keyset anchor, so a row whose state changes mid-walk can move before it and be skipped
- * (D-006). Every page carries the whole result's summary; when one differs from page one's, the walk restarts.
+ * (D-006). Every page carries the result's revision and summary; when either differs from page one's, the walk
+ * restarts.
  * After WALK_RETRIES restarts the previous result is kept (or, on a first load, the last walk), marked inconsistent.
  * The walk stops after any page once wanted(page one) is false.
  */

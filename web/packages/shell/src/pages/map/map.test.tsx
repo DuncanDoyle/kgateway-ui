@@ -250,6 +250,34 @@ it("a row that turns bad between pages is not lost: the walk restarts when the r
   expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", null, "p1"]);
 });
 
+it("a walk restarts when the revision changes between pages, even with the same counts", async () => {
+  // r100 recovers and r250 fails: the error count holds, but r250 moves ahead of the page-one anchor.
+  const before = Array.from({ length: 300 }, (_, k) => named(k, k === 100 ? "error" : "healthy"));
+  const after = [named(250, "error"), ...Array.from({ length: 300 }, (_, k) => named(k)).filter((_, k) => k !== 250)];
+  const base = edgePaths().summary;
+  const summary: PathSummary = {
+    ...base,
+    paths: 300,
+    byState: { ...base.byState, error: { ...base.byState.error, paths: 1 } },
+  };
+  let flipped = false;
+  serve((u) => {
+    const n = pageOf(u);
+    if (n === 1) flipped = true;
+    const all = flipped ? after : before;
+    const next = (n + 1) * 200 < all.length ? `p${n + 1}` : undefined;
+    const revision = flipped ? "boot.8" : "boot.7";
+    return { ...edgePaths(), rows: all.slice(n * 200, n * 200 + 200), next, summary, revision };
+  });
+  const params = new URLSearchParams();
+  const { result } = renderHook(() => useMapPaths(ID, "infra/edge", params), { wrapper: hookWrapper });
+  await waitFor(() => expect(result.current.done).toBe(true));
+  expect(result.current.rows.find((r) => r.routes[0]?.name === "r250")?.problem.state).toBe("error");
+  expect(result.current.rows.find((r) => r.routes[0]?.name === "r100")?.problem.state).toBe("healthy");
+  expect(result.current.inconsistent).toBe(false);
+  expect(pathCalls().map((u) => u.searchParams.get("cursor"))).toEqual([null, "p1", null, "p1"]);
+});
+
 it("a result that keeps changing is walked three times, then shown marked inconsistent", async () => {
   const base = edgePaths().summary;
   let calls = 0;
