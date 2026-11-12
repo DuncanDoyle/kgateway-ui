@@ -467,3 +467,48 @@ func TestProjectRefsDoNotHideProgramming(t *testing.T) {
 		t.Fatalf("root KGWUI-015 missing: %+v", pr)
 	}
 }
+
+// A delegated child's own controller status for its parent route counts on
+// its rows: missing or stale is waiting, rejected is an error, accepted is
+// healthy. Its endpoints are ready throughout (D-006).
+func TestProjectDelegatedChildStatus(t *testing.T) {
+	svcs, eps := cart([]cache.ServicePort{httpPort}, []int{1}, 1)
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gwEdge}, testutil.AcceptedBy(gwEdge, testutil.Controller)),
+		prefixes([]string{"/api"}, testutil.DelegateTo("shop", "plain")))
+	apiRef := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "api"}
+	rejected := testutil.RouteParent{Ref: apiRef, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByParent"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	for _, tc := range []struct {
+		name   string
+		status []testutil.RouteParent
+		stale  bool
+		want   health.State
+	}{
+		{"accepted", []testutil.RouteParent{testutil.AcceptedBy(apiRef, testutil.Controller)}, false, health.StateHealthy},
+		{"missing", nil, false, health.StateUnknown},
+		{"stale", []testutil.RouteParent{testutil.AcceptedBy(apiRef, testutil.Controller)}, true, health.StateUnknown},
+		{"rejected", []testutil.RouteParent{rejected}, false, health.StateError},
+	} {
+		plain := testutil.WithRules(testutil.HTTPRoute("shop", "plain", nil, tc.status...), prefixes([]string{"/api/a"}, svc("cart")))
+		if tc.stale {
+			plain.SetGeneration(2)
+		}
+		snap := worldSnap(t, "v2.5.0", nil, edge("http"), api, plain)
+		snap.Access[cache.ServicesGVR], snap.Access[cache.EndpointSlicesGVR] = cache.Access{OK: true}, cache.Access{OK: true}
+		snap.Services, snap.EndpointSlices = svcs, eps
+		top, p, _ := project(t, snap, "on")
+		n := 0
+		for i, r := range top.Rows {
+			if len(top.Chain(r)) != 2 {
+				continue
+			}
+			n++
+			if pr := p.Problems[i]; pr.State != tc.want {
+				t.Errorf("%s: delegated row %+v, want %s", tc.name, pr, tc.want)
+			}
+		}
+		if n == 0 {
+			t.Fatalf("%s: no delegated rows", tc.name)
+		}
+	}
+}

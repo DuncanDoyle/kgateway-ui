@@ -509,8 +509,46 @@ func (p *projector) delegation(ctx int32, routes []objects.Ref) []Signal {
 		if s := p.edge(routes[k-1], routes[k]); s != nil && !slices.Contains(sigs, *s) {
 			sigs = append(sigs, *s)
 		}
+		for _, s := range p.hop(routes[k-1], routes[k], k == len(routes)-1) {
+			if !slices.Contains(sigs, s) {
+				sigs = append(sigs, s)
+			}
+		}
 	}
 	p.ctxs[ctx] = sigs
+	return sigs
+}
+
+// hop are the signals of child's controller status for its parent route:
+// waiting when missing or not current, an error for each False condition.
+// The last child's ResolvedRefs=False is left to its 013 and 014 when it has any.
+func (p *projector) hop(parent, child objects.Ref, last bool) []Signal {
+	idx := p.in.Model.Index
+	id, ok := idx.Row(child)
+	if !ok {
+		return []Signal{{Kind: SignalWaiting, Ref: child, State: health.StateUnknown}}
+	}
+	var sigs []Signal
+	found := false
+	for _, l := range idx.Routes[id].Parents {
+		if l.Target != parent {
+			continue
+		}
+		found = true
+		if l.Attachment != explore.AttachmentAccepted && l.Attachment != explore.AttachmentNotAccepted {
+			sigs = append(sigs, Signal{Kind: SignalWaiting, Ref: child, State: health.StateUnknown})
+			continue
+		}
+		for _, c := range [2]*metav1.Condition{l.Cond, l.Programming} {
+			if c == nil || c.Type == "ResolvedRefs" && last && len(p.refFindings(child)) > 0 {
+				continue
+			}
+			sigs = append(sigs, Signal{Kind: SignalRouteStatus, Code: c.Type, Ref: child, State: health.StateError})
+		}
+	}
+	if !found {
+		sigs = append(sigs, Signal{Kind: SignalWaiting, Ref: child, State: health.StateUnknown})
+	}
 	return sigs
 }
 
