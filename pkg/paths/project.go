@@ -164,6 +164,8 @@ type projector struct {
 	key  []byte
 	// na are the shared not-applicable summaries of Backend refs, per port.
 	na map[int32]*Endpoints
+	// entries are entryChecks' table; nil until first used.
+	entries map[[2]objects.Ref][]computed.Class
 }
 
 // Project maps each row of t to its problem: the worst existing signal along
@@ -525,14 +527,35 @@ func (p *projector) delegation(ctx int32, routes []objects.Ref) []Signal {
 	return sigs
 }
 
-// hop are the signals of child's controller status for its parent route:
-// waiting when missing or not current, an error for each False condition.
+// hop are the signals of child's entry for its parent route. View C's
+// child-entry checks decide whether an entry is expected and current: none
+// expected (2.3 writes none under the key) gives nothing, missing, stale or
+// undecided gives waiting. A current entry's False conditions are errors,
+// except the UnsupportedValue a compatible check expects from another
+// context's hostname rejection. Without a check, the status alone decides.
 // The last child's ResolvedRefs=False is left to its 013 and 014 when it has any.
 func (p *projector) hop(parent, child objects.Ref, last bool) []Signal {
+	waiting := []Signal{{Kind: SignalWaiting, Ref: child, State: health.StateUnknown}}
+	classes, checked := p.entryChecks()[[2]objects.Ref{parent, child}]
+	expected, tolerate, pending := !checked, false, false
+	for _, c := range classes {
+		switch c {
+		case computed.ClassNotObservable:
+		case computed.ClassCompatible:
+			expected, tolerate = true, true
+		case computed.ClassContradicting:
+			expected = true
+		default: // missing, stale, unknown, inconclusive, unexpected
+			expected, pending = true, true
+		}
+	}
 	idx := p.in.Model.Index
 	id, ok := idx.Row(child)
-	if !ok {
-		return []Signal{{Kind: SignalWaiting, Ref: child, State: health.StateUnknown}}
+	switch {
+	case !expected:
+		return nil
+	case !ok:
+		return waiting
 	}
 	var sigs []Signal
 	found := false
@@ -542,20 +565,43 @@ func (p *projector) hop(parent, child objects.Ref, last bool) []Signal {
 		}
 		found = true
 		if l.Attachment != explore.AttachmentAccepted && l.Attachment != explore.AttachmentNotAccepted {
-			sigs = append(sigs, Signal{Kind: SignalWaiting, Ref: child, State: health.StateUnknown})
+			pending = true
 			continue
 		}
 		for _, c := range [2]*metav1.Condition{l.Cond, l.Programming} {
-			if c == nil || c.Type == "ResolvedRefs" && last && len(p.refFindings(child)) > 0 {
+			switch {
+			case c == nil, c.Type == "ResolvedRefs" && last && len(p.refFindings(child)) > 0,
+				tolerate && c.Type == "Accepted" && c.Reason == reasonUnsupportedValue:
 				continue
 			}
 			sigs = append(sigs, Signal{Kind: SignalRouteStatus, Code: c.Type, Ref: child, State: health.StateError})
 		}
 	}
-	if !found {
-		sigs = append(sigs, Signal{Kind: SignalWaiting, Ref: child, State: health.StateUnknown})
+	if pending || !found {
+		sigs = append(sigs, waiting...)
 	}
 	return sigs
+}
+
+// reasonUnsupportedValue is the Accepted reason of kgateway's hostname stage.
+const reasonUnsupportedValue = "UnsupportedValue"
+
+// entryChecks are the classes of view C's child-entry checks per (parent, child), built on first use.
+func (p *projector) entryChecks() map[[2]objects.Ref][]computed.Class {
+	if p.entries != nil {
+		return p.entries
+	}
+	p.entries = map[[2]objects.Ref][]computed.Class{}
+	if v := p.in.Model.Computed; v != nil {
+		for i := range v.Checks {
+			c := &v.Checks[i]
+			if parent, ok := c.Parent(); ok && c.ID.Kind == computed.KindChildEntry {
+				k := [2]objects.Ref{parent, c.On}
+				p.entries[k] = append(p.entries[k], c.Class)
+			}
+		}
+	}
+	return p.entries
 }
 
 // edge is the signal of every view C row from parent to child, merged; nil when certain.

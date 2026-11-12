@@ -12,6 +12,8 @@ import (
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/internal/testutil/scale"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -42,10 +44,18 @@ func project(t *testing.T, snap *cache.Snapshot, cap string, extra ...health.Fin
 // testutil.Now, projecting the last.
 func projectAt(t *testing.T, snap *cache.Snapshot, cap string, at []time.Duration, extra ...health.Finding) (*paths.Topology, *paths.Projection, *engine.Model) {
 	t.Helper()
+	return projectWith(t, snap, cap, at, nil, nil, extra...)
+}
+
+// projectWith is projectAt with the engine's rule selection rulesFor (nil
+// for the real one) and mutate applied to the install's model before projecting.
+func projectWith(t *testing.T, snap *cache.Snapshot, cap string, at []time.Duration, rulesFor func(string) computed.Selection,
+	mutate func(*engine.InstallModel), extra ...health.Finding) (*paths.Topology, *paths.Projection, *engine.Model) {
+	t.Helper()
 	now := testutil.Now
 	e := engine.New(engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Checks: health.Upstream(),
-		Now: func() time.Time { return now }})
+		Now: func() time.Time { return now }, RulesFor: rulesFor})
 	var m *engine.Model
 	for _, d := range at {
 		now = testutil.Now.Add(d)
@@ -56,6 +66,9 @@ func projectAt(t *testing.T, snap *cache.Snapshot, cap string, at []time.Duratio
 	}
 	i := &m.Installs[0]
 	i.Health.Findings = append(i.Health.Findings, extra...)
+	if mutate != nil {
+		mutate(i)
+	}
 	top := paths.Build(paths.Input{Index: i.Index, Views: i.Computed, Decode: objects.Direct{}, Delegates: i.Rules.Delegator() != nil})
 	p := paths.Project(top, paths.ProjectInput{Model: i, Next: m.Next, Snapshot: m.Snapshot, Now: now, EndpointsCap: cap})
 	if len(p.Problems) != len(top.Rows) || len(p.Shares) != len(top.Rows) || len(p.Endpoints) != len(top.Rows) || len(p.Order) != len(top.Rows) {
@@ -501,25 +514,46 @@ func TestProjectDelegatedChildStatus(t *testing.T) {
 	apiRef := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "api"}
 	rejected := testutil.RouteParent{Ref: apiRef, Controller: testutil.Controller, Conds: []metav1.Condition{
 		testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByParent"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	unsupported := testutil.RouteParent{Ref: apiRef, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionFalse, "UnsupportedValue"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	// The parentRef written without its namespace: 2.3 writes no entry under the synthesized key.
+	unkeyed := []objects.ParentRef{{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "api"}}
+	// expectRejection stands in for view C expecting the hostname stage's
+	// rejection, as when another context of the child under api is
+	// hostname-rejected: the child-entry check calls UnsupportedValue compatible.
+	expectRejection := func(i *engine.InstallModel) {
+		for k := range i.Computed.Checks {
+			if c := &i.Computed.Checks[k]; c.ID.Kind == computed.KindChildEntry {
+				c.Class = computed.ClassCompatible
+			}
+		}
+	}
 	for _, tc := range []struct {
-		name   string
-		status []testutil.RouteParent
-		stale  bool
-		want   health.State
+		name    string
+		version string
+		parents []objects.ParentRef
+		status  []testutil.RouteParent
+		stale   bool
+		mutate  func(*engine.InstallModel)
+		want    health.State
 	}{
-		{"accepted", []testutil.RouteParent{testutil.AcceptedBy(apiRef, testutil.Controller)}, false, health.StateHealthy},
-		{"missing", nil, false, health.StateUnknown},
-		{"stale", []testutil.RouteParent{testutil.AcceptedBy(apiRef, testutil.Controller)}, true, health.StateUnknown},
-		{"rejected", []testutil.RouteParent{rejected}, false, health.StateError},
+		{"accepted", "v2.5.0", nil, []testutil.RouteParent{testutil.AcceptedBy(apiRef, testutil.Controller)}, false, nil, health.StateHealthy},
+		{"missing", "v2.5.0", nil, nil, false, nil, health.StateUnknown},
+		{"stale", "v2.5.0", nil, []testutil.RouteParent{testutil.AcceptedBy(apiRef, testutil.Controller)}, true, nil, health.StateUnknown},
+		{"rejected", "v2.5.0", nil, []testutil.RouteParent{rejected}, false, nil, health.StateError},
+		{"rejection view C does not expect", "v2.5.0", nil, []testutil.RouteParent{unsupported}, false, nil, health.StateError},
+		{"2.3 writes no entry", "v2.3.0", unkeyed, nil, false, nil, health.StateHealthy},
+		{"rejection view C expects", "v2.5.0", nil, []testutil.RouteParent{unsupported}, false, expectRejection, health.StateHealthy},
 	} {
-		plain := testutil.WithRules(testutil.HTTPRoute("shop", "plain", nil, tc.status...), prefixes([]string{"/api/a"}, svc("cart")))
+		plain := testutil.WithRules(testutil.HTTPRoute("shop", "plain", tc.parents, tc.status...), prefixes([]string{"/api/a"}, svc("cart")))
 		if tc.stale {
 			plain.SetGeneration(2)
 		}
-		snap := worldSnap(t, "v2.5.0", nil, edge("http"), api, plain)
+		snap := worldSnap(t, tc.version, nil, edge("http"), api, plain)
 		snap.Access[cache.ServicesGVR], snap.Access[cache.EndpointSlicesGVR] = cache.Access{OK: true}, cache.Access{OK: true}
 		snap.Services, snap.EndpointSlices = svcs, eps
-		top, p, _ := project(t, snap, "on")
+		rules := func(string) computed.Selection { return rulesets.Select(tc.version) }
+		top, p, _ := projectWith(t, snap, "on", []time.Duration{0}, rules, tc.mutate)
 		n := 0
 		for i, r := range top.Rows {
 			if len(top.Chain(r)) != 2 {
