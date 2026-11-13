@@ -850,8 +850,8 @@ describe("ProcessLine", () => {
       />,
     );
     expect(screen.getByText("4 of 5 Gateways ready")).toBeInTheDocument();
-    expect(screen.getByText("4 reject config")).toBeInTheDocument();
-    expect(screen.getByText("1 self-managed")).toBeInTheDocument();
+    expect(screen.getByText("4 Gateways reject config")).toBeInTheDocument();
+    expect(screen.getByText("1 self-managed Gateway")).toBeInTheDocument();
     expect(screen.queryByText(/not observed/)).toBeNull();
   });
 

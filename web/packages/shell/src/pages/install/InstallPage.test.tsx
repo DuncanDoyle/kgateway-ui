@@ -384,7 +384,7 @@ it("Processes shows the controller and proxies lines and links to the Processes 
   const proxies = within(section).getByTestId("process-line-proxies");
   expect(proxies).toHaveTextContent("Error");
   expect(proxies).toHaveTextContent("1 of 2 Gateways ready");
-  expect(proxies).toHaveTextContent("1 reject config");
+  expect(proxies).toHaveTextContent("1 Gateway rejects config");
   expect(within(section).getByRole("link", { name: "View processes" })).toHaveAttribute(
     "href",
     "/i/kgw.kgateway/processes",
