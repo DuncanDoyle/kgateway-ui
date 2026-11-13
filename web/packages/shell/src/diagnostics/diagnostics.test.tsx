@@ -842,10 +842,22 @@ describe("ProcessLine", () => {
     );
     expect(screen.getByText(diagnosticsCopy.gatewaysReady(2, 5))).toBeInTheDocument();
     expect(screen.getByText(diagnosticsCopy.rejecting(1))).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.skew(1))).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.restarting(1))).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.gatewaysNotObserved(1))).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway with version skew")).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway restarted recently")).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway not observed")).toBeInTheDocument();
     expect(screen.getByText("Error")).toBeInTheDocument();
+  });
+
+  it("the proxies line names Gateways in the plural", () => {
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{ state: "error", gateways: 9, ready: 3, rejecting: 0, skew: 2, restarting: 3, notObserved: 4 }}
+      />,
+    );
+    expect(screen.getByText("2 Gateways with version skew")).toBeInTheDocument();
+    expect(screen.getByText("3 Gateways restarted recently")).toBeInTheDocument();
+    expect(screen.getByText("4 Gateways not observed")).toBeInTheDocument();
   });
 
   it("the proxies line leaves self-managed Gateways out of the ready count", () => {

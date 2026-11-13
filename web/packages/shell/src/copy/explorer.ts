@@ -514,9 +514,9 @@ export const diagnosticsCopy = {
   notObserved: "Not observed", // S363
   noGateways: "No Gateways you can view", // S395
   gatewaysReady: (ready: number, total: number) => `${ready} of ${total} Gateways ready`, // S396
-  skew: (n: number) => `${n} with version skew`, // S398
-  restarting: (n: number) => `${n} restarted recently`, // S399
-  gatewaysNotObserved: (n: number) => `${n} not observed`, // S364
+  skew: (n: number) => `${plural(n, ["Gateway", "Gateways"])} with version skew`, // S398
+  restarting: (n: number) => `${plural(n, ["Gateway", "Gateways"])} restarted recently`, // S399
+  gatewaysNotObserved: (n: number) => `${plural(n, ["Gateway", "Gateways"])} not observed`, // S364
   selfManaged: (n: number) => plural(n, ["self-managed Gateway", "self-managed Gateways"]), // S824
   name: "Name",
   ready: "Ready", // S400
