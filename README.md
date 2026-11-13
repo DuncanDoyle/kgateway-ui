@@ -31,7 +31,7 @@ Read this before you expose the UI.
 
 ```sh
 # Install the chart from ghcr
-helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.6.0 \
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.7.0 \
   -n snellius --create-namespace
 
 # Open the UI on http://localhost:8080
@@ -267,7 +267,7 @@ API v1, additive: Gateway, ListenerSet and route detail gain an optional `reason
 
 A route that sends traffic to a backend with an error or warning finding, such as a Service with no ready endpoints (KGWUI-023), is now at least a warning and carries the `backend-problem` flag. Its reason names the backend and the finding. The routes list takes `state=backend-problem` (D-082).
 
-### Traffic flow and backends (Phase 6)
+### v0.7.0: traffic flow and backends (Phase 6)
 
 API v1 changes are additive. New endpoints: `…/paths`, `…/backends` and `…/backends/{group}/{kind}/{ns}/{name}`. Route detail serves GRPCRoute, TCPRoute and TLSRoute instead of 404, and `BackendRefDTO` gains optional `share`, `shareState`, `problem` and `endpoints`. The install nav gains Traffic and Backends.
 

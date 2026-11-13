@@ -1,6 +1,6 @@
 # Phase 6 — Traffic Flow & Backends (Complete)
 
-**Completed:** 2026-11-12 (local branch `duncandoyle/phase6`, not yet pushed)
+**Completed:** 2026-11-12, merged in #36 (`1adfe14`) and released as `v0.7.0`. CI fixes before the merge: `e8d8319` (the bench harness memo reads the engine's clock), `630aaa4` (map tests that draw 2,000 nodes in jsdom get a 15 s limit)
 **Range:** 657378ad..ec258bb
 
 ## Summary
