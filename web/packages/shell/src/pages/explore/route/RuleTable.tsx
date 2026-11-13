@@ -187,8 +187,12 @@ function searchText(r: Rule): string {
 function openRules(params: URLSearchParams, rules: Rule[], linked?: number): Set<number> {
   const written = params.get("open");
   const out = new Set(
-    // Rules start closed; a route's only rule starts open.
-    written === null ? (rules.length === 1 ? [1] : []) : written.split(",").map(Number).filter(Number.isInteger),
+    // Error and warning rules, and a route's only rule, start open; the rest start closed.
+    written === null
+      ? rules
+          .filter((r) => rules.length === 1 || ["error", "warning"].includes(ruleState(r) ?? ""))
+          .map((r) => r.index + 1)
+      : written.split(",").map(Number).filter(Number.isInteger),
   );
   if (linked !== undefined) out.add(linked);
   return out;

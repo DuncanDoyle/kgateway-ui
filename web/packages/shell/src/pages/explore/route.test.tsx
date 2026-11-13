@@ -345,10 +345,8 @@ it("each backendRef links to its backend detail, and the route links to Traffic 
 
 it("delegation refs show their mode and status state", async () => {
   serve(api());
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
-  // The rule opens from its row, as a user opens it.
-  await userEvent.click(within(screen.getAllByTestId("rule-row")[0] as HTMLElement).getByRole("button"));
   const r = rule(1);
   expect(hrefPath(within(backend("child")).getByRole("link", { name: /shop\/child/ }))).toBe(
     `/i/${ID}/routes/${GW}/HTTPRoute/shop/child`,
@@ -732,21 +730,21 @@ describe("a route's rule table", () => {
     expect(screen.getByRole("button", { name: routeCopy.collapseAll })).toBeInTheDocument();
   });
 
-  it("three rules render compact rows, all closed", async () => {
+  it("three rules render compact rows; only the error rule starts open", async () => {
     mountLong(3);
     await loaded();
     expect(rows()).toHaveLength(3);
-    expect(openRegions()).toHaveLength(0);
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 3"]);
     expect(screen.getByRole("button", { name: routeCopy.expandAll })).toBeInTheDocument();
   });
 
-  it("nine rules render compact rows, all closed with the error and warning rules too; a row click toggles its rule", async () => {
+  it("nine rules render compact rows with the error and warning rules open; a row click toggles its rule", async () => {
     mountLong(9);
     await loaded();
     expect(rows()).toHaveLength(9);
-    expect(openRegions()).toHaveLength(0);
-    expect(rowButton(3)).toHaveAttribute("aria-expanded", "false");
-    expect(rowButton(5)).toHaveAttribute("aria-expanded", "false");
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 3", "Rule 5"]);
+    expect(rowButton(3)).toHaveAttribute("aria-expanded", "true");
+    expect(rowButton(5)).toHaveAttribute("aria-expanded", "true");
     expect(rowButton(1)).toHaveAttribute("aria-expanded", "false");
     expect(rowButton(1)).toHaveAttribute("aria-controls");
     // One line per rule: match, filter count, backends, state; no state without problem data.
@@ -762,12 +760,12 @@ describe("a route's rule table", () => {
     const body = screen.getByRole("region", { name: /^Rule 1\b/ });
     expect(rowButton(1).getAttribute("aria-controls")).toBe(body.id);
     expect(within(body).getByTestId("backend-svc-a")).toBeInTheDocument();
-    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("1");
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("1,3,5");
     await userEvent.click(rowButton(3));
-    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 1", "Rule 3"]);
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 1", "Rule 5"]);
     await userEvent.click(rowButton(1));
-    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 3"]);
-    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("3");
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 5"]);
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("5");
   });
 
   it("Problems only keeps the rules with a problem and counts them", async () => {
