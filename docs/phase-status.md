@@ -24,8 +24,8 @@ Sub-phase: none
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
 Waiting on: (read the program file when Phase 7 starts)
-Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5), `v0.6.0` (2026-11-09, generic core, kgwctl#7; E8 break, kgwctl#6) and `v0.7.0` (2026-11-12): kgwctl's E2 requests #18 (`cache.ListOnce`) and #19 (namespace-scoped inputs) shipped and closed. The kgwctl notice and the program file's E2 row for `v0.7.0` are still to do. E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
-Open `cross-repo` issues (2026-11-13): here #15, #21 (xdsview E4/E5, for Phase 11); in kgwctl #1–#7 (notices from xdsview and this repo, consumer side).
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5), `v0.6.0` (2026-11-09, generic core, kgwctl#7; E8 break, kgwctl#6) and `v0.7.0` (2026-11-12): kgwctl's E2 requests #18 (`cache.ListOnce`) and #19 (namespace-scoped inputs) shipped and closed; notified kgwctl#8, program file updated (kgateway-tooling `fd99830`). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
+Open `cross-repo` issues (2026-11-13): here #15, #21 (xdsview E4/E5, for Phase 11); in kgwctl #1–#8 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
 
 ## Carry-over (deferred to later phases)
