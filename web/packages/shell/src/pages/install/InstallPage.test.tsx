@@ -310,7 +310,7 @@ it("Data plane column shows ✓, Rejects, Config withheld or Unknown", async () 
   };
   expect(cell("edge")).toHaveTextContent(/^Rejects$/);
   expect(within(cell("edge")).getByTestId("health-icon-error")).toBeInTheDocument();
-  expect(cell("internal")).toHaveTextContent(/^No rejects$/);
+  expect(cell("internal")).toHaveTextContent(/^Config accepted$/);
   expect(within(cell("internal")).getByTestId("health-icon-healthy")).toBeInTheDocument();
   expect(cell("lab")).toHaveTextContent(/^Unknown$/);
   expect(cell("held")).toHaveTextContent(/^Config withheld$/);

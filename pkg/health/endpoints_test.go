@@ -103,7 +103,7 @@ func TestBackendNoReadyEndpointsAfterHold(t *testing.T) {
 	}
 	f := fs[0]
 	if f.Severity != SeverityWarning || f.Slug != "backend-no-ready-endpoints" || *f.Resource != cartService ||
-		f.Message != "Requests to this backend get 503" || f.Since == nil || !f.Since.Equal(testutil.Now) || f.ID == "" || r.State != StateWarning {
+		f.Message != "This backend has no ready endpoints" || f.Since == nil || !f.Since.Equal(testutil.Now) || f.ID == "" || r.State != StateWarning {
 		t.Fatalf("finding %+v state %s", f, r.State)
 	}
 	want := &EndpointsEvidence{Service: "cart", Port: 8080, PortName: "http", Ready: 0, Total: 2, Slices: 1,

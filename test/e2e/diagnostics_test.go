@@ -851,8 +851,8 @@ func TestBackendReadiness(t *testing.T) {
 	}
 	f := idle023(h)
 	ev := f.Facts.(*health.EndpointsEvidence)
-	if f.Severity != health.SeverityWarning || f.Message != "Requests to this backend get 503" ||
-		f.Detail != "Service `shop/idle` has no ready endpoints for port 8000." || ev.Service != "idle" || ev.Ready != 0 || ev.Total != 0 {
+	if f.Severity != health.SeverityWarning || f.Message != "This backend has no ready endpoints" ||
+		f.Detail != "Service `shop/idle` has no ready endpoints for port 8000, so HTTP requests to it get a 503." || ev.Service != "idle" || ev.Ready != 0 || ev.Total != 0 {
 		t.Errorf("023 on %s: severity %s, message %q, detail %q, evidence %+v", idleID, f.Severity, f.Message, f.Detail, ev)
 	}
 	if c := checkResult(h, "backend endpoints"); c == nil || !c.OK || c.Unavailable != "" {

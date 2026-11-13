@@ -518,7 +518,7 @@ export const diagnosticsCopy = {
     "not-observed": "Not observed", // S363
   } as Record<string, string>,
   dataPlane: "Data plane", // S388
-  noRejects: "No rejects", // S389
+  noRejects: "Config accepted", // S389
   rejects: "Rejects", // S390
   configWithheld: "Config withheld", // S597
   problems: (n: number) => plural(n, ["problem", "problems"]), // S383

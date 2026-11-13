@@ -60,7 +60,7 @@ func TestBackendNoReadyEndpointsAtTheAPI(t *testing.T) {
 	h := newHarness(t, setup{endpoints: true}, backendWorld(&notReady)...)
 	f, d := endpointsDetail(t, h)
 	if f.Severity != health.SeverityWarning || f.Slug != "backend-no-ready-endpoints" || f.Resource == nil || f.Resource.Ref != cartSvc ||
-		f.Message != "Requests to this backend get 503" {
+		f.Message != "This backend has no ready endpoints" {
 		t.Fatalf("finding %+v", f)
 	}
 	ev, ok := d.Evidence.(*health.EndpointsEvidence)

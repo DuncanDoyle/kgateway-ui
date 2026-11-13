@@ -26,8 +26,8 @@ const endpointsStartsKey = "starts"
 
 // Wording of KGWUI-023 and its availability (design §11). Draft wording, finalised in the wording pass.
 const (
-	endpointsMessage    = "Requests to this backend get 503"
-	endpointsDetail     = "Service `%s` has no ready endpoints for port %d."
+	endpointsMessage    = "This backend has no ready endpoints"
+	endpointsDetail     = "Service `%s` has no ready endpoints for port %d, so HTTP requests to it get a 503."
 	endpointsOffDetail  = "Services and EndpointSlices are not watched"
 	endpointsSyncDetail = "Services and EndpointSlices are not synced yet"
 	endpointsHoldReason = "Waiting for backends to get ready endpoints"
