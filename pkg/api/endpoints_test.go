@@ -1,7 +1,9 @@
 package api
 
 import (
+	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +23,9 @@ import (
 var notReady = false
 
 // backendWorld is world with route shop/cart sending to Service shop/cart port
-// 8080, whose one EndpointSlice has one endpoint with ready set to ready.
-func backendWorld(ready *bool) []runtime.Object {
-	objs := world()
+// 8080, whose one EndpointSlice has one endpoint with ready set to ready, plus extra.
+func backendWorld(ready *bool, extra ...runtime.Object) []runtime.Object {
+	objs := world(extra...)
 	for _, o := range objs {
 		if u, ok := o.(*unstructured.Unstructured); ok && u.GetKind() == "HTTPRoute" && u.GetName() == "cart" {
 			u.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": "cart", "port": int64(8080)}}}}
@@ -97,5 +99,86 @@ func TestBackendEndpointsOffAtTheAPI(t *testing.T) {
 	if c == nil || c.OK || c.Unavailable != health.AvailOff || findingCode(r, health.CodeBackendNoReadyEndpoints) != nil ||
 		findingCode(r, health.CodeSignalUnavailable) != nil || r.State == health.StateUnknown {
 		t.Fatalf("state %s check %+v findings %+v", r.State, c, r.Findings)
+	}
+}
+
+// afterHold is setup with endpoints on and controller metrics still fresh after the 023 hold.
+func afterHold(authz Authorizer) setup {
+	m := okMetrics("kgw.kgateway")
+	r := m["kgw.kgateway"]
+	r.CollectedAt = testutil.Now.Add(health.EndpointsHold + time.Second)
+	m["kgw.kgateway"] = r
+	return setup{endpoints: true, authz: authz, metrics: m}
+}
+
+// D-082 at the API: a route sending to a Service with a 023 is warning with a
+// backend-problem reason, in its row and its detail; an own error stays error;
+// a route that only delegates to that route stays healthy.
+func TestBackendProblemAtTheAPI(t *testing.T) {
+	gw, front := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "front")
+	toCart := func(path string) map[string]any {
+		return delegRule([]string{path}, map[string]any{"name": "cart", "port": int64(8080)})
+	}
+	unresolved := testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}}
+	h := newHarness(t, afterHold(nil), backendWorld(&notReady,
+		testutil.WithRules(testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, unresolved), toCart("/broken")),
+		testutil.WithRules(testutil.HTTPRoute("shop", "front", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+			delegRule([]string{"/api"}, testutil.DelegateTo("shop", "child"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "child", []objects.ParentRef{front}, testutil.AcceptedBy(front, testutil.Controller)), toCart("/api/child")),
+	)...)
+	endpointsDetail(t, h)
+	rows := get[Page[RouteRow]](t, h.srv, listBase+"/routes?limit=200", 200)
+	for _, name := range []string{"shop/cart", "shop/child"} {
+		r := routeByName(t, rows, name)
+		if r.Health != health.StateWarning || !slices.Contains(r.Flags, "backend-problem") || r.Reason == nil ||
+			r.Reason.Kind != health.ReasonBackendProblem || r.Reason.Code != health.CodeBackendNoReadyEndpoints ||
+			r.Reason.Message != "This backend has no ready endpoints" || r.Reason.Backend == nil || r.Reason.Backend.Ref != cartSvc {
+			t.Errorf("%s: health %s flags %v reason %+v", name, r.Health, r.Flags, r.Reason)
+		}
+	}
+	if r := routeByName(t, rows, "shop/broken"); r.Health != health.StateError || r.Reason == nil || r.Reason.Kind != health.ReasonFinding {
+		t.Errorf("shop/broken: health %s reason %+v", r.Health, r.Reason)
+	}
+	if r := routeByName(t, rows, "shop/front"); r.Health != health.StateHealthy || slices.Contains(r.Flags, "backend-problem") || r.Reason != nil {
+		t.Errorf("shop/front: health %s flags %v reason %+v", r.Health, r.Flags, r.Reason)
+	}
+	d := get[RouteDetail](t, h.srv, routeDetail+"shop/cart", 200)
+	if d.Health != health.StateWarning || d.Reason == nil || d.Reason.Kind != health.ReasonBackendProblem || d.Reason.Backend == nil || d.Reason.Backend.Ref != cartSvc {
+		t.Errorf("shop/cart detail: health %s reason %+v", d.Health, d.Reason)
+	}
+	if p := get[Page[RouteRow]](t, h.srv, listBase+"/routes?state=backend-problem", 200); !slices.Equal(routeNames(p), []string{"shop/broken", "shop/cart", "shop/child"}) {
+		t.Errorf("state=backend-problem: %v", routeNames(p))
+	}
+}
+
+// A route to a ready Service stays healthy.
+func TestReadyBackendKeepsRouteHealthy(t *testing.T) {
+	h := newHarness(t, afterHold(nil), backendWorld(nil)...)
+	h.awaitCache(t, "Services and EndpointSlices", func(s *cache.Snapshot) bool { return len(s.Services) > 0 && len(s.EndpointSlices) > 0 })
+	h.at(t, testutil.Now)
+	h.at(t, testutil.Now.Add(health.EndpointsHold+time.Second))
+	if r := routeByName(t, get[Page[RouteRow]](t, h.srv, listBase+"/routes", 200), "shop/cart"); r.Health != health.StateHealthy || r.Reason != nil {
+		t.Errorf("shop/cart: health %s reason %+v", r.Health, r.Reason)
+	}
+}
+
+// A caller who may not view the Service gets the same warning, and a reason
+// with the code but without the Service or the finding's message (D-013).
+func TestBackendProblemForRestrictedCaller(t *testing.T) {
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != cartSvc })
+	h := newHarness(t, afterHold(hide), backendWorld(&notReady)...)
+	endpointsDetail(t, h)
+	r := routeByName(t, get[Page[RouteRow]](t, h.srv, listBase+"/routes", 200), "shop/cart")
+	want := RouteReason{RowReason: health.RowReason{Kind: health.ReasonBackendProblem, Code: health.CodeBackendNoReadyEndpoints}}
+	if r.Health != health.StateWarning || r.Reason == nil || *r.Reason != want {
+		t.Errorf("shop/cart: health %s reason %+v", r.Health, r.Reason)
+	}
+	d := get[RouteDetail](t, h.srv, routeDetail+"shop/cart", 200)
+	if d.Health != health.StateWarning || d.Reason == nil || d.Reason.RowReason != want.RowReason || d.Reason.Backend != nil {
+		t.Errorf("shop/cart detail: health %s reason %+v", d.Health, d.Reason)
+	}
+	if body := rawGet(t, h.srv, listBase+"/routes"); strings.Contains(body, `"backend"`) {
+		t.Errorf("the hidden backend reached the wire: %s", body)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -26,12 +27,20 @@ type reasonRow struct {
 	reason *health.RowReason
 }
 
+// rowReason is r without its backend.
+func rowReason(r *RouteReason) *health.RowReason {
+	if r == nil {
+		return nil
+	}
+	return &r.RowReason
+}
+
 // reasonRows collects the rows of the three lists and the overview of srv.
 func reasonRows(t *testing.T, srv *httptest.Server) []reasonRow {
 	t.Helper()
 	var out []reasonRow
 	for _, r := range get[Page[RouteRow]](t, srv, listBase+"/routes?limit=200", 200).Items {
-		out = append(out, reasonRow{"route " + r.Ref.Namespace + "/" + r.Ref.Name, r.Ref.Ref, r.Health, r.Reason})
+		out = append(out, reasonRow{"route " + r.Ref.Namespace + "/" + r.Ref.Name, r.Ref.Ref, r.Health, rowReason(r.Reason)})
 	}
 	for _, r := range get[Page[GatewayListRow]](t, srv, listBase+"/gateways", 200).Items {
 		out = append(out, reasonRow{"gateway " + r.Ref.Name, r.Ref.Ref, r.Health, r.Reason})
@@ -80,6 +89,10 @@ func checkReasons(t *testing.T, srv *httptest.Server) map[string][]string {
 			if r.state != health.StateWarning || got.Code != "" || got.Message != "" || slices.ContainsFunc(own, func(f FindingDTO) bool { return f.Severity == health.SeverityWarning }) {
 				t.Errorf("%s: %s row, reason %+v, findings %d", r.name, r.state, got, len(own))
 			}
+		case health.ReasonBackendProblem:
+			if r.state != health.StateWarning || got.Code == "" || got.More != 0 || slices.ContainsFunc(own, func(f FindingDTO) bool { return f.Severity == health.SeverityWarning }) {
+				t.Errorf("%s: %s row, reason %+v, findings %d", r.name, r.state, got, len(own))
+			}
 		case health.ReasonFinding:
 			// The deciding finding is one of the row's own at the row's severity; more counts the rest.
 			i := slices.IndexFunc(own, func(f FindingDTO) bool {
@@ -95,11 +108,12 @@ func checkReasons(t *testing.T, srv *httptest.Server) map[string][]string {
 	return seen
 }
 
-// reasonKeys fails when a row reason on the wire has a key other than the four
-// allowed ones: never detail or evidence (design §7.4 rule 7).
+// reasonKeys fails when a row reason on the wire has a key other than the
+// allowed ones: never detail or evidence (design §7.4 rule 7). Only route rows
+// add backend (D-082).
 func reasonKeys(t *testing.T, srv *httptest.Server) {
 	t.Helper()
-	allowed := []string{"kind", "code", "message", "more"}
+	allowed := []string{"kind", "code", "message", "more", "backend"}
 	check := func(path string, rows []map[string]json.RawMessage) {
 		for _, row := range rows {
 			raw, ok := row["reason"]
@@ -150,7 +164,11 @@ func detailReasons(t *testing.T, srv *httptest.Server) {
 	}
 	for _, r := range get[Page[RouteRow]](t, srv, listBase+"/routes?limit=200", 200).Items {
 		p := fmt.Sprintf("%s/routes/%s/%s/%s/%s", listBase, r.Ref.Group, r.Ref.Kind, r.Ref.Namespace, r.Ref.Name)
-		check("route "+r.Ref.Name, r.Ref.Ref, r.Reason, get[RouteDetail](t, srv, p, 200).Reason)
+		got := get[RouteDetail](t, srv, p, 200).Reason
+		check("route "+r.Ref.Name, r.Ref.Ref, rowReason(r.Reason), got)
+		if r.Reason != nil && got != nil && !reflect.DeepEqual(r.Reason.Backend, got.Backend) {
+			t.Errorf("route %s: detail backend %+v, row backend %+v", r.Ref.Name, got.Backend, r.Reason.Backend)
+		}
 	}
 	for _, r := range get[Page[GatewayListRow]](t, srv, listBase+"/gateways", 200).Items {
 		p := fmt.Sprintf("%s/gateways/%s/%s", listBase, r.Ref.Namespace, r.Ref.Name)

@@ -83,11 +83,18 @@ export const routeStateDataPlaneCopy = {
   "gateway-rejecting": "Gateway rejects config", // S457
 };
 
+/** The backend flag (D-082): a backend the route sends to has a problem. */
+export const routeStateBackendCopy = {
+  "backend-problem": "Backend has a problem", // S839
+};
+
 /** A list row's status tooltip (D-063). */
 export const rowReasonCopy = {
   finding: (code: string, message: string, more?: number) => `${code}: ${message}${more ? ` (+${more} more)` : ""}`,
   unknown: "A required check is not OK, so the state is unknown.",
   "gateway-rejecting": "The parent Gateway rejects config.",
+  backendProblem: (backend: string, message: string) => `Backend ${backend}: ${message}`, // S836
+  backendHidden: (code: string) => `${code}: A backend you cannot view has a problem.`, // S837
 };
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
@@ -140,6 +147,7 @@ export const problemCopy = {
   seeConditions: "Go to conditions", // S825
   openFinding: "Open finding", // S826
   badgeLink: (state: string) => `${state}, go to the problem`, // S827
+  backend: "Backend", // S838
 };
 
 // region Gateway page

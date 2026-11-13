@@ -181,8 +181,15 @@ type RouteRow struct {
 	Flags        []string        `json:"flags"`
 	Health       health.State    `json:"health"`
 	// Reason says why Health is not healthy (D-063).
-	Reason *health.RowReason `json:"reason,omitempty"`
-	Mirror bool              `json:"mirror,omitempty"`
+	Reason *RouteReason `json:"reason,omitempty"`
+	Mirror bool         `json:"mirror,omitempty"`
+}
+
+// RouteReason is a route row's reason plus, on kind backend-problem, the
+// backend when the caller may view it; else that kind keeps only its code (D-082).
+type RouteReason struct {
+	health.RowReason
+	Backend *LinkedRef `json:"backend,omitempty"`
 }
 
 // GatewayListRow is one row of the Gateways list (the design's GatewayRow2).
@@ -309,10 +316,11 @@ type Candidate struct {
 }
 
 // DetailReason is a detail page's reason: the list row's (D-063) plus, for
-// kind finding, the deciding finding's id, so the page can open it.
+// kind finding, the deciding finding's id, so the page can open it. Backend is as on RouteReason.
 type DetailReason struct {
 	health.RowReason
-	Finding string `json:"finding,omitempty"`
+	Finding string     `json:"finding,omitempty"`
+	Backend *LinkedRef `json:"backend,omitempty"`
 }
 
 // GatewayDetail is GET …/gateways/{ns}/{name}. Its ListenerSets are paged

@@ -138,12 +138,15 @@ export interface Count {
 }
 /**
  * Why a list or overview row is not healthy (D-063); healthy rows have none. A finding is the row's deciding
- * finding, code and message only, and more counts the object's other findings. The other kinds carry nothing else.
+ * finding, code and message only, and more counts the object's other findings. A backend-problem (route rows only,
+ * D-082) is the backend's deciding finding; message and backend are absent when the caller may not view the backend.
+ * The other kinds carry nothing else.
  */
 export type RowReason =
   | { kind: "finding"; code: string; message: string; more?: number }
   | { kind: "unknown" }
-  | { kind: "gateway-rejecting" };
+  | { kind: "gateway-rejecting" }
+  | { kind: "backend-problem"; code: string; message?: string; backend?: LinkedRef };
 export interface GatewayRow {
   ref: Ref;
   class: string;

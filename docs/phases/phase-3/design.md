@@ -360,6 +360,7 @@ D-006 says the UI never reports green while a contradicting signal is active. Ph
 - A route, ListenerSet or policy whose current status is `True` for a Gateway with an active KGWUI-001 carries the flag `gateway-rejecting` and is never shown `healthy`: its state is at least `warning` ("Its Gateway's proxies reject config"), even if its own conditions are all `True`. An error of its own still shows `error`.
 - The flag creates no finding of its own. The row state rule of Phase 2 design §6.3 gains this one input.
 - The route list gains `state=gateway-rejecting` as a filter.
+- D-082 (0.7.1) adds a second input of the same kind: a route whose rule backendRefs name a backend with an active error or warning finding carries the flag `backend-problem` and is at least `warning`; an own error still shows `error`. Delegation refs, mirror targets and info findings never count. A row with both flags gives the reason `gateway-rejecting`. The route list takes `state=backend-problem`.
 
 ### 8.5 The decisive next step
 

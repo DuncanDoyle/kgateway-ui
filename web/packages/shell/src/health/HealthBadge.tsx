@@ -38,7 +38,17 @@ const Focusable = styled.span`
 // region Helpers
 /** The tooltip text for a row reason. */
 export function rowReasonText(r: RowReason): string {
-  return r.kind === "finding" ? rowReasonCopy.finding(r.code, r.message, r.more) : rowReasonCopy[r.kind];
+  switch (r.kind) {
+    case "finding":
+      return rowReasonCopy.finding(r.code, r.message, r.more);
+    case "backend-problem":
+      // A backend the caller may not view comes without its name and message.
+      return r.backend && r.message
+        ? rowReasonCopy.backendProblem(`${r.backend.namespace}/${r.backend.name}`, r.message)
+        : rowReasonCopy.backendHidden(r.code);
+    default:
+      return rowReasonCopy[r.kind];
+  }
 }
 
 // region Component

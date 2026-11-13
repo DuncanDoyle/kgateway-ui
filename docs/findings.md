@@ -368,6 +368,8 @@ Nothing is compared during a controller rollout and for 10 minutes after it, so 
 
 **Cause.** A route sends traffic to a Service port that has had no ready endpoint for 30 s. HTTP requests to it get a 503; on a TCP or TLS route, connections fail. With a weighted split, only the share sent to this Service fails. The UI checks only a rule `backendRef` to a core `Service` with a weight above 0, on a parent where the controller reports `ResolvedRefs=True` for the route's current generation. The Service must exist and not be `ExternalName`. The UI sums ready endpoints for that port over all the Service's EndpointSlices; an endpoint with `ready` unset counts as ready. One ready endpoint restarts the 30 s. Delegation refs, mirror targets, `Backend` refs and Hostname refs are never checked. There is one finding per Service port; the routes that use it are the affected objects. Scaling to zero can be deliberate, so this is a warning.
 
+Routes whose rule backendRefs name the Service carry the `backend-problem` flag and show at least a warning, like any route to a backend with an error or warning finding (D-082).
+
 **Evidence.** The Service, the port, its ready and total endpoints, and how many EndpointSlices the Service has. A dual-stack Service lists its Pods once per address family, so the counts are those of the larger family.
 
 **Since.** When the port's endpoints first read zero. It resets when the UI restarts.

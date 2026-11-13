@@ -518,6 +518,11 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	out.Reason = d.reason(ref, st)
+	if row {
+		if rr := routeReason(d.ix, d.v, d.l, id); rr != nil && rr.Kind == health.ReasonBackendProblem {
+			out.Reason = &DetailReason{RowReason: rr.RowReason, Backend: rr.Backend}
+		}
+	}
 	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok && ref.Kind == "HTTPRoute" {
 		b := v.InheritParentMatcher
 		out.Annotations.InheritParentMatcher = &b

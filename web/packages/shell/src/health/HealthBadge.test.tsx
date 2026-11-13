@@ -54,6 +54,18 @@ describe("row reason tooltip (D-063)", () => {
   it.each([
     ["unknown", { kind: "unknown" }, "A required check is not OK, so the state is unknown."],
     ["warning", { kind: "gateway-rejecting" }, "The parent Gateway rejects config."],
+    [
+      "warning",
+      {
+        kind: "backend-problem",
+        code: "KGWUI-023",
+        message: "This backend has no ready endpoints",
+        backend: { group: "", kind: "Service", namespace: "demo", name: "reviews", link: "backend" },
+      },
+      "Backend demo/reviews: This backend has no ready endpoints",
+    ],
+    // A backend the caller may not view: no name, no message.
+    ["warning", { kind: "backend-problem", code: "KGWUI-023" }, "KGWUI-023: A backend you cannot view has a problem."],
   ] as const)("a %s row without a finding of its own names the cause", async (state, reason, text) => {
     renderWithTheme(<HealthBadge state={state} reason={reason} />);
     await userEvent.hover(trigger());

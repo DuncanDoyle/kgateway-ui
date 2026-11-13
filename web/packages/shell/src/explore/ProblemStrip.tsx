@@ -10,6 +10,7 @@ import { stateLabel } from "../health/state";
 import { findingPath } from "../pages/findings/FindingsPage";
 import type { HealthState } from "../theme/tokens";
 import { conditionState } from "./ConditionList";
+import { LinkedName } from "./LinkedName";
 
 // region Styles
 /** The strip's element id; the header's state badge links to it. */
@@ -118,7 +119,15 @@ export function ProblemStrip({
       <span className="state">{stateLabel(state)}</span>
       {reason ? (
         <span className="line" data-testid="problem-reason">
-          <span>{rowReasonText(reason)}</span>
+          {reason.kind === "backend-problem" && reason.backend && reason.message ? (
+            <>
+              <span className="label">{problemCopy.backend}</span>
+              <LinkedName refValue={reason.backend} installId={installId} />
+              <span>{reason.message}</span>
+            </>
+          ) : (
+            <span>{rowReasonText(reason)}</span>
+          )}
           {finding ? (
             <Link className="jump" to={finding}>
               {problemCopy.openFinding}

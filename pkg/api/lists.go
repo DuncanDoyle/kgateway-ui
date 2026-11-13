@@ -8,6 +8,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -87,7 +88,7 @@ func (ls *list) routeRow(id explore.RowID) RouteRow {
 	r := &ls.ix.Routes[id]
 	out := RouteRow{Ref: ls.l.linked(r.Ref), Hostnames: r.Hostnames, Parents: make([]ParentSummary, 0, len(r.Parents)),
 		ParentRoutes: make([]LinkedRef, 0, len(r.ParentRoutes)), Children: r.Children, Flags: ls.ix.RowFlags(id, ls.v.visible()).Names(), Health: r.State,
-		Reason: ls.ix.Findings[r.Ref].Reason(r.State)}
+		Reason: routeReason(ls.ix, ls.v, ls.l, id)}
 	if out.Hostnames == nil {
 		out.Hostnames = []string{}
 	}
@@ -103,6 +104,25 @@ func (ls *list) routeRow(id explore.RowID) RouteRow {
 	}
 	if len(ls.q.Backends) > 0 {
 		out.Mirror = ls.mirrorOnly(id)
+	}
+	return out
+}
+
+// routeReason is route row id's reason on the wire. A backend-problem names
+// its backend and message only to a caller who may view the backend (D-013).
+func routeReason(ix *explore.Index, v *view, l linker, id explore.RowID) *RouteReason {
+	r := ix.RouteReason(id)
+	if r == nil {
+		return nil
+	}
+	out := &RouteReason{RowReason: *r}
+	if b := ix.Routes[id].Backend; r.Kind == health.ReasonBackendProblem {
+		if v.can(*b) {
+			lr := l.linked(*b)
+			out.Backend = &lr
+		} else {
+			out.Message = ""
+		}
 	}
 	return out
 }

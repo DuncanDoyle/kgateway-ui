@@ -567,7 +567,7 @@ it("Routes state filter offers disagrees and listener-unknown", async () => {
   );
 });
 
-it("Routes state filter offers gateway-rejecting to a Phase 3 server only", async () => {
+it("Routes state filter offers gateway-rejecting and backend-problem to a Phase 3 server only", async () => {
   const phase3 = { ...meta, filters: { ...meta.filters, findings: ["severity"] } };
   serve((u) => (u.pathname === "/api/v1/meta" ? phase3 : u.pathname.endsWith("/routes") ? routes() : undefined));
   const first = mountWithLocation(`/i/${ID}/routes`);
@@ -576,6 +576,10 @@ it("Routes state filter offers gateway-rejecting to a Phase 3 server only", asyn
   await userEvent.click(await within(group).findByRole("button", { name: "Gateway rejects config" }));
   await waitFor(() => expect(search().get("state")).toBe("gateway-rejecting"));
   await waitFor(() => expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["gateway-rejecting"]));
+  await userEvent.click(within(group).getByRole("button", { name: "Backend has a problem" }));
+  await waitFor(() =>
+    expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["gateway-rejecting", "backend-problem"]),
+  );
   first.unmount();
   serve((u) => (u.pathname === "/api/v1/meta" ? meta : u.pathname.endsWith("/routes") ? routes() : undefined));
   mount(`/i/${ID}/routes`);
@@ -583,6 +587,7 @@ it("Routes state filter offers gateway-rejecting to a Phase 3 server only", asyn
   const older = screen.getByRole("group", { name: "Route state" });
   await within(older).findByRole("button", { name: "Unknown listener" });
   expect(within(older).queryByRole("button", { name: "Gateway rejects config" })).toBeNull();
+  expect(within(older).queryByRole("button", { name: "Backend has a problem" })).toBeNull();
 });
 
 it("an older server is not offered the 2.3 state values", async () => {
@@ -666,6 +671,12 @@ it("a server before 2.3 gets no Routes column, not No count in every row", async
 
 describe("a row's Error or Warning explains itself in a tooltip (D-063)", () => {
   const finding = { kind: "finding", code: "KGWUI-002", message: "Unsupported value in the route", more: 1 } as const;
+  const backendProblem = {
+    kind: "backend-problem",
+    code: "KGWUI-023",
+    message: "This backend has no ready endpoints",
+    backend: { group: "", kind: "Service", namespace: "demo", name: "reviews", link: "backend" },
+  } as const;
   const cases = [
     {
       list: "routes",
@@ -679,10 +690,15 @@ describe("a row's Error or Warning explains itself in a tooltip (D-063)", () => 
             ? { ...r, reason: finding }
             : r.ref.name === "cart"
               ? { ...r, health: "warning" as const, reason: { kind: "gateway-rejecting" as const } }
-              : r,
+              : r.ref.name === "via-ls"
+                ? { ...r, health: "warning" as const, reason: backendProblem }
+                : r,
         ),
       }),
-      second: ["cart", "The parent Gateway rejects config."],
+      others: [
+        ["cart", "The parent Gateway rejects config."],
+        ["via-ls", "Backend demo/reviews: This backend has no ready endpoints"],
+      ],
     },
     {
       list: "gateways",
@@ -713,8 +729,7 @@ describe("a row's Error or Warning explains itself in a tooltip (D-063)", () => 
     expect(screen.getByRole("tooltip")).toHaveTextContent(c.tip);
     await userEvent.unhover(trigger);
     expect(screen.queryByRole("tooltip")).toBeNull();
-    if ("second" in c) {
-      const [name, tip] = c.second;
+    for (const [name, tip] of "others" in c ? c.others : []) {
       const other = within(rowOf(name)).getByTestId("health-reason");
       await userEvent.hover(other);
       expect(screen.getByRole("tooltip")).toHaveTextContent(tip);

@@ -1354,3 +1354,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** No API change. The detail frame shares its URL params through a context, so a section never adds a second `useUrlParams`.
 
 **Alternatives:** Draw short routes open and only long ones as a table: rejected by the user. Start every rule closed: rejected by the user, a problem rule should show why without a click. Keep the open rules in local state: rejected, reload and back would lose the place.
+
+## D-082 — A route with a backend problem is at least warning (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13); the user may revert it
+
+**Context:** A row's state came only from findings on its own object (Phase 2 design §6.3). KGWUI-023 sits on the Service, so a route sending to a Service without ready endpoints showed healthy, while its rule table showed that rule as Warning. A route to a missing Service showed error, because KGWUI-013 is on the route.
+
+**Decision:** A route (HTTPRoute, GRPCRoute, TCPRoute, TLSRoute) whose rule backendRefs name a backend with an active error or warning finding carries the flag `backend-problem` and is at least `warning`, whatever the finding's severity and the traffic share. An error of its own still shows `error`. The targets are those of the backends view (`Index.ByBackend`): never delegation refs or mirror targets. Info findings never count. It copies `gateway-rejecting` (Phase 3 design §8.4). `explore.Build` sets it once, and the route lists, route detail, the `state=backend-problem` filter and the Gateway and ListenerSet route tables read it from the row. Its reason is `{kind: "backend-problem", code, message, backend}`: the first such backend in rule order and its deciding finding. When both flags apply, the reason is `gateway-rejecting`. A caller who may not view the backend gets the same state and the code, without `message` or `backend` (D-013).
+
+**Consequences:** API v1, additive: a new flag and filter value, a reason kind, and `backend` on route reasons. Gateway and ListenerSet states are unchanged. A route to an idle Service now reads warning.
+
+**Alternatives:** Raise the route to the backend's severity: not taken, an error backend may carry only a small share of the traffic.

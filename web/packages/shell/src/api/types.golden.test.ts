@@ -532,6 +532,11 @@ const rowReason: Shape = {
         {},
         { kind: { "gateway-rejecting": 1 } },
       ),
+      "backend-problem": shape<Extract<RowReason, { kind: "backend-problem" }>>(
+        { kind: "!", code: "!", message: "?", backend: "?" },
+        { backend: linkedRef },
+        { kind: { "backend-problem": 1 } },
+      ),
     } satisfies Record<RowReason["kind"], Shape>,
   },
 };

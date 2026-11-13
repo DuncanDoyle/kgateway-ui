@@ -384,7 +384,7 @@ No-evidence states are never green (D-016 §6) and add no failed required check,
 
 Every row and detail header shows a **state** (`error`, `unknown`, `warning`, `healthy`), never a severity, with Phase 1's Gateway row rules applied to the row's own object (`pkg/overview/overview.go:166-187`) **(our call)**: any error finding → `error`; else any required check not OK → `unknown`; else any warning finding → `warning`; else `healthy`. A Backend without current evidence is `unknown`. Info findings never set a row's state by their own severity. A KGWUI-011 info inside its grace period, though, makes the install-wide `resource status` required check pending (§6.2), and Phase 1's rule is install-wide: while any required check is not OK, **every** row of the install is `unknown`. Stale data turns every state `unknown` on the client.
 
-**Propagation.** A child's failures count in install health and on the child's row. A Gateway, ListenerSet or parent route badge counts only findings on that object; a KGWUI-012 on a Gateway makes it `warning` **(our call)**. Clusters that use delegation may change colour after upgrade; the release notes say so.
+**Propagation.** A child's failures count in install health and on the child's row. A Gateway, ListenerSet or parent route badge counts only findings on that object; a KGWUI-012 on a Gateway makes it `warning` **(our call)**. Clusters that use delegation may change colour after upgrade; the release notes say so. Two later inputs lift a route row to at least `warning` without a finding of its own: a rejecting Gateway (Phase 3 design §8.4) and a backend problem (D-082).
 
 ## 7. API v1 additions
 
