@@ -31,7 +31,7 @@ Read this before you expose the UI.
 
 ```sh
 # Install the chart from ghcr
-helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.6.0 \
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.7.0 \
   -n snellius --create-namespace
 
 # Open the UI on http://localhost:8080
@@ -261,7 +261,7 @@ Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v
 
 ## Upgrade notes
 
-### Traffic flow and backends (Phase 6)
+### v0.7.0: traffic flow and backends (Phase 6)
 
 API v1 changes are additive. New endpoints: `…/paths`, `…/backends` and `…/backends/{group}/{kind}/{ns}/{name}`. Route detail serves GRPCRoute, TCPRoute and TLSRoute instead of 404, and `BackendRefDTO` gains optional `share`, `shareState`, `problem` and `endpoints`. The install nav gains Traffic and Backends.
 

@@ -1,38 +1,31 @@
 # Phase status
 
 ## Phase
-Phase: 6 — Traffic Flow & Backends
-Base: 657378ad
-Docs: docs/phases/phase-6/
-Status: complete pending user review (push, PR, tag). Design and plan approved 2026-11-10. Branch `duncandoyle/phase6`, worktree `../snellius-phase6`. Record: phases/phase-6/phase-6-complete.md. Proxy endpoint view after GA (D-069, #35)
+Phase: 7 — Policies & Filters
+Base: (set when the phase starts)
+Docs: docs/phases/phase-7/
+Status: not started
 
 ### Queue
-Tasks 19–50 of `phases/phase-6/implementation-plan.md`, one sub-phase at a time:
-- [x] 6.1 cache access for kgwctl (Tasks 19–21) — closed 2026-11-10, phases/phase-6/phase-6.1-complete.md
-- [x] 6.2 path model, paths API, path list (Tasks 22–32) — closed 2026-11-11, phases/phase-6/phase-6.2-complete.md
-- [x] 6.3 backends (Tasks 33–39) — closed 2026-11-11, phases/phase-6/phase-6.3-complete.md
-- [x] 6.4 route trace, all route kinds (Tasks 40–42) — closed 2026-11-11, phases/phase-6/phase-6.4-complete.md
-- [x] 6.5 Gateway map, core (Tasks 43–47) — closed 2026-11-11, phases/phase-6/phase-6.5-complete.md
-- [x] 6.6 Gateway map, the rest; phase close (Tasks 48–50) — closed 2026-11-12, phases/phase-6/phase-6.6-complete.md (e2e matrix and reel ran on `ec258bb`, after 6.7)
-- [x] 6.7 phase review fixes (stabilization; reviews/phase-codex.md #1–#9) — closed 2026-11-12, phases/phase-6/phase-6.7-complete.md
+(none yet; the design comes first)
 
 ### Exit gates
-- [x] tests/vet pass (observed: `make test`, `make lint`, web 976/976 at 6.7; e2e on three pairs at `ec258bb`)
-- [x] all queue items done or deferred
-- [x] design+plan cross-model review + triage (reviews/design-codex.md, reviews/plan-codex.md)
-- [x] phase cross-model review + triage (reviews/phase-codex.md; 9 accepted → 6.7)
-- [x] decisions.md / design / plan in sync with code (D-078; design status set to approved, as built)
-- [ ] snellius.dev matches the user-visible changes (program P-006; `npm run sync:findings` for finding codes) — not done; syncs at the release
-- [x] phase-6-complete.md written, roadmap updated, tracked items closed (open items listed in the record)
+- [ ] tests/vet pass (observed)
+- [ ] all queue items done or deferred
+- [ ] design+plan cross-model review + triage
+- [ ] phase cross-model review + triage
+- [ ] decisions.md / design / plan in sync with code
+- [ ] snellius.dev matches the user-visible changes (program P-006; `npm run sync:findings` for finding codes)
+- [ ] phase-7-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: none active (6.6 and 6.7 closed 2026-11-12)
+Sub-phase: none
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
-Waiting on: none (program file read 2026-11-10; Phase 6 needs no open edge. It answers kgwctl's E2 requests #18 and #19)
-Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5) and `v0.6.0` (2026-11-09, generic core, kgwctl#7). `v0.6.0` breaks E8 on purpose: controller metrics reach the engine only through `setup.Config.Collected` (`ctrlmetrics.CollectOnce` + `Publish`), kgwctl#6. The program file is updated (kgateway-tooling `ca7f2dd`). kgwctl's E2 requests #18 and #19 are for this phase (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
-Open `cross-repo` issues (2026-11-10): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6), in kgwctl #1–#7 (notices from xdsview and this repo, consumer side).
+Waiting on: (read the program file when Phase 7 starts)
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5), `v0.6.0` (2026-11-09, generic core, kgwctl#7; E8 break, kgwctl#6) and `v0.7.0` (2026-11-12): kgwctl's E2 requests #18 (`cache.ListOnce`) and #19 (namespace-scoped inputs) shipped and closed; notified kgwctl#8, program file updated (kgateway-tooling `fd99830`). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
+Open `cross-repo` issues (2026-11-13): here #15, #21 (xdsview E4/E5, for Phase 11); in kgwctl #1–#8 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
 
 ## Carry-over (deferred to later phases)
@@ -55,7 +48,8 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - Smaller Phase 2 and Phase 3 items (parked tasks, test gaps, layout at 720 px, P4 polish) — src: phases/phase-2/phase-2-complete.md and phases/phase-3/phase-3-complete.md, Deferred / open
 
 ## Notes
-- 2026-11-12: Phase 6 closed locally (phases/phase-6/phase-6-complete.md). Nothing is pushed. The user decides on push, PR, tag and when Phase 7 starts; this file stays on Phase 6 until then. Items queued for the user are in the record's Deferred / open (the D-077 Findings API leak, finding-copy and dependency questions, D-078 review).
+- 2026-11-12: Phase 6 closed (phases/phase-6/phase-6-complete.md), merged in #36 and released as `v0.7.0`. Its snellius.dev gate is still open: sync the site for `v0.7.0`. Open items from the record's Deferred / open: the KGWUI-023 title, the map's reserved rule column, export scope, the D-078 review. The user decides when Phase 7 starts; read the program file and set Base then.
+- 2026-11-13: axe scans of the main pages, light and dark, run in every e2e row (#37, `@axe-core/playwright`). Only serious and critical violations fail.
 - [x] Q 5.7 (planned, before Phase 6): checks report what they are waiting on (E9, #33, D-068) — closed 2026-11-10, merged in #34, pre-release `v0.7.0-alpha.1`, phases/phase-5/phase-5.7-complete.md. snellius.dev syncs at `v0.7.0`
 - 2026-11-09: Phase 5 closed (phases/phase-5/phase-5-complete.md), merged in #31 and released as `v0.6.0`. Phase 6 is next; read the program file and set Base when it starts.
 - [x] Q 4.3 (Phase 4 stabilization, v0.5.1): data age reads the server's clock, so cluster clock skew no longer fakes or hides staleness — closed 2026-11-08, phases/phase-4/phase-4.3-complete.md
