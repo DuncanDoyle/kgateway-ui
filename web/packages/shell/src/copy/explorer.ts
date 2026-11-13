@@ -137,9 +137,9 @@ export const detailCopy = {
 
 /** The problem strip under a detail page's header, and the header badge that jumps to it. */
 export const problemCopy = {
-  seeConditions: "See conditions", // S825
+  seeConditions: "Go to conditions", // S825
   openFinding: "Open finding", // S826
-  badgeLink: (state: string) => `${state}, see why`, // S827
+  badgeLink: (state: string) => `${state}, go to the problem`, // S827
 };
 
 // region Gateway page
@@ -262,7 +262,7 @@ export const routeCopy = {
   noChildRoutes: "No reported child routes.", // S93
   // The rule table of a route with more than five rules (D-081).
   problemsOnly: "Problems only", // S771
-  searchRules: "Search rules", // S828
+  searchRules: "Filter rules", // S828
   expandAll: "Expand all", // S829
   collapseAll: "Collapse all", // S830
   shownRules: (n: number, of: number) => `${n} of ${plural(of, ["rule", "rules"])}`, // S831

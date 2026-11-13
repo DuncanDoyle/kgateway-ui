@@ -1250,7 +1250,7 @@ it("a ListenerSet's strip names the failing condition and the parent Gateway, at
   expect(within(condition).getByText("Accepted: False")).toBeInTheDocument();
   expect(within(condition).getByText("NotAllowed")).toBeInTheDocument();
   expect(within(condition).getByText(NOT_ALLOWED)).toBeInTheDocument();
-  expect(within(condition).getByRole("link", { name: "See conditions" })).toHaveAttribute("href", "#ls-conditions");
+  expect(within(condition).getByRole("link", { name: "Go to conditions" })).toHaveAttribute("href", "#ls-conditions");
   expect(document.getElementById("ls-conditions")).toHaveTextContent("Conditions");
   const parent = within(strip).getByTestId("problem-parent");
   expect(parent).toHaveTextContent("Parent Gateway");
@@ -1286,7 +1286,7 @@ it("the state badge links to the strip only while the strip is shown", async () 
   const view = mount(GW_PATH);
   const link = await screen.findByTestId("state-link");
   expect(link).toHaveAttribute("href", "#problem");
-  expect(link).toHaveAccessibleName("Warning, see why");
+  expect(link).toHaveAccessibleName("Warning, go to the problem");
   expect(document.getElementById("problem")).toBe(screen.getByTestId("problem-strip"));
   view.unmount();
   // The YAML tab has no strip, so the badge is plain there.
