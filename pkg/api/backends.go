@@ -38,10 +38,13 @@ func (h *handler) backendsInput(p *engine.Published, i *engine.InstallModel, v *
 	return in
 }
 
-// listedBackends are the backends backendDetail serves the caller of v: the
-// ones Backends lists over the same input, so links and the endpoint agree.
-func (h *handler) listedBackends(p *engine.Published, i *engine.InstallModel, v *view, t *paths.Topology, proj *paths.Projection) map[objects.Ref]bool {
-	return paths.Listed(t, proj, h.backendsInput(p, i, v, t))
+// listedBackends reports the backends backendDetail serves the caller of v:
+// the ones Backends lists over the same input, so links and the endpoint
+// agree. The membership is memoised with t; only viewer checks run per request.
+func (h *handler) listedBackends(p *engine.Published, i *engine.InstallModel, v *view, t *paths.Topology) func(objects.Ref) bool {
+	in := h.backendsInput(p, i, v, t)
+	ms := h.pathMemo.Membership(p, i.Resolved.ID(), t, func() *paths.Membership { return paths.NewMembership(t, in) })
+	return func(ref objects.Ref) bool { return ms.Listed(t, in, ref) }
 }
 
 // backendList is GET …/backends (design §8.1): the install's backends as the

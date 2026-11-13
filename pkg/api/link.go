@@ -17,8 +17,8 @@ type linker struct {
 	m      *engine.Model
 	i      *engine.InstallModel
 	detail map[objects.GroupKind]bool
-	// backends are the refs backendDetail serves this caller, built on first use; nil links no backend.
-	backends func() map[objects.Ref]bool
+	// backend reports whether backendDetail serves this caller a ref; nil links no backend.
+	backend func(objects.Ref) bool
 }
 
 // linkerFor returns the linker for the caller of v and install i of m, without backend links.
@@ -34,12 +34,13 @@ func linkerFor(v *view, m *engine.Model, i *engine.InstallModel) linker {
 // backend links come from t and proj when given, else from h.pathModel.
 func (h *handler) linker(v *view, p *engine.Published, i *engine.InstallModel, t *paths.Topology, proj *paths.Projection) linker {
 	l := linkerFor(v, p.Model, i)
-	l.backends = sync.OnceValue(func() map[objects.Ref]bool {
+	listed := sync.OnceValue(func() func(objects.Ref) bool {
 		if t == nil {
-			t, proj, _ = h.pathModel(p, i)
+			t, _, _ = h.pathModel(p, i)
 		}
-		return h.listedBackends(p, i, v, t, proj)
+		return h.listedBackends(p, i, v, t)
 	})
+	l.backend = func(ref objects.Ref) bool { return listed()(ref) }
 	return l
 }
 
@@ -48,7 +49,7 @@ func (h *handler) linker(v *view, p *engine.Published, i *engine.InstallModel, t
 // should a route write one, its detail page wins.
 func (l linker) link(ref objects.Ref) Link {
 	k := l.admit(ref)
-	if k != LinkDetail && l.backends != nil && l.v.can(ref) && l.backends()[ref] {
+	if k != LinkDetail && l.backend != nil && l.v.can(ref) && l.backend(ref) {
 		return LinkBackend
 	}
 	return k

@@ -95,16 +95,72 @@ func Backends(t *Topology, p *Projection, in BackendsInput) BackendSet {
 	return b.set
 }
 
-// Listed is the set of refs Backends lists, without computing their problems.
-func Listed(t *Topology, p *Projection, in BackendsInput) map[objects.Ref]bool {
-	b := collect(t, p, in)
-	out := make(map[objects.Ref]bool, len(b.set.Items))
-	for i, it := range b.set.Items {
-		if b.listed[i] {
-			out[it.Ref] = true
+// Membership is what Backends lists before any viewer check that the index
+// cannot answer per ref: the in-scope Backends and each target's path rows.
+// It holds only refs and row indices, so the path memo may keep it.
+type Membership struct {
+	refs map[objects.Ref]*reasons
+}
+
+// reasons are one candidate's in-scope flag and the path rows to it.
+type reasons struct {
+	inScope bool
+	rows    []int32
+}
+
+// NewMembership records the in-scope Backends of in and the path rows of t.
+func NewMembership(t *Topology, in BackendsInput) *Membership {
+	m := &Membership{refs: map[objects.Ref]*reasons{}}
+	at := func(ref objects.Ref) *reasons {
+		r := m.refs[ref]
+		if r == nil {
+			r = &reasons{}
+			m.refs[ref] = r
+		}
+		return r
+	}
+	for k, row := range t.Rows {
+		if ref, ok := t.target(row); ok {
+			at(ref).rows = append(at(ref).rows, int32(k)) // #nosec G115 -- row counts fit in int32
 		}
 	}
-	return out
+	if snap := in.Snapshot; snap != nil {
+		scope := in.Model.Resolved.Scope
+		for _, k := range kinds.ByCategory(in.Served, kinds.CategoryBackend) {
+			for _, u := range snap.Objects[k.GVR()] {
+				if scope.Contains(u.GetNamespace(), named(snap.Namespaces, u.GetNamespace())) {
+					at(objects.RefOf(u)).inScope = true
+				}
+			}
+		}
+	}
+	return m
+}
+
+// Listed reports whether Backends lists ref for the viewer of in, over t:
+// the reasons of collect, for one ref.
+func (m *Membership) Listed(t *Topology, in BackendsInput, ref objects.Ref) bool {
+	can := func(x objects.Ref) bool { return in.Can == nil || in.Can(x) }
+	if !can(ref) {
+		return false
+	}
+	r := m.refs[ref]
+	if r != nil && r.inScope {
+		return true
+	}
+	if ix := in.Model.Index; ix != nil {
+		for _, u := range ix.ByBackend[ref] {
+			if row := &ix.Routes[u.Row]; row.Owned && can(row.Ref) {
+				return true
+			}
+		}
+	}
+	for _, c := range in.Consumers {
+		if c.BackendRef == ref && can(c.Consumer) {
+			return true
+		}
+	}
+	return r != nil && slices.ContainsFunc(r.rows, func(k int32) bool { return in.Visible == nil || in.Visible(t.Deps(t.Rows[k])) })
 }
 
 // collect adds every candidate backend and marks the ones a visible reason lists.

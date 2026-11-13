@@ -5,6 +5,7 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	goruntime "runtime"
 	"slices"
 	"sync/atomic"
@@ -547,5 +548,53 @@ func TestBackendsFacets(t *testing.T) {
 		return cmp.Or(cmp.Compare(a.Ref.Namespace, b.Ref.Namespace), cmp.Compare(a.Ref.Name, b.Ref.Name))
 	}) {
 		t.Fatalf("gateway facets not sorted: %v", gateways(all))
+	}
+}
+
+// D-079: a ref links the backend page exactly when backendDetail serves it,
+// for every object in the snapshot and every consumer's backend, under
+// full access and three restrictions, from a fresh memo and a warm one.
+func TestBackendLinkAgreesWithBackendDetail(t *testing.T) {
+	for name, authz := range map[string]Authorizer{
+		"all": AllowAll{}, "no edge": AuthorizerFunc(hideEdge),
+		"no to-back": hideKinds("HTTPRoute", "to-back"), "no cart-svc": hideKinds("Service", "cart-svc"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, srv, _ := startWith(t, backendsSetup(authz, nil), backendsWorld()...)
+			l := engineLinks{e: e, authz: authz}
+			_, i := l.install(t)
+			p := e.Current()
+			h := &handler{src: e, authz: authz, pathMemo: paths.NewMemo(nil), consumersFor: kgateway.BackendConsumers}
+			v := h.view(httptest.NewRequest(http.MethodGet, "/", nil))
+			refs := []objects.Ref{{Kind: "Service", Namespace: "shop", Name: "absent"}}
+			for _, us := range p.Model.Snapshot.Objects {
+				for _, u := range us {
+					refs = append(refs, objects.RefOf(u))
+				}
+			}
+			// Services are cache facts, not objects: the refs routes write name them.
+			for ref := range i.Index.ByBackend {
+				refs = append(refs, ref)
+			}
+			for _, c := range kgateway.BackendConsumers(i.Resolved.Install, i.Owned) {
+				refs = append(refs, c.BackendRef)
+			}
+			services := 0
+			for pass := range 2 {
+				t2, _, _ := h.pathModel(p, i)
+				listed := h.listedBackends(p, i, v, t2)
+				for _, ref := range refs {
+					status, _ := raw(t, srv, listBase+backendDetailPath(ref))
+					if got := v.can(ref) && listed(ref); got != (status == 200) {
+						t.Errorf("pass %d: %s %s listed %v, backend page %d", pass, ref.Kind, ref, got, status)
+					} else if got && pass == 0 && ref.Group == "" && ref.Kind == "Service" {
+						services++
+					}
+				}
+			}
+			if services == 0 {
+				t.Fatal("the fixture must list a Service")
+			}
+		})
 	}
 }
