@@ -94,7 +94,7 @@ export const rowReasonCopy = {
   unknown: "A required check is not OK, so the state is unknown.",
   "gateway-rejecting": "The parent Gateway rejects config.",
   backendProblem: (backend: string, message: string) => `Backend ${backend}: ${message}`, // S836
-  backendHidden: (code: string) => `${code}: A backend you cannot view has a problem.`, // S837
+  backendHidden: (code: string) => `${code}: A backend you can't view has a problem.`, // S837
 };
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */

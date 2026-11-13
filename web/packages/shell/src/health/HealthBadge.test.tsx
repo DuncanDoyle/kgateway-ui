@@ -65,7 +65,7 @@ describe("row reason tooltip (D-063)", () => {
       "Backend demo/reviews: This backend has no ready endpoints",
     ],
     // A backend the caller may not view: no name, no message.
-    ["warning", { kind: "backend-problem", code: "KGWUI-023" }, "KGWUI-023: A backend you cannot view has a problem."],
+    ["warning", { kind: "backend-problem", code: "KGWUI-023" }, "KGWUI-023: A backend you can't view has a problem."],
   ] as const)("a %s row without a finding of its own names the cause", async (state, reason, text) => {
     renderWithTheme(<HealthBadge state={state} reason={reason} />);
     await userEvent.hover(trigger());

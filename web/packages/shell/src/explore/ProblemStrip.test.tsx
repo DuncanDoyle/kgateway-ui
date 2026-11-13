@@ -31,6 +31,6 @@ it("a backend the caller may not view is neither named nor linked", () => {
     <ProblemStrip installId={ID} state="warning" reason={{ kind: "backend-problem", code: "KGWUI-023" }} />,
   );
   const line = screen.getByTestId("problem-reason");
-  expect(line).toHaveTextContent(/^KGWUI-023: A backend you cannot view has a problem\.$/);
+  expect(line).toHaveTextContent(/^KGWUI-023: A backend you can't view has a problem\.$/);
   expect(within(line).queryByRole("link")).toBeNull();
 });
