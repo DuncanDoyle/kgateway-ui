@@ -387,14 +387,17 @@ export function linkedRule(params: URLSearchParams | undefined, rules: Rule[]): 
   return rules.some((r) => r.index + 1 === n) ? n : undefined;
 }
 
-/** Scrolls ?rule=n's element into view once, after the first render that has it. */
+/** Scrolls ?rule=n's element into view once per distinct n, on the first render that has the element. */
 export function useScrollToRule(n: number | undefined) {
-  const done = useRef(false);
+  const scrolled = useRef<number>(undefined);
   useEffect(() => {
-    if (done.current || n === undefined) return;
-    done.current = true;
-    document.getElementById(ruleAnchor(n))?.scrollIntoView?.({ block: "start" });
-  }, [n]);
+    if (n === undefined) scrolled.current = undefined;
+    if (n === undefined || scrolled.current === n) return;
+    const el = document.getElementById(ruleAnchor(n));
+    if (!el) return;
+    scrolled.current = n;
+    el.scrollIntoView?.({ block: "start" });
+  });
 }
 
 interface RuleListProps {

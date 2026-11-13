@@ -228,7 +228,9 @@ export function RuleTable({ installId, kind, rules, serves = [], stylesOverride 
   const open = openRules(params, rules, linked);
   const texts = useMemo(() => new Map(rules.map((r) => [r.index, searchText(r)])), [rules]);
   const needle = q.trim().toLowerCase();
+  // The linked rule always shows, whatever Problems only and the search say.
   const shown = rules.filter((r) => {
+    if (r.index + 1 === linked) return true;
     const s = ruleState(r);
     if (problems && (!s || s === "healthy")) return false;
     return !needle || (texts.get(r.index) ?? "").includes(needle);

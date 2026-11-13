@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
 import candidateGolden from "../../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
@@ -701,7 +701,15 @@ describe("a route's rule table", () => {
   const rowButton = (n: number) => within(rows()[n - 1] as HTMLElement).getByRole("button");
   /** The page's current query string, from a probe beside the page. */
   function Probe() {
-    return <output data-testid="search">{useLocation().search}</output>;
+    const navigate = useNavigate();
+    return (
+      <>
+        <output data-testid="search">{useLocation().search}</output>
+        <button type="button" onClick={() => navigate(`${MID}?rule=7`)}>
+          link to rule 7
+        </button>
+      </>
+    );
   }
   function mountLong(rules: number, query = "") {
     serve(api({ mid: longRoute(rules) }));
@@ -806,6 +814,33 @@ describe("a route's rule table", () => {
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(scroll.mock.contexts[0]).toBe(rows()[6]);
     // jsdom has no scrollIntoView; the page calls it only when present.
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("?problems=1&rule=7 still shows and opens the healthy rule 7", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mountLong(9, "?problems=1&rule=7");
+    await loaded();
+    expect(rows().map((r) => within(r).getByRole("button").textContent)).toEqual([
+      expect.stringContaining("Rule 3"),
+      expect.stringContaining("Rule 5"),
+      expect.stringContaining("Rule 7"),
+    ]);
+    expect(screen.getByRole("region", { name: /^Rule 7\b/ })).toBeInTheDocument();
+    expect(scroll.mock.contexts).toEqual([rows()[2]]);
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("changing ?rule=3 to ?rule=7 on the same page scrolls to rule 7", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mountLong(9, "?rule=3");
+    await loaded();
+    expect(scroll.mock.contexts).toEqual([rows()[2]]);
+    await userEvent.click(screen.getByRole("button", { name: "link to rule 7" }));
+    expect(screen.getByRole("region", { name: /^Rule 7\b/ })).toBeInTheDocument();
+    expect(scroll.mock.contexts).toEqual([rows()[2], rows()[6]]);
     Reflect.deleteProperty(Element.prototype, "scrollIntoView");
   });
 
