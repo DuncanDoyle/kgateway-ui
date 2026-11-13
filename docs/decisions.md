@@ -1321,3 +1321,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** Nothing here changes a budget, a finding code or the meaning of API v1. Each item can be reversed on its own.
 
 **Alternatives:** Wait for the user at each question: rejected under the away rule; only pushes, posts and approvals were queued.
+
+## D-079 — A `backend` link opens backend detail (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13)
+
+**Context:** Phase 6 added backend detail, but `link` (design §7.1) knew only `detail`, `yaml` and `none`. A group caused by a missing or unready Service read `none`, though its backend page opened from the Backends list.
+
+**Decision:** `link` gains `backend`: the ref is not `detail`, and backend detail serves it to this caller, absent or not. The link and the endpoint decide by the same listing (`paths.Backends` over `backendsInput`). `detail` wins over `backend`; `backend` wins over `yaml` and `none`. The resource endpoint and the reads that need an admitted object still use `admit`. A Needs attention row opens as a whole: its cause, else its one affected object, else its findings (`findings?group=`); a restricted group never opens. A findings list row keeps its two links, the resource and the finding page.
+
+**Consequences:** Adding an enum value to API v1 `link` is additive. Clients treat an unknown value like `none`, as the SPA does. A listed kgateway Backend now opens its backend page, whose YAML tab keeps `admit`'s rule.
+
+**Alternatives:** Derive the page from the kind in the SPA: rejected, links come from the server (§7.1).

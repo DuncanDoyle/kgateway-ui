@@ -708,7 +708,14 @@ describe("GroupRow", () => {
     renderWithTheme(<DiagnosticsGroupRow group={group()} installId="kgw.kgateway" />);
     expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Proxies reject this Gateway's config")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /edge/ })).toBeInTheDocument();
+    // The whole row opens the cause: one link, with the row's hover and active and the link's focus ring.
+    const link = screen.getByRole("link", { name: "Proxies reject this Gateway's config" });
+    expect(link).toHaveAttribute("href", "/i/kgw.kgateway/gateways/infra/edge");
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByLabelText("infra/edge")).toBeInTheDocument();
+    const line = link.closest(".line") as Element;
+    expect(pseudoRules(line, ":hover").length > 0 && pseudoRules(line, ":active").length > 0).toBe(true);
+    expect(pseudoRules(link, ":focus-visible").join()).toContain("outline");
     expect(screen.getByText(diagnosticsCopy.affected(37))).toBeInTheDocument();
     expect(screen.getByText("5m ago")).toBeInTheDocument();
     expect(screen.getByText("KGWUI-001")).toBeInTheDocument();

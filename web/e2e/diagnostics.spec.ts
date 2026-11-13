@@ -97,8 +97,10 @@ for (const theme of themes) {
     expect(first, "the group's first next step").toBeTruthy();
 
     const attention = page.getByRole("region", { name: diagnosticsCopy.needsAttention });
-    const row = attention.getByTestId("group-row").filter({ has: page.getByRole("link", { name: nack, exact: true }) });
+    const row = attention.getByTestId("group-row").filter({ has: page.getByLabel(nack, { exact: true }) });
     await expect(row).toHaveCount(1);
+    // The whole row opens its cause, the Gateway.
+    await expect(row.getByRole("link", { name: group.title })).toHaveAttribute("href", /\/gateways\/infra\/nack/);
     await expect(row).toContainText(group.title);
     await expect(row).toContainText(group.code);
 

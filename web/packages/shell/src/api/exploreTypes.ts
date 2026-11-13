@@ -4,8 +4,8 @@ import type { LabelSelector, Ref, RowReason } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
 
-/** How a reference may be opened; rendered as given, never derived from a kind (design §7.1). */
-export type Link = "detail" | "yaml" | "none";
+/** How a reference may be opened; rendered as given, never derived from a kind (design §7.1, D-079). An unknown value opens nothing. */
+export type Link = "detail" | "yaml" | "backend" | "none";
 /** A reference with its server-computed link; the link sits flat beside the ref fields. */
 export interface LinkedRef extends Ref {
   link: Link;

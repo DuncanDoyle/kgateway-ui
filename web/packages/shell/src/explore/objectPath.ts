@@ -19,9 +19,13 @@ export function backendPath(installId: string, r: Ref): string {
 const GATEWAY_API = "gateway.networking.k8s.io";
 const ROUTE_KINDS = new Set(["HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute"]);
 
-/** Where r opens, from its server-computed link only (design §7.1): detail → its detail page, yaml → the YAML view, none → undefined. */
+/**
+ * Where r opens, from its server-computed link only (design §7.1): detail → its detail page, yaml → the YAML view,
+ * backend → its backend page (D-079), none or an unknown value → undefined.
+ */
 export function objectPath(installId: string, r: LinkedRef): string | undefined {
   if (r.link === "yaml") return resourcePath(installId, r);
+  if (r.link === "backend") return backendPath(installId, r);
   if (r.link !== "detail") return undefined;
   const ns = encodeURIComponent(r.namespace ?? "");
   const name = encodeURIComponent(r.name);

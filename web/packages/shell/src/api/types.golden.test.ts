@@ -232,7 +232,7 @@ const shape = <T>(
 
 // The members of each union in types.ts; Record<U, 1> makes tsc require every member and nothing else.
 const healthState = { healthy: 1, warning: 1, error: 1, unknown: 1 } as const;
-const link = { link: { detail: 1, yaml: 1, none: 1 } } as const;
+const link = { link: { detail: 1, yaml: 1, backend: 1, none: 1 } } as const;
 const category = {
   category: {
     gatewayclass: 1,
@@ -1577,8 +1577,9 @@ describe("types.ts matches the golden v1 wire format", () => {
       gatewayDetailGolden,
       routeDetailGolden,
       routeDetailRestrictedGolden,
+      refsGolden,
     ]);
-    for (const l of ["detail", "yaml", "none"]) expect(all).toContain(`"link":"${l}"`);
+    for (const l of ["detail", "yaml", "backend", "none"]) expect(all).toContain(`"link":"${l}"`);
     expect(routesRestrictedGolden.body.deniedInInstall).toBeGreaterThan(0);
     expect(routesRestrictedGolden.body.items.some((r) => r.parents.some((p) => "viaRestricted" in p))).toBe(true);
     expect(routesFilteredGolden.body.next).toBeTruthy();
