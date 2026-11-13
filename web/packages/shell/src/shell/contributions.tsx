@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import { Component, type ReactNode, useMemo } from "react";
 import { useFeatureCheck } from "../api/hooks";
 import type { Finding, Ref } from "../api/types";
@@ -16,6 +17,8 @@ export interface DetailContext {
 export interface DetailTabContribution {
   id: string;
   label: string;
+  /** Drawn before the label; optional. */
+  icon?: LucideIcon;
   render: (ctx: DetailContext) => ReactNode;
   /** Shown only where the install has this feature (InstallSummary.features). */
   feature?: string;

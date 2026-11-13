@@ -1,5 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import { FileCode, LayoutList, type LucideIcon } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
 import { useNow } from "../../api/clock";
@@ -61,7 +62,7 @@ export const Facts = styled.dl`
   grid-template-columns: max-content 1fr;
   gap: 4px ${(p) => p.theme.space(3)};
   margin: 0;
-  font-size: ${(p) => p.theme.font.size.sm};
+  font-size: ${(p) => p.theme.font.size.md};
   dt {
     color: ${(p) => p.theme.color.textMuted};
   }
@@ -78,8 +79,8 @@ const Stack = styled.div`
 
 // region Helpers
 const TABS = [
-  { id: "overview", label: detailCopy.overview },
-  { id: "yaml", label: detailCopy.yaml },
+  { id: "overview", label: detailCopy.overview, icon: LayoutList },
+  { id: "yaml", label: detailCopy.yaml, icon: FileCode },
 ];
 // Core tab ids are reserved, so a contribution never takes one over.
 const CORE_TAB_IDS = TABS.map((t) => t.id);
@@ -88,6 +89,7 @@ const CORE_TAB_IDS = TABS.map((t) => t.id);
 export interface ExtraTab {
   id: string;
   label: string;
+  icon?: LucideIcon;
   /** Rendered only once data has loaded. */
   content: ReactNode;
 }
@@ -143,7 +145,7 @@ export function DetailFrame({
   const tabs = useMemo(
     () => [
       ...TABS.filter((t) => yaml || t.id !== "yaml"),
-      ...[...(extraTabs ?? []), ...contributed].map(({ id, label }) => ({ id, label })),
+      ...[...(extraTabs ?? []), ...contributed].map(({ id, label, icon }) => ({ id, label, icon })),
     ],
     [extraTabs, contributed, yaml],
   );

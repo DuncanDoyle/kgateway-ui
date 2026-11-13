@@ -48,7 +48,7 @@ const Table = styled.table`
     text-align: left;
     white-space: nowrap;
     overflow: hidden;
-    font-size: ${(p) => p.theme.font.size.xs};
+    font-size: ${(p) => p.theme.font.size.sm};
     letter-spacing: 0.06em;
     text-transform: uppercase;
     font-weight: ${(p) => p.theme.font.weight.semibold};
@@ -150,7 +150,7 @@ const Table = styled.table`
     grid-template-columns: max-content 1fr;
     gap: 4px ${(p) => p.theme.space(3)};
     margin: 0;
-    font-size: ${(p) => p.theme.font.size.sm};
+    font-size: ${(p) => p.theme.font.size.md};
   }
   dt {
     color: ${(p) => p.theme.color.textMuted};

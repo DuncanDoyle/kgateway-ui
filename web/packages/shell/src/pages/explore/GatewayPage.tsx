@@ -1,4 +1,5 @@
 import type { SerializedStyles } from "@emotion/react";
+import { Workflow } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useGatewayDetail, useListenerSets } from "../../api/exploreHooks";
@@ -55,7 +56,7 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
     [ns, name],
   );
   const extraTabs = useMemo<ExtraTab[]>(
-    () => [{ id: "map", label: mapCopy.tab, content: <MapTab installId={id} gateway={ref} /> }],
+    () => [{ id: "map", label: mapCopy.tab, icon: Workflow, content: <MapTab installId={id} gateway={ref} /> }],
     [id, ref],
   );
   const lsQuery = useMemo(() => ({ parent: refParam(ref) }), [ref]);

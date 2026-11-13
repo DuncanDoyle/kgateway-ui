@@ -1,5 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import type { LucideIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useId, useRef } from "react";
 
 // region Styles
@@ -20,15 +21,15 @@ const Tab = styled.button`
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
+  gap: ${(p) => p.theme.space(2)};
   height: ${TABS_H}px;
   padding: 0 ${(p) => p.theme.space(3)};
   cursor: pointer;
-  font-size: ${(p) => p.theme.font.size.sm};
-  color: ${(p) => p.theme.color.textMuted};
+  font-size: ${(p) => p.theme.font.size.base};
+  color: ${(p) => p.theme.color.text};
   border-bottom: 2px solid transparent;
   border-radius: ${(p) => p.theme.radius.sm} ${(p) => p.theme.radius.sm} 0 0;
   &:hover {
-    color: ${(p) => p.theme.color.text};
     background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.bg});
   }
   &:active {
@@ -40,7 +41,6 @@ const Tab = styled.button`
   }
   /* Selected: text weight and an underline bar, not colour alone. */
   &[aria-selected="true"] {
-    color: ${(p) => p.theme.color.text};
     font-weight: ${(p) => p.theme.font.weight.semibold};
     border-bottom-color: ${(p) => p.theme.color.accentText};
   }
@@ -50,6 +50,8 @@ const Tab = styled.button`
 export interface TabDef {
   id: string;
   label: string;
+  /** Drawn before the label; tabs without one show the label alone. */
+  icon?: LucideIcon;
 }
 
 // region Component
@@ -99,6 +101,7 @@ export function DetailTabs({ label, tabs, selected, onSelect, children, stylesOv
             onClick={() => onSelect(t.id)}
             onKeyDown={onKey}
           >
+            {t.icon ? <t.icon size={16} aria-hidden="true" /> : null}
             {t.label}
           </Tab>
         ))}
