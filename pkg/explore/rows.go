@@ -547,6 +547,14 @@ func (b *builder) index(ix *Index) {
 		for j, t := range targets {
 			ix.ByBackend[t] = append(ix.ByBackend[t], uses[j])
 		}
+		// The first backend with an error or warning finding lifts the row; mirrors never do (D-082).
+		for _, t := range a.targets {
+			if w := b.worst[t.Ref]; !t.Mirror && (w.Error != nil || w.Warning != nil) {
+				ref := t.Ref
+				r.Backend, r.Flags, r.State = &ref, r.Flags|FlagBackendProblem, lifted(r.State, true)
+				break
+			}
+		}
 	}
 	for i := range ix.Routes {
 		ix.Routes[i].Children = len(ix.ByParentRoute[ix.Routes[i].Ref])

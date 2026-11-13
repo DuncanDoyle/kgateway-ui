@@ -88,8 +88,8 @@ const NOT_GROUPED = ["kind", "namespace", "group", "sort"];
 /** Filters a group row carries to the flat view of its members (R98). */
 const GROUP_CARRIES = ["severity", "code", "q"];
 
-/** The flat view of group g's findings, with the grouped view's filters. */
-const groupFindingsPath = (installId: string, g: { id: string }, params: URLSearchParams) => {
+/** The flat view of group g's findings, with the grouped view's filters in params. */
+export const groupFindingsPath = (installId: string, g: { id: string }, params = new URLSearchParams()) => {
   const q = new URLSearchParams();
   for (const k of GROUP_CARRIES) if (params.get(k)) q.set(k, params.get(k) as string);
   q.set("group", g.id);

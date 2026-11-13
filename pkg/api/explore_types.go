@@ -22,6 +22,8 @@ const (
 	LinkDetail Link = "detail"
 	// LinkYAML: admitted without a detail view, or a no-parent row.
 	LinkYAML Link = "yaml"
+	// LinkBackend: not detail, and the backend detail serves it to the caller, absent or not (D-079).
+	LinkBackend Link = "backend"
 	// LinkNone: denied, absent, never served or not admitted (D-013).
 	LinkNone Link = "none"
 )
@@ -179,8 +181,15 @@ type RouteRow struct {
 	Flags        []string        `json:"flags"`
 	Health       health.State    `json:"health"`
 	// Reason says why Health is not healthy (D-063).
-	Reason *health.RowReason `json:"reason,omitempty"`
-	Mirror bool              `json:"mirror,omitempty"`
+	Reason *RouteReason `json:"reason,omitempty"`
+	Mirror bool         `json:"mirror,omitempty"`
+}
+
+// RouteReason is a route row's reason plus, on kind backend-problem, the
+// backend when the caller may view it; else that kind keeps only its code (D-082).
+type RouteReason struct {
+	health.RowReason
+	Backend *LinkedRef `json:"backend,omitempty"`
 }
 
 // GatewayListRow is one row of the Gateways list (the design's GatewayRow2).
@@ -306,6 +315,14 @@ type Candidate struct {
 	By     *LinkedRef              `json:"by,omitempty"`
 }
 
+// DetailReason is a detail page's reason: the list row's (D-063) plus, for
+// kind finding, the deciding finding's id, so the page can open it. Backend is as on RouteReason.
+type DetailReason struct {
+	health.RowReason
+	Finding string     `json:"finding,omitempty"`
+	Backend *LinkedRef `json:"backend,omitempty"`
+}
+
 // GatewayDetail is GET …/gateways/{ns}/{name}. Its ListenerSets are paged
 // through the ListenerSets list, never embedded; ListenerSets is that list's
 // total for the caller (design §7.4 rule 5).
@@ -315,6 +332,7 @@ type GatewayDetail struct {
 	Generation           int64         `json:"generation"`
 	Class                string        `json:"class"`
 	Health               health.State  `json:"health"`
+	Reason               *DetailReason `json:"reason,omitempty"`
 	Candidate            *Candidate    `json:"candidate,omitempty"`
 	RuleSet              string        `json:"ruleSet,omitempty"`
 	RuleSetLabel         string        `json:"ruleSetLabel,omitempty"`
@@ -351,6 +369,7 @@ type ListenerSetDetail struct {
 	Ref                    LinkedRef            `json:"ref"`
 	Generation             int64                `json:"generation"`
 	Health                 health.State         `json:"health"`
+	Reason                 *DetailReason        `json:"reason,omitempty"`
 	Candidate              *Candidate           `json:"candidate,omitempty"`
 	RuleSet                string               `json:"ruleSet,omitempty"`
 	RuleSetLabel           string               `json:"ruleSetLabel,omitempty"`
@@ -381,6 +400,7 @@ type RouteDetail struct {
 	Ref                LinkedRef            `json:"ref"`
 	Generation         int64                `json:"generation"`
 	Health             health.State         `json:"health"`
+	Reason             *DetailReason        `json:"reason,omitempty"`
 	Candidate          *Candidate           `json:"candidate,omitempty"`
 	RuleSet            string               `json:"ruleSet,omitempty"`
 	RuleSetLabel       string               `json:"ruleSetLabel,omitempty"`

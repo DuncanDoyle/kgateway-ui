@@ -90,13 +90,89 @@ type backends struct {
 // (attached or not), and every consumer's backend. A backend, row, route or
 // consumer the viewer may not see is left out and counted nowhere.
 func Backends(t *Topology, p *Projection, in BackendsInput) BackendSet {
+	b := collect(t, p, in)
+	b.finish()
+	return b.set
+}
+
+// Membership is what Backends lists before any viewer check that the index
+// cannot answer per ref: the in-scope Backends and each target's path rows.
+// It holds only refs and row indices, so the path memo may keep it.
+// Sorted slices, not maps: this is built on a cold request and must stay small.
+type Membership struct {
+	// rows are the path rows with a target, sorted by it.
+	rows []int32
+	// inScope are the in-scope Backends, sorted.
+	inScope []objects.Ref
+}
+
+// NewMembership records the in-scope Backends of in and the path rows of t.
+func NewMembership(t *Topology, in BackendsInput) *Membership {
+	m := &Membership{}
+	for k, row := range t.Rows {
+		if _, ok := t.target(row); ok {
+			m.rows = append(m.rows, int32(k)) // #nosec G115 -- row counts fit in int32
+		}
+	}
+	slices.SortFunc(m.rows, func(a, b int32) int { return m.targetOf(t, a).Compare(m.targetOf(t, b)) })
+	if snap := in.Snapshot; snap != nil {
+		scope := in.Model.Resolved.Scope
+		for _, k := range kinds.ByCategory(in.Served, kinds.CategoryBackend) {
+			for _, u := range snap.Objects[k.GVR()] {
+				if scope.Contains(u.GetNamespace(), named(snap.Namespaces, u.GetNamespace())) {
+					m.inScope = append(m.inScope, objects.RefOf(u))
+				}
+			}
+		}
+	}
+	slices.SortFunc(m.inScope, compareRefs)
+	return m
+}
+
+func (m *Membership) targetOf(t *Topology, k int32) objects.Ref {
+	ref, _ := t.target(t.Rows[k])
+	return ref
+}
+
+// Listed reports whether Backends lists ref for the viewer of in, over t:
+// the reasons of collect, for one ref.
+func (m *Membership) Listed(t *Topology, in BackendsInput, ref objects.Ref) bool {
+	can := func(x objects.Ref) bool { return in.Can == nil || in.Can(x) }
+	if !can(ref) {
+		return false
+	}
+	if _, ok := slices.BinarySearchFunc(m.inScope, ref, compareRefs); ok {
+		return true
+	}
+	if ix := in.Model.Index; ix != nil {
+		for _, u := range ix.ByBackend[ref] {
+			if row := &ix.Routes[u.Row]; row.Owned && can(row.Ref) {
+				return true
+			}
+		}
+	}
+	for _, c := range in.Consumers {
+		if c.BackendRef == ref && can(c.Consumer) {
+			return true
+		}
+	}
+	i, _ := slices.BinarySearchFunc(m.rows, ref, func(k int32, r objects.Ref) int { return m.targetOf(t, k).Compare(r) })
+	for ; i < len(m.rows) && m.targetOf(t, m.rows[i]) == ref; i++ {
+		if in.Visible == nil || in.Visible(t.Deps(t.Rows[m.rows[i]])) {
+			return true
+		}
+	}
+	return false
+}
+
+// collect adds every candidate backend and marks the ones a visible reason lists.
+func collect(t *Topology, p *Projection, in BackendsInput) *backends {
 	b := &backends{t: t, p: p, in: in, index: map[objects.Ref]int{}}
 	b.rows()
 	b.written()
 	b.inScope()
 	b.consumers()
-	b.finish()
-	return b.set
+	return b
 }
 
 func (b *backends) can(ref objects.Ref) bool { return b.in.Can == nil || b.in.Can(ref) }

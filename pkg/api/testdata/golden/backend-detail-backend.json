@@ -24,7 +24,7 @@
           "backend": {
             "group": "gateway.kgateway.dev",
             "kind": "Backend",
-            "link": "yaml",
+            "link": "backend",
             "name": "be-used",
             "namespace": "shop"
           },
@@ -167,7 +167,7 @@
     "ref": {
       "group": "gateway.kgateway.dev",
       "kind": "Backend",
-      "link": "yaml",
+      "link": "backend",
       "name": "be-used",
       "namespace": "shop"
     },

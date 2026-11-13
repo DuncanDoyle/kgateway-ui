@@ -181,6 +181,9 @@ it("the status line names routes and Gateways and the impact in fixed phrases, n
   expect(line).toHaveTextContent("2 routes on 2 Gateways send traffic here; no endpoint is ready, so requests fail.");
   expect(line).toHaveTextContent("Error");
   expect(line.textContent).not.toMatch(/\b[45]\d\d\b/);
+  // The status line is the page's problem strip: the header badge jumps to it.
+  expect(screen.getByTestId("state-link")).toHaveAttribute("href", `#${line.id}`);
+  expect(screen.queryByTestId("problem-strip")).toBeNull();
 });
 
 it("the status line has a phrase per signal: waiting, not read, not accepted, unused", async () => {

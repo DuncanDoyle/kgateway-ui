@@ -1,3 +1,4 @@
+import { GitFork } from "lucide-react";
 import type { RouteDetail } from "../api/types";
 import { delegationCopy } from "../copy/explorer";
 import type { DetailTabContribution } from "../shell/contributions";
@@ -18,6 +19,7 @@ const noInstallsHelp = (
 const delegationTab: DetailTabContribution = {
   id: "delegation",
   label: delegationCopy.tab,
+  icon: GitFork,
   feature: "delegation",
   applies: (ctx) => hasDelegationRefs(ctx.detail as RouteDetail),
   render: (ctx) => <DelegationContribution ctx={ctx} />,

@@ -83,11 +83,18 @@ export const routeStateDataPlaneCopy = {
   "gateway-rejecting": "Gateway rejects config", // S457
 };
 
+/** The backend flag (D-082): a backend the route sends to has a problem. */
+export const routeStateBackendCopy = {
+  "backend-problem": "Backend has a problem", // S839
+};
+
 /** A list row's status tooltip (D-063). */
 export const rowReasonCopy = {
   finding: (code: string, message: string, more?: number) => `${code}: ${message}${more ? ` (+${more} more)` : ""}`,
   unknown: "A required check is not OK, so the state is unknown.",
   "gateway-rejecting": "The parent Gateway rejects config.",
+  backendProblem: (backend: string, message: string) => `Backend ${backend}: ${message}`, // S836
+  backendHidden: (code: string) => `${code}: A backend you can't view has a problem.`, // S837
 };
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
@@ -133,6 +140,14 @@ export const detailCopy = {
   bannerObject: "an object of this install refers to it.",
   bannerSelected: "selects it through a delegation ref.", // S188
   backendLookup: "Routes that send traffic here", // S96 (fixed)
+};
+
+/** The problem strip under a detail page's header, and the header badge that jumps to it. */
+export const problemCopy = {
+  seeConditions: "Go to conditions", // S825
+  openFinding: "Open finding", // S826
+  badgeLink: (state: string) => `${state}, go to the problem`, // S827
+  backend: "Backend", // S838
 };
 
 // region Gateway page
@@ -253,6 +268,16 @@ export const routeCopy = {
   childRoutes: "Child routes",
   toggleChildren: (open: boolean) => (open ? "Hide child routes" : "Show child routes"), // S92
   noChildRoutes: "No reported child routes.", // S93
+  // A route's rule table (D-081).
+  problemsOnly: "Problems only", // S771
+  searchRules: "Filter rules", // S828
+  expandAll: "Expand all", // S829
+  collapseAll: "Collapse all", // S830
+  shownRules: (n: number, of: number) => `${n} of ${plural(of, ["rule", "rules"])}`, // S831
+  noRuleMatch: "No rule matches the search.", // S832
+  moreHeaders: (n: number) => `+${plural(n, ["header", "headers"])}`, // S833
+  moreQuery: (n: number) => `+${n} query`, // S834
+  filterCount: (n: number) => plural(n, ["filter", "filters"]), // S835
 };
 
 // region Computed facts (2.3). S111–S133; final wording from Task 48 (phase-2.3-wording.md).
@@ -438,7 +463,7 @@ export const diagnosticsCopy = {
   pod: "Pod", // S433
   rejectingSince: (ago: string) => `New rejects, started ${ago}`, // S434
   envoyResources: "Envoy resources", // S436
-  rejecting: (n: number) => `${n} rejecting`, // S397
+  rejecting: (n: number) => `${plural(n, ["Gateway", "Gateways"])} ${n === 1 ? "rejects" : "reject"} config`, // S397
   rejectingNow: "New rejects", // S434
   notRejecting: "No new rejects", // S435
   truncated: "and more", // S437
@@ -488,10 +513,11 @@ export const diagnosticsCopy = {
   versionHeader: "Version", // S406
   notObserved: "Not observed", // S363
   noGateways: "No Gateways you can view", // S395
-  gatewaysReady: (ready: number, total: number) => `${ready}/${total} Gateways ready`, // S396
-  skew: (n: number) => `${n} with version skew`, // S398
-  restarting: (n: number) => `${n} restarted recently`, // S399
-  gatewaysNotObserved: (n: number) => `${n} not observed`, // S364
+  gatewaysReady: (ready: number, total: number) => `${ready} of ${total} Gateways ready`, // S396
+  skew: (n: number) => `${plural(n, ["Gateway", "Gateways"])} with version skew`, // S398
+  restarting: (n: number) => `${plural(n, ["Gateway", "Gateways"])} restarted recently`, // S399
+  gatewaysNotObserved: (n: number) => `${plural(n, ["Gateway", "Gateways"])} not observed`, // S364
+  selfManaged: (n: number) => plural(n, ["self-managed Gateway", "self-managed Gateways"]), // S824
   name: "Name",
   ready: "Ready", // S400
   notReady: "Not ready",
@@ -518,7 +544,7 @@ export const diagnosticsCopy = {
     "not-observed": "Not observed", // S363
   } as Record<string, string>,
   dataPlane: "Data plane", // S388
-  noRejects: "No rejects", // S389
+  noRejects: "Config accepted", // S389
   rejects: "Rejects", // S390
   configWithheld: "Config withheld", // S597
   problems: (n: number) => plural(n, ["problem", "problems"]), // S383

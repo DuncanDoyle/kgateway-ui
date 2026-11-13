@@ -8,6 +8,7 @@ import type { AllowedListeners, Condition, LinkedRef } from "../../api/types";
 import { detailCopy, gatewayCopy, listenerSetCopy } from "../../copy/explorer";
 import { ConditionList } from "../../explore/ConditionList";
 import { LinkedName } from "../../explore/LinkedName";
+import { firstFailing } from "../../explore/ProblemStrip";
 import { ResourceName } from "../../resource/ResourceName";
 import { YamlBlock } from "../../resource/ResourceYaml";
 import { useInstallId } from "../../shell/extension";
@@ -87,22 +88,23 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
   const parentRef = useMemo(() => (data ? [data.parent] : undefined), [data]);
   // From 1600 px the parent and conditions sit beside the structure; below, above it.
   const wide = useTwoColumns();
+  // parentFound is false for a hidden parent too, so the page never says it does not exist (D-013).
+  const parentName = data ? (
+    data.parentFound ? (
+      <LinkedName refValue={data.parent} installId={id} />
+    ) : (
+      <>
+        <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
+        <Muted>{listenerSetCopy.notAvailable}</Muted>
+      </>
+    )
+  ) : null;
   const related = data ? (
     <>
       <Section aria-label={listenerSetCopy.parent}>
         <Facts>
           <dt>{listenerSetCopy.parentGateway}</dt>
-          <dd>
-            {/* parentFound is false for a hidden parent too, so the page never says it does not exist (D-013). */}
-            {data.parentFound ? (
-              <LinkedName refValue={data.parent} installId={id} />
-            ) : (
-              <>
-                <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
-                <Muted>{listenerSetCopy.notAvailable}</Muted>
-              </>
-            )}
-          </dd>
+          <dd>{parentName}</dd>
         </Facts>
       </Section>
       <Section aria-labelledby="ls-conditions">
@@ -126,6 +128,14 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
       noun="ListenerSet"
       data={data}
       error={error}
+      // The fix for a rejected ListenerSet is often on its parent Gateway, so the strip names it.
+      problem={
+        data && {
+          condition: firstFailing(data.conditions),
+          conditionsId: "ls-conditions",
+          parent: { label: listenerSetCopy.parentGateway, name: parentName },
+        }
+      }
       stylesOverride={stylesOverride}
     >
       {data ? (

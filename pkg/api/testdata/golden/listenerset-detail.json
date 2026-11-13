@@ -49,6 +49,13 @@
       "set": false
     },
     "parentFound": true,
+    "reason": {
+      "code": "KGWUI-002",
+      "finding": "f1-puapjtdw23bqmtv2ly6ww5lzd6",
+      "kind": "finding",
+      "message": "Accepted is False (NotAllowed)",
+      "more": 1
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "ListenerSet",

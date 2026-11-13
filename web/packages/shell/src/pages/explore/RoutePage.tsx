@@ -7,6 +7,7 @@ import { useInstallFeature } from "../../api/hooks";
 import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
 import { detailCopy, routeCopy, traceCopy } from "../../copy/explorer";
 import { trafficCopy } from "../../copy/traffic";
+import { firstFailing } from "../../explore/ProblemStrip";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
 import { installPath } from "../../shell/paths";
@@ -17,6 +18,7 @@ import { ChildRoutes } from "./route/ChildRoutes";
 import { EffectiveMatches } from "./route/EffectiveMatches";
 import { ParentCard } from "./route/ParentCard";
 import { RuleList } from "./route/RuleList";
+import { RuleTable } from "./route/RuleTable";
 import { isRouteRef, sameParentRef } from "./route/refs";
 import { Serves } from "./route/Serves";
 import { UpChain } from "./route/UpChain";
@@ -137,6 +139,13 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
       sideWhenWide
       data={data}
       error={error}
+      // Conditions live per parent; only this install's controller's entries count.
+      problem={
+        data && {
+          condition: firstFailing(data.parents.filter((p) => p.ours).flatMap((p) => p.conditions)),
+          conditionsId: "route-parents",
+        }
+      }
       trailRefs={trailRefs}
       stylesOverride={stylesOverride}
     >
@@ -179,7 +188,11 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
             <h2 id="route-rules">
               {routeCopy.rules} <span className="note">{data.rules.length}</span>
             </h2>
-            <RuleList installId={id} kind={kind} rules={data.rules} serves={data.serves} />
+            {data.rules.length ? (
+              <RuleTable installId={id} kind={kind} rules={data.rules} serves={data.serves} />
+            ) : (
+              <RuleList installId={id} kind={kind} rules={data.rules} serves={data.serves} />
+            )}
           </Section>
           {delegation && data.effective?.length ? (
             <EffectiveMatches installId={id} edges={data.effective} truncated={data.effectiveTruncated} />

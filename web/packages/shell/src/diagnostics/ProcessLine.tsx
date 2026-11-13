@@ -62,16 +62,21 @@ export function ProcessLine(props: ProcessLineProps) {
     );
   } else {
     const s = props.summary;
+    // Self-managed Gateways can never be ready, so the ratio leaves them out.
+    const selfManaged = s.selfManaged ?? 0;
+    const managed = s.gateways - selfManaged;
+    const notObserved = s.notObserved - selfManaged;
     facts =
       s.gateways === 0 ? (
         <span className="muted">{diagnosticsCopy.noGateways}</span>
       ) : (
         <>
-          <span>{diagnosticsCopy.gatewaysReady(s.ready, s.gateways)}</span>
+          {managed > 0 ? <span>{diagnosticsCopy.gatewaysReady(s.ready, managed)}</span> : null}
           {s.rejecting ? <span>{diagnosticsCopy.rejecting(s.rejecting)}</span> : null}
           {s.skew ? <span>{diagnosticsCopy.skew(s.skew)}</span> : null}
           {s.restarting ? <span>{diagnosticsCopy.restarting(s.restarting)}</span> : null}
-          {s.notObserved ? <span className="muted">{diagnosticsCopy.gatewaysNotObserved(s.notObserved)}</span> : null}
+          {selfManaged ? <span className="muted">{diagnosticsCopy.selfManaged(selfManaged)}</span> : null}
+          {notObserved > 0 ? <span className="muted">{diagnosticsCopy.gatewaysNotObserved(notObserved)}</span> : null}
         </>
       );
   }

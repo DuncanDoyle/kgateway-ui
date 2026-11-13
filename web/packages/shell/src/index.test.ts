@@ -167,6 +167,7 @@ it("keeps the public export surface", () => {
         "DelegationRow",
         "DeployerError",
         "DetailContext",
+        "DetailReason",
         "DetailTabContribution",
         "Diagnostics",
         "DiagnosticsSectionProps",

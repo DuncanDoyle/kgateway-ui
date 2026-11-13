@@ -42,7 +42,7 @@
           "backend": {
             "group": "",
             "kind": "Service",
-            "link": "none",
+            "link": "backend",
             "name": "cart",
             "namespace": "store"
           },
@@ -92,7 +92,7 @@
                 "ref": {
                   "group": "",
                   "kind": "Service",
-                  "link": "none",
+                  "link": "backend",
                   "name": "cart",
                   "namespace": "store"
                 },
@@ -120,7 +120,7 @@
           "backend": {
             "group": "",
             "kind": "Service",
-            "link": "none",
+            "link": "backend",
             "name": "cart",
             "namespace": "store"
           },
@@ -157,7 +157,7 @@
                 "ref": {
                   "group": "",
                   "kind": "Service",
-                  "link": "none",
+                  "link": "backend",
                   "name": "cart",
                   "namespace": "store"
                 },
@@ -263,7 +263,7 @@
           "ref": {
             "group": "",
             "kind": "Service",
-            "link": "none",
+            "link": "backend",
             "name": "cart",
             "namespace": "store"
           },
@@ -275,7 +275,7 @@
     "ref": {
       "group": "",
       "kind": "Service",
-      "link": "none",
+      "link": "backend",
       "name": "cart",
       "namespace": "store"
     },
@@ -296,7 +296,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "cart",
           "namespace": "store"
         },

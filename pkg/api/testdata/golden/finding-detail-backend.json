@@ -16,7 +16,7 @@
       "resource": {
         "group": "gateway.kgateway.dev",
         "kind": "Backend",
-        "link": "yaml",
+        "link": "backend",
         "name": "be-bad",
         "namespace": "shop"
       },

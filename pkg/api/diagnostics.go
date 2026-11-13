@@ -387,7 +387,7 @@ func (h *handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := h.view(r)
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, nil, nil)
 	d, rep, at := diagnosis(i), &i.Health, wireTime(p.ConfirmedAt)
 	in := stepsInput(p.Model, i)
 	out := Diagnostics{Install: i.Resolved.ID(), Verdict: verdict(v, rep), Groups: []GroupRow{}, Checks: wireChecks(rep.Checks), CollectedAt: at}

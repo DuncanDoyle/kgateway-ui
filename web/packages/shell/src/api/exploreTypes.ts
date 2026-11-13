@@ -4,8 +4,8 @@ import type { LabelSelector, Ref, RowReason } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
 
-/** How a reference may be opened; rendered as given, never derived from a kind (design §7.1). */
-export type Link = "detail" | "yaml" | "none";
+/** How a reference may be opened; rendered as given, never derived from a kind (design §7.1, D-079). An unknown value opens nothing. */
+export type Link = "detail" | "yaml" | "backend" | "none";
 /** A reference with its server-computed link; the link sits flat beside the ref fields. */
 export interface LinkedRef extends Ref {
   link: Link;
@@ -107,6 +107,8 @@ export interface RouteRow {
   reason?: RowReason;
   mirror?: boolean;
 }
+/** A detail page's reason: its list row's reason plus, for kind finding, the deciding finding's id. */
+export type DetailReason = RowReason & { finding?: string };
 /** One row of the Gateways list. */
 export interface GatewayListRow {
   ref: LinkedRef;
@@ -199,6 +201,7 @@ export interface GatewayDetail {
   generation: number;
   class: string;
   health: HealthState;
+  reason?: DetailReason;
   candidate?: Candidate;
   ruleSet?: string;
   /** ruleSet's display name; absent from older servers. */
@@ -232,6 +235,7 @@ export interface ListenerSetDetail {
   ref: LinkedRef;
   generation: number;
   health: HealthState;
+  reason?: DetailReason;
   candidate?: Candidate;
   ruleSet?: string;
   /** ruleSet's display name; absent from older servers. */
@@ -350,6 +354,7 @@ export interface RouteDetail {
   ref: LinkedRef;
   generation: number;
   health: HealthState;
+  reason?: DetailReason;
   candidate?: Candidate;
   ruleSet?: string;
   /** ruleSet's display name; absent from older servers. */

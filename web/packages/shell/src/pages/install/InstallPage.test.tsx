@@ -120,7 +120,9 @@ it("10 groups in rank order with Show all to the grouped findings page", async (
   await screen.findByTestId("health-strip");
   // The server ranks; the page keeps its order.
   expect(groupRows().map((r) => within(r).getByTitle(/^Problem/).textContent)).toEqual(groups.map((g) => g.title));
-  expect(within(groupRows()[0] as HTMLElement).getByRole("link", { name: "shop/route-0" })).toBeInTheDocument();
+  expect(
+    within(groupRows()[0] as HTMLElement).getByRole("link", { name: "Problem 0, HTTPRoute shop/route-0" }),
+  ).toHaveAttribute("href", "/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/route-0");
   const all = screen.getByRole("link", { name: "Show all groups (14)" });
   expect(all).toHaveAttribute("href", "/i/kgw.kgateway/findings?view=groups");
   // Unhealthy: What was checked starts collapsed and opens on demand.
@@ -307,7 +309,7 @@ it("Data plane column shows ✓, Rejects, Config withheld or Unknown", async () 
   };
   expect(cell("edge")).toHaveTextContent(/^Rejects$/);
   expect(within(cell("edge")).getByTestId("health-icon-error")).toBeInTheDocument();
-  expect(cell("internal")).toHaveTextContent(/^No rejects$/);
+  expect(cell("internal")).toHaveTextContent(/^Config accepted$/);
   expect(within(cell("internal")).getByTestId("health-icon-healthy")).toBeInTheDocument();
   expect(cell("lab")).toHaveTextContent(/^Unknown$/);
   expect(cell("held")).toHaveTextContent(/^Config withheld$/);
@@ -380,8 +382,8 @@ it("Processes shows the controller and proxies lines and links to the Processes 
   expect(within(section).getByTestId("process-line-controller")).toHaveTextContent("version 2.4.7");
   const proxies = within(section).getByTestId("process-line-proxies");
   expect(proxies).toHaveTextContent("Error");
-  expect(proxies).toHaveTextContent("1/2 Gateways ready");
-  expect(proxies).toHaveTextContent("1 rejecting");
+  expect(proxies).toHaveTextContent("1 of 2 Gateways ready");
+  expect(proxies).toHaveTextContent("1 Gateway rejects config");
   expect(within(section).getByRole("link", { name: "View processes" })).toHaveAttribute(
     "href",
     "/i/kgw.kgateway/processes",
@@ -732,8 +734,9 @@ it("a Gateway row follows its link: yaml opens the YAML view, none is plain text
   expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway");
 });
 
-it("a group's cause opens where its link says; link none is plain text", async () => {
+it("a group row opens its cause, else its one affected object, else its findings", async () => {
   const gw = "gateway.networking.k8s.io";
+  const route = (name: string) => ({ group: gw, kind: "HTTPRoute", namespace: "shop", name, link: "detail" as const });
   mount(
     unhealthy(),
     "/i/kgw.kgateway",
@@ -741,26 +744,40 @@ it("a group's cause opens where its link says; link none is plain text", async (
     diagnostics(unhealthy(), [
       groupRow(0, { cause: { group: gw, kind: "Gateway", namespace: "prod", name: "edge", link: "detail" } }),
       groupRow(1, {
-        cause: { group: "gateway.kgateway.dev", kind: "Backend", namespace: "shop", name: "be1", link: "yaml" },
+        title: "Backend not found",
+        cause: { group: "", kind: "Service", namespace: "demo", name: "payments", link: "backend" },
+        nextSteps: [{ title: "Check the Service", command: "kubectl get svc -n demo payments" }],
       }),
-      groupRow(2, { cause: { group: gw, kind: "HTTPRoute", namespace: "shop", name: "cart", link: "none" } }),
+      groupRow(2, {
+        cause: { ...route("cart"), link: "none" },
+        affected: [route("web")],
+        affectedTotal: 1,
+      }),
+      groupRow(3, { cause: { ...route("two"), link: "none" }, affected: [route("a"), route("b")], affectedTotal: 2 }),
     ]),
   );
-  const [gateway, backend, none] = (await screen.findAllByTestId("group-row")) as [
+  const [gateway, backend, one, many] = (await screen.findAllByTestId("group-row")) as [
+    HTMLElement,
     HTMLElement,
     HTMLElement,
     HTMLElement,
   ];
-  expect(within(gateway).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
-    "href",
-    "/i/kgw.kgateway/gateways/prod/edge",
-  );
-  expect(within(backend).getByRole("link", { name: "shop/be1" })).toHaveAttribute(
-    "href",
-    "/i/kgw.kgateway/r/gateway.kgateway.dev/Backend/shop/be1",
-  );
-  expect(none).toHaveTextContent("shop/cart");
-  expect(within(none).queryByRole("link", { name: "shop/cart" })).toBeNull();
+  const rowLink = (row: HTMLElement) => within(row).getByRole("link");
+  expect(rowLink(gateway)).toHaveAttribute("href", "/i/kgw.kgateway/gateways/prod/edge");
+  expect(rowLink(one)).toHaveAttribute("href", "/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/web");
+  expect(rowLink(many)).toHaveAttribute("href", "/i/kgw.kgateway/findings?group=g-3");
+  // One link per row: a cause that opens is the row's target, so its name is text.
+  expect(backend).toHaveTextContent("demo/payments");
+  expect(within(backend).getAllByRole("link")).toHaveLength(1);
+
+  // The expander toggles without leaving the page.
+  const toggle = within(backend).getByRole("button", { name: diagnosticsCopy.nextStep });
+  await userEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway");
+
+  await userEvent.click(within(backend).getByRole("link", { name: "Backend not found, Service demo/payments" }));
+  expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway/backends/-/Service/demo/payments");
 });
 
 it("switching installs never shows the previous install's data", async () => {

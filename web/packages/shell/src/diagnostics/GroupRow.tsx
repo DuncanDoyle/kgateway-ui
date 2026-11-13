@@ -1,14 +1,18 @@
-import type { SerializedStyles } from "@emotion/react";
+import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useId, useState } from "react";
+import { Link } from "react-router-dom";
 import { useNow } from "../api/clock";
 import type { GroupRow as GroupRowData } from "../api/types";
 import { diagnosticsCopy, findingsCopy } from "../copy/explorer";
-import { LinkedName } from "../explore/LinkedName";
+import { objectPath, withVia } from "../explore/objectPath";
 import { HealthBadge } from "../health/HealthBadge";
 import { severityLabel, severityToState } from "../health/state";
+import { groupFindingsPath } from "../pages/findings/FindingsPage";
 import { ago } from "../pages/install/HealthStrip";
+import { ResourceName } from "../resource/ResourceName";
+import { useLinkVia } from "../shell/trail";
 import { NextSteps } from "./NextSteps";
 
 // region Styles
@@ -31,6 +35,35 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
     box-sizing: border-box;
     min-height: ${GROUP_ROW_H}px;
     padding: ${(p) => p.theme.space(2)} ${(p) => p.theme.space(3)};
+  }
+  /* One link per row; its ::after covers the line, and the expander sits above it. */
+  .line.linked {
+    position: relative;
+  }
+  .line.linked:hover {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 5%, ${(p) => p.theme.color.surface});
+  }
+  .line.linked:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 12%, ${(p) => p.theme.color.surface});
+  }
+  .row-link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .row-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .line.linked:hover .row-link {
+    text-decoration: underline;
+  }
+  .row-link:focus-visible {
+    outline: none;
+  }
+  .row-link:focus-visible::after {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: -2px;
   }
   .main {
     min-width: 0;
@@ -85,6 +118,8 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   ${(p) => p.stylesOverride}
 `;
 const Expander = styled.button`
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -111,6 +146,33 @@ const Expander = styled.button`
   }
 `;
 
+const oneLine = css`
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+// region Helpers
+/** Where a group row opens: its cause, else its one affected object, else its findings; a restricted group never opens. */
+export function groupTarget(installId: string, g: GroupRowData): string | undefined {
+  if (g.restricted) return undefined;
+  const one = g.affectedTotal === 1 ? g.affected[0] : undefined;
+  return (
+    (g.cause && objectPath(installId, g.cause)) ??
+    (one && objectPath(installId, one)) ??
+    groupFindingsPath(installId, g)
+  );
+}
+
+/** The row link's accessible name: the title, plus the object it opens, so same-titled rows differ. */
+function linkName(installId: string, g: GroupRowData): string {
+  const one = g.affectedTotal === 1 ? g.affected[0] : undefined;
+  const obj = g.cause && objectPath(installId, g.cause) ? g.cause : one && objectPath(installId, one) ? one : undefined;
+  if (!obj) return g.title;
+  return `${g.title}, ${obj.kind} ${obj.namespace ? `${obj.namespace}/${obj.name}` : obj.name}`;
+}
+
 // region Component
 interface GroupRowProps {
   group: GroupRowData;
@@ -126,10 +188,13 @@ export function DiagnosticsGroupRow({ group: g, installId, stylesOverride }: Gro
   const now = useNow();
   const [open, setOpen] = useState(false);
   const panelId = useId();
+  const via = useLinkVia(installId);
   const steps = g.restricted ? undefined : g.nextSteps;
+  const target = groupTarget(installId, g);
+  const to = target ? withVia(target, via) : undefined;
   return (
     <Row data-testid="group-row" stylesOverride={stylesOverride}>
-      <div className="line">
+      <div className={to ? "line linked" : "line"}>
         <div className="sev">
           <HealthBadge state={severityToState(g.severity)} label={severityLabel[g.severity]} />
         </div>
@@ -138,13 +203,21 @@ export function DiagnosticsGroupRow({ group: g, installId, stylesOverride }: Gro
             <div className="title muted">{findingsCopy.restricted}</div>
           ) : (
             <div className="title" title={g.title}>
-              {g.title}
+              {to ? (
+                <Link className="row-link" to={to} aria-label={linkName(installId, g)}>
+                  {g.title}
+                </Link>
+              ) : (
+                g.title
+              )}
             </div>
           )}
           <div className="meta">
+            {/* Text, not a link: a cause that opens is the row's own target. */}
             {!g.restricted && g.cause ? (
               <span className="cause">
-                {g.cause.kind} <LinkedName refValue={g.cause} installId={installId} truncate />
+                {g.cause.kind}{" "}
+                <ResourceName namespace={g.cause.namespace} name={g.cause.name} stylesOverride={oneLine} />
               </span>
             ) : null}
             {!g.restricted && !g.cause && g.grant ? (

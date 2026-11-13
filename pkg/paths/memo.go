@@ -61,12 +61,15 @@ func NewMemoCap(c clock.PassiveClock, capBytes int) *Memo {
 }
 
 // memoEntry is one install's generation. proj projects topo for the model
-// whose Seq is seq; proj is nil until one is stored.
+// whose Seq is seq, and members lists topo's backends for the one whose Seq
+// is membersSeq; each is nil until one is stored.
 type memoEntry struct {
-	key  TopoKey
-	topo *Topology
-	seq  uint64
-	proj *Projection
+	key        TopoKey
+	topo       *Topology
+	seq        uint64
+	proj       *Projection
+	membersSeq uint64
+	members    *Membership
 }
 
 // Prune drops the entries of installs that publication m does not have. It
@@ -140,6 +143,30 @@ func (m *Memo) Projection(pub *engine.Published, install string, t *Topology, pr
 		e.seq, e.proj = seq, p
 	}
 	return p
+}
+
+// Membership returns t's backend membership for pub's model, building it on
+// a miss. Like a projection, it is kept only for the memoised topology and
+// never reused for another model.
+func (m *Memo) Membership(pub *engine.Published, install string, t *Topology, build func() *Membership) *Membership {
+	if pub == nil || pub.Model == nil {
+		return build()
+	}
+	seq := pub.Model.Seq
+	m.mu.Lock()
+	if e := m.installs[install]; e != nil && e.topo == t && e.members != nil && e.membersSeq == seq {
+		ms := e.members
+		m.mu.Unlock()
+		return ms
+	}
+	m.mu.Unlock()
+	ms := build()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e := m.installs[install]; e != nil && e.topo == t && (e.members == nil || e.membersSeq <= seq) {
+		e.membersSeq, e.members = seq, ms
+	}
+	return ms
 }
 
 // expired reports whether p's Next has come: at its instant, strict or not.

@@ -708,7 +708,14 @@ describe("GroupRow", () => {
     renderWithTheme(<DiagnosticsGroupRow group={group()} installId="kgw.kgateway" />);
     expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Proxies reject this Gateway's config")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /edge/ })).toBeInTheDocument();
+    // The whole row opens the cause: one link, with the row's hover and active and the link's focus ring.
+    const link = screen.getByRole("link", { name: "Proxies reject this Gateway's config, Gateway infra/edge" });
+    expect(link).toHaveAttribute("href", "/i/kgw.kgateway/gateways/infra/edge");
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByLabelText("infra/edge")).toBeInTheDocument();
+    const line = link.closest(".line") as Element;
+    expect(pseudoRules(line, ":hover").length > 0 && pseudoRules(line, ":active").length > 0).toBe(true);
+    expect(pseudoRules(link, ":focus-visible").join()).toContain("outline");
     expect(screen.getByText(diagnosticsCopy.affected(37))).toBeInTheDocument();
     expect(screen.getByText("5m ago")).toBeInTheDocument();
     expect(screen.getByText("KGWUI-001")).toBeInTheDocument();
@@ -720,6 +727,21 @@ describe("GroupRow", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
     expect(panel).toHaveTextContent("kubectl logs -n kgw kgateway-0");
+  });
+
+  it("two groups with the same title name their different causes in the link", () => {
+    const cause = (name: string) => ({ group: "", kind: "Service", namespace: "shop", name, link: "backend" as const });
+    const title = "This backend has no ready endpoints";
+    renderWithTheme(
+      <>
+        <DiagnosticsGroupRow group={group({ id: "a", title, cause: cause("cart") })} installId="kgw.kgateway" />
+        <DiagnosticsGroupRow group={group({ id: "b", title, cause: cause("pay") })} installId="kgw.kgateway" />
+      </>,
+    );
+    expect(screen.getAllByRole("link").map((l) => l.getAttribute("aria-label"))).toEqual([
+      `${title}, Service shop/cart`,
+      `${title}, Service shop/pay`,
+    ]);
   });
 
   it("a Not permitted group names its grant shape instead of a cause", () => {
@@ -820,10 +842,65 @@ describe("ProcessLine", () => {
     );
     expect(screen.getByText(diagnosticsCopy.gatewaysReady(2, 5))).toBeInTheDocument();
     expect(screen.getByText(diagnosticsCopy.rejecting(1))).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.skew(1))).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.restarting(1))).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.gatewaysNotObserved(1))).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway with version skew")).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway restarted recently")).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway not observed")).toBeInTheDocument();
     expect(screen.getByText("Error")).toBeInTheDocument();
+  });
+
+  it("the proxies line names Gateways in the plural", () => {
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{ state: "error", gateways: 9, ready: 3, rejecting: 0, skew: 2, restarting: 3, notObserved: 4 }}
+      />,
+    );
+    expect(screen.getByText("2 Gateways with version skew")).toBeInTheDocument();
+    expect(screen.getByText("3 Gateways restarted recently")).toBeInTheDocument();
+    expect(screen.getByText("4 Gateways not observed")).toBeInTheDocument();
+  });
+
+  it("the proxies line leaves self-managed Gateways out of the ready count", () => {
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{
+          state: "error",
+          gateways: 6,
+          ready: 4,
+          rejecting: 4,
+          skew: 0,
+          restarting: 0,
+          notObserved: 1,
+          selfManaged: 1,
+        }}
+      />,
+    );
+    expect(screen.getByText("4 of 5 Gateways ready")).toBeInTheDocument();
+    expect(screen.getByText("4 Gateways reject config")).toBeInTheDocument();
+    expect(screen.getByText("1 self-managed Gateway")).toBeInTheDocument();
+    expect(screen.queryByText(/not observed/)).toBeNull();
+  });
+
+  it("a proxies line of only self-managed Gateways shows no ready count", () => {
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{
+          state: "unknown",
+          gateways: 2,
+          ready: 0,
+          rejecting: 0,
+          skew: 0,
+          restarting: 0,
+          notObserved: 2,
+          selfManaged: 2,
+        }}
+      />,
+    );
+    expect(screen.getByText(diagnosticsCopy.selfManaged(2))).toBeInTheDocument();
+    expect(screen.queryByText(/Gateways ready/)).toBeNull();
+    expect(screen.queryByText(/not observed/)).toBeNull();
   });
 });
 

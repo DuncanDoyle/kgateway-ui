@@ -69,7 +69,7 @@
               "ref": {
                 "group": "",
                 "kind": "Service",
-                "link": "none",
+                "link": "backend",
                 "name": "lonely-svc",
                 "namespace": "shop"
               },
@@ -81,7 +81,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "lonely-svc",
           "namespace": "shop"
         },
@@ -120,7 +120,7 @@
         "ref": {
           "group": "gateway.kgateway.dev",
           "kind": "Backend",
-          "link": "yaml",
+          "link": "backend",
           "name": "be-used",
           "namespace": "shop"
         },
@@ -165,7 +165,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "cart-svc",
           "namespace": "shop"
         },
@@ -207,7 +207,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "ext-svc",
           "namespace": "shop"
         },
@@ -252,7 +252,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "named-svc",
           "namespace": "shop"
         },
@@ -285,7 +285,7 @@
               "ref": {
                 "group": "",
                 "kind": "Service",
-                "link": "none",
+                "link": "backend",
                 "name": "other-svc",
                 "namespace": "shop"
               },
@@ -297,7 +297,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "other-svc",
           "namespace": "shop"
         },
@@ -317,7 +317,7 @@
               "ref": {
                 "group": "",
                 "kind": "Service",
-                "link": "none",
+                "link": "backend",
                 "name": "authz",
                 "namespace": "shop"
               },
@@ -329,7 +329,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "authz",
           "namespace": "shop"
         },
@@ -349,7 +349,7 @@
               "ref": {
                 "group": "",
                 "kind": "Service",
-                "link": "none",
+                "link": "backend",
                 "name": "mirror-svc",
                 "namespace": "shop"
               },
@@ -361,7 +361,7 @@
         "ref": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "mirror-svc",
           "namespace": "shop"
         },
@@ -386,7 +386,7 @@
         "ref": {
           "group": "gateway.kgateway.dev",
           "kind": "Backend",
-          "link": "none",
+          "link": "backend",
           "name": "be-unused",
           "namespace": "shop"
         },
@@ -411,7 +411,7 @@
         "ref": {
           "group": "gateway.kgateway.dev",
           "kind": "Backend",
-          "link": "yaml",
+          "link": "backend",
           "name": "be1",
           "namespace": "shop"
         },

@@ -57,6 +57,8 @@ export function BackendPage({ stylesOverride }: BackendPageProps = {}) {
       noun={kind}
       data={frameData}
       error={error}
+      // The status line is this page's problem strip.
+      ownProblem
       trailRefs={trailRefs}
       yaml={!service}
       stylesOverride={stylesOverride}

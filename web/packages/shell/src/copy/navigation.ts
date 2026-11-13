@@ -14,7 +14,7 @@ export const breadcrumbsCopy = {
 
 // region Object header
 export const objectHeaderCopy = {
-  namespace: "namespace", // S299
+  namespace: "namespace:", // S299
 };
 
 // region Data age

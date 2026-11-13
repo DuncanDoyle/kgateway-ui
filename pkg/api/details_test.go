@@ -485,7 +485,7 @@ func TestRouteDetailValuesEasyToGetWrong(t *testing.T) {
 		t.Errorf("config as written: %+v", f)
 	}
 	m1, m2 := r.Filters[1].Mirror, r.Filters[2].Mirror
-	if m1 == nil || m1.BackendRef.Ref != (objects.Ref{Kind: "Service", Namespace: "shop", Name: "mirror-svc"}) || m1.BackendRef.Link != LinkNone ||
+	if m1 == nil || m1.BackendRef.Ref != (objects.Ref{Kind: "Service", Namespace: "shop", Name: "mirror-svc"}) || m1.BackendRef.Link != LinkBackend ||
 		m1.Port != 80 || m1.Percent == nil || *m1.Percent != 10 || m1.Fraction != nil {
 		t.Errorf("mirror percent %+v", m1)
 	}
@@ -508,7 +508,7 @@ func TestRouteDetailValuesEasyToGetWrong(t *testing.T) {
 	if b[2].Weight != 0 || b[2].WeightDefaulted || b[2].Port != 0 {
 		t.Errorf("explicit weight 0, absent port %+v", b[2])
 	}
-	if be := b[3]; be.Ref.Ref != backendRef("shop", "be1") || be.Ref.Link != LinkYAML || be.Backend == nil || be.Backend.State != "healthy" ||
+	if be := b[3]; be.Ref.Ref != backendRef("shop", "be1") || be.Ref.Link != LinkBackend || be.Backend == nil || be.Backend.State != "healthy" ||
 		be.Backend.Accepted == nil || be.Backend.Accepted.Status != "True" || be.Backend.Restricted {
 		t.Errorf("Backend ref %+v %+v", be.Ref, be.Backend)
 	}
@@ -887,7 +887,7 @@ func TestRouteDetailTraceKeysOnly(t *testing.T) {
 	if err := json.Unmarshal(wire(t, srv, routeDetail+"shop/mid"), &body); err != nil {
 		t.Fatal(err)
 	}
-	top := []string{"install", "ref", "generation", "health", "ruleSet", "ruleSetLabel", "hostnames", "annotations", "parentRefs", "parents",
+	top := []string{"install", "ref", "generation", "health", "reason", "ruleSet", "ruleSetLabel", "hostnames", "annotations", "parentRefs", "parents",
 		"attachments", "serves", "rules", "effective", "effectiveTruncated", "ancestors", "ancestorsTruncated", "childCount", "declaredCount", "collectedAt"}
 	ref := []string{"ref", "port", "weight", "weightDefaulted", "filters", "delegation", "backend", "share", "shareState", "problem", "endpoints"}
 	only := func(what string, m map[string]any, keys []string) {

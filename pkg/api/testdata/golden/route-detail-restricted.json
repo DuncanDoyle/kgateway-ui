@@ -970,6 +970,13 @@
         }
       }
     ],
+    "reason": {
+      "code": "KGWUI-013",
+      "finding": "f1-3wufqpqyklpby4glalwrwjzzqb",
+      "kind": "finding",
+      "message": "Backend not found",
+      "more": 6
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "HTTPRoute",
@@ -1240,7 +1247,7 @@
                   "ref": {
                     "group": "",
                     "kind": "Service",
-                    "link": "none",
+                    "link": "backend",
                     "name": "cart-svc",
                     "namespace": "shop"
                   },
@@ -1252,7 +1259,7 @@
             "ref": {
               "group": "",
               "kind": "Service",
-              "link": "none",
+              "link": "backend",
               "name": "cart-svc",
               "namespace": "shop"
             },
@@ -1296,7 +1303,7 @@
                   "backendRef": {
                     "group": "",
                     "kind": "Service",
-                    "link": "none",
+                    "link": "backend",
                     "name": "mirror-svc",
                     "namespace": "shop"
                   },
@@ -1327,7 +1334,7 @@
                   "ref": {
                     "group": "",
                     "kind": "Service",
-                    "link": "none",
+                    "link": "backend",
                     "name": "w1",
                     "namespace": "shop"
                   },
@@ -1339,7 +1346,7 @@
             "ref": {
               "group": "",
               "kind": "Service",
-              "link": "none",
+              "link": "backend",
               "name": "w1",
               "namespace": "shop"
             },
@@ -1375,7 +1382,7 @@
                   "ref": {
                     "group": "",
                     "kind": "Service",
-                    "link": "none",
+                    "link": "backend",
                     "name": "w0",
                     "namespace": "shop"
                   },
@@ -1387,7 +1394,7 @@
             "ref": {
               "group": "",
               "kind": "Service",
-              "link": "none",
+              "link": "backend",
               "name": "w0",
               "namespace": "shop"
             },
@@ -1441,7 +1448,7 @@
               "backendRef": {
                 "group": "",
                 "kind": "Service",
-                "link": "none",
+                "link": "backend",
                 "name": "mirror-svc",
                 "namespace": "shop"
               },
@@ -1466,7 +1473,7 @@
               "backendRef": {
                 "group": "",
                 "kind": "Service",
-                "link": "none",
+                "link": "backend",
                 "name": "mirror-frac",
                 "namespace": "shop"
               },
@@ -1540,7 +1547,7 @@
                   "ref": {
                     "group": "",
                     "kind": "Service",
-                    "link": "none",
+                    "link": "backend",
                     "name": "cart-svc",
                     "namespace": "shop"
                   },
@@ -1552,7 +1559,7 @@
             "ref": {
               "group": "",
               "kind": "Service",
-              "link": "none",
+              "link": "backend",
               "name": "cart-svc",
               "namespace": "shop"
             },

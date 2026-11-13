@@ -331,6 +331,8 @@ export interface ProxySummary {
   skew: number;
   restarting: number;
   notObserved: number;
+  /** Gateways whose proxies kgateway does not run; also counted in notObserved. Absent from older servers. */
+  selfManaged?: number;
 }
 export interface DataPlaneSummary {
   gateways: number;

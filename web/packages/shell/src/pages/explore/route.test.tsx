@@ -1,18 +1,19 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
 import candidateGolden from "../../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
 import restrictedGolden from "../../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
-import type { Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
+import type { BackendRef, Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
 import { routeCopy } from "../../copy/explorer";
 import { trafficCopy } from "../../copy/traffic";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
 import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
+import type { HealthState } from "../../theme/tokens";
 import { HEADER_H } from "./detailParts";
 import { RoutePage } from "./RoutePage";
 
@@ -20,6 +21,8 @@ const ID = "kgw.kgateway";
 const GW = "gateway.networking.k8s.io";
 const API = `/api/v1/installs/${ID}`;
 const MID = `/i/${ID}/routes/${GW}/HTTPRoute/shop/mid`;
+/** mid with its three rules open, as a link with ?open= draws it. */
+const MID_OPEN = `${MID}?open=1,2,3`;
 const FAR = `/i/${ID}/routes/${GW}/HTTPRoute/blog/far`;
 const MID_PARAM = `${GW}/HTTPRoute/shop/mid`;
 const now = () => new Date().toISOString();
@@ -303,7 +306,7 @@ it("an implicit child shows a card for each status entry its parentRefs do not n
 
 it("stale route data turns every state on the page unknown", async () => {
   serve(api({ mid: { ...detail(routeGolden), collectedAt: new Date(Date.now() - 10 * 60_000).toISOString() } }));
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   await screen.findByText(/Data is stale/);
   expect(within(screen.getByTestId("detail-header")).getByText("Unknown")).toBeInTheDocument();
@@ -319,7 +322,7 @@ it("stale route data turns every state on the page unknown", async () => {
 
 it("each backendRef links to its backend detail, and the route links to Traffic with route=", async () => {
   serve(api());
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   // The routes-using-this-backend lookup became the backend detail link (Phase 6 design §7.1).
   expect(screen.queryByRole("link", { name: "Other routes using this backend" })).toBeNull();
@@ -342,7 +345,7 @@ it("each backendRef links to its backend detail, and the route links to Traffic 
 
 it("delegation refs show their mode and status state", async () => {
   serve(api());
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   const r = rule(1);
   expect(hrefPath(within(backend("child")).getByRole("link", { name: /shop\/child/ }))).toBe(
@@ -358,7 +361,7 @@ it("delegation refs show their mode and status state", async () => {
 
 it("absent weight shows 1 marked as defaulted; absent port shows nothing", async () => {
   serve(api());
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   const weight = (name: string) => within(backend(name)).getByTestId("weight").textContent;
   expect(weight("cart-svc")).toBe("Weight 1 (default)");
@@ -370,7 +373,7 @@ it("absent weight shows 1 marked as defaulted; absent port shows nothing", async
 
 it("mirror filters show their target and percentage; filters keep written order", async () => {
   serve(api());
-  mount(MID);
+  mount(`${MID}?rule=2`);
   await loaded();
   const filters = within(rule(2)).getAllByTestId("filter");
   // The rule's own filters, then w1's; each in written order.
@@ -400,7 +403,7 @@ it("matches render as written; an explicit empty list is not the default match",
   const d = detail(routeGolden);
   (d.rules[0] as RouteDetail["rules"][number]).matches = [];
   serve(api({ mid: d }));
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   // Explicit matches: [] reaches the SPA empty and keeps its own line (computed-rules §3.2, §6).
   expect(within(rule(1)).queryByTestId("match")).toBeNull();
@@ -419,7 +422,7 @@ it("matches render as written; an explicit empty list is not the default match",
 
 it("restricted objects show no names or data", async () => {
   serve(api({ mid: detail(restrictedGolden) }));
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   // A hidden Backend: its spec ref as text, "Restricted", no condition.
   const be1 = backend("be1");
@@ -481,7 +484,7 @@ it("the header and tabs keep their size from loading to loaded", async () => {
 });
 
 describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", (theme) => {
-  it("up-chain links, the Traffic and backend links and the expanders have hover, active and focus-visible styles", async () => {
+  it("up-chain links, the Traffic and backend links, the rule rows and the expanders have hover, active and focus-visible styles", async () => {
     serve(api());
     mount(FAR, theme.id);
     await loaded();
@@ -490,7 +493,7 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
     expect(more).toHaveFocus();
     const els: HTMLElement[] = [more];
     serve(api());
-    const r = mount(MID, theme.id);
+    const r = mount(MID_OPEN, theme.id);
     const nav = await within(r.container).findByRole("navigation", { name: "Route parents" });
     const step = within(nav).getAllByRole("link")[0] as HTMLElement;
     step.focus();
@@ -500,6 +503,7 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
       within(r.container).getByRole("button", { name: "Show child routes" }),
       within(r.container).getByRole("link", { name: trafficCopy.routeEntry }),
       within(r.container).getAllByRole("link", { name: /shop\/cart-svc/ })[0] as HTMLElement,
+      within(within(r.container).getAllByTestId("rule-row")[0] as HTMLElement).getByRole("button"),
     );
     for (const el of els)
       for (const pseudo of [":hover", ":active", ":focus-visible"])
@@ -522,7 +526,7 @@ function withBe1(state: "healthy" | "unknown", accepted: Partial<Condition>) {
 
 it("an evidence-less Backend condition shows the unknown icon and says the version is not reported", async () => {
   serve(api({ mid: withBe1("unknown", { observedGeneration: 0 }) }));
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   const c = within(backend("be1")).getByTestId("condition-Accepted");
   expect(c).toHaveTextContent("Accepted: True");
@@ -534,7 +538,7 @@ it("an evidence-less Backend condition shows the unknown icon and says the versi
 
 it("a stale Backend condition shows the unknown icon, not Configuration accepted", async () => {
   serve(api({ mid: withBe1("unknown", { stale: true }) }));
-  mount(MID);
+  mount(MID_OPEN);
   await loaded();
   const c = within(backend("be1")).getByTestId("condition-Accepted");
   expect(c).toHaveTextContent("Accepted: True");
@@ -663,4 +667,190 @@ it("from 1600 px the up-chain and parents render in the side column; below, at t
     view.unmount();
     vi.unstubAllGlobals();
   }
+});
+
+describe("a route's rule table", () => {
+  /** n rules, one Service each; rule 3 is an error, rule 5 a warning, rule 2 has no problem data, rule 7 is named. */
+  function longRoute(n: number): RouteDetail {
+    const d = detail(routeGolden);
+    const ref = d.rules[1]?.backendRefs[0] as BackendRef;
+    const states: Record<number, HealthState | undefined> = { 2: undefined, 3: "error", 5: "warning" };
+    d.rules = Array.from({ length: n }, (_, i) => {
+      const k = i + 1;
+      const letter = String.fromCharCode(96 + k);
+      const state = k in states ? states[k] : "healthy";
+      return {
+        index: i,
+        name: k === 7 ? "checkout" : undefined,
+        matches: [{ path: { type: "PathPrefix", value: `/store/${letter}` } }],
+        filters: k === 8 ? [{ type: "RequestHeaderModifier" }] : [],
+        backendRefs: [
+          {
+            ...ref,
+            ref: { ...ref.ref, name: `svc-${letter}` },
+            filters: [],
+            problem: state ? { state, signals: [] } : undefined,
+          },
+        ],
+      };
+    });
+    return d;
+  }
+  const rows = () => screen.queryAllByTestId("rule-row");
+  const openRegions = () => screen.queryAllByRole("region", { name: /^Rule \d+\b/ });
+  const rowButton = (n: number) => within(rows()[n - 1] as HTMLElement).getByRole("button");
+  /** The page's current query string, from a probe beside the page. */
+  function Probe() {
+    const navigate = useNavigate();
+    return (
+      <>
+        <output data-testid="search">{useLocation().search}</output>
+        <button type="button" onClick={() => navigate(`${MID}?rule=7`)}>
+          link to rule 7
+        </button>
+      </>
+    );
+  }
+  function mountLong(rules: number, query = "") {
+    serve(api({ mid: longRoute(rules) }));
+    return renderWithTheme(
+      <Routes>
+        <Route
+          path="/i/:id/routes/:group/:kind/:ns/:name"
+          element={
+            <>
+              <RoutePage />
+              <Probe />
+            </>
+          }
+        />
+      </Routes>,
+      { path: `${MID}${query}` },
+    );
+  }
+
+  it("a single-rule route renders one row with its rule open", async () => {
+    mountLong(1);
+    await loaded();
+    expect(rows()).toHaveLength(1);
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 1"]);
+    expect(rowButton(1)).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: routeCopy.collapseAll })).toBeInTheDocument();
+  });
+
+  it("three rules render compact rows; only the error rule starts open", async () => {
+    mountLong(3);
+    await loaded();
+    expect(rows()).toHaveLength(3);
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 3"]);
+    expect(screen.getByRole("button", { name: routeCopy.expandAll })).toBeInTheDocument();
+  });
+
+  it("nine rules render compact rows with the error and warning rules open; a row click toggles its rule", async () => {
+    mountLong(9);
+    await loaded();
+    expect(rows()).toHaveLength(9);
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 3", "Rule 5"]);
+    expect(rowButton(3)).toHaveAttribute("aria-expanded", "true");
+    expect(rowButton(5)).toHaveAttribute("aria-expanded", "true");
+    expect(rowButton(1)).toHaveAttribute("aria-expanded", "false");
+    expect(rowButton(1)).toHaveAttribute("aria-controls");
+    // One line per rule: match, filter count, backends, state; no state without problem data.
+    expect(rows()[7]).toHaveTextContent("PathPrefix /store/h");
+    expect(rows()[7]).toHaveTextContent("1 filter");
+    expect(rows()[7]).toHaveTextContent("svc-h");
+    expect(within(rowButton(3)).getByText("Error")).toBeInTheDocument();
+    expect(within(rowButton(2)).queryByText(/Healthy|Error|Warning|Unknown/)).toBeNull();
+    expect(rows()[6]).toHaveTextContent("checkout");
+
+    await userEvent.click(rowButton(1));
+    expect(rowButton(1)).toHaveAttribute("aria-expanded", "true");
+    const body = screen.getByRole("region", { name: /^Rule 1\b/ });
+    expect(rowButton(1).getAttribute("aria-controls")).toBe(body.id);
+    expect(within(body).getByTestId("backend-svc-a")).toBeInTheDocument();
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("1,3,5");
+    await userEvent.click(rowButton(3));
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 1", "Rule 5"]);
+    await userEvent.click(rowButton(1));
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 5"]);
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("5");
+  });
+
+  it("Problems only keeps the rules with a problem and counts them", async () => {
+    mountLong(9);
+    await loaded();
+    await userEvent.click(screen.getByRole("button", { name: routeCopy.problemsOnly }));
+    expect(rows().map((r) => within(r).getByRole("button").textContent)).toEqual([
+      expect.stringContaining("Rule 3"),
+      expect.stringContaining("Rule 5"),
+    ]);
+    expect(screen.getByTestId("rule-count")).toHaveTextContent("2 of 9 rules");
+    expect(screen.getByTestId("search")).toHaveTextContent("problems=1");
+  });
+
+  it("the search matches paths and backend names, and says when nothing matches", async () => {
+    mountLong(9);
+    await loaded();
+    const box = screen.getByRole("searchbox", { name: routeCopy.searchRules });
+    await userEvent.type(box, "/store/h");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toHaveTextContent("Rule 8");
+    expect(screen.getByTestId("rule-count")).toHaveTextContent("1 of 9 rules");
+    await userEvent.clear(box);
+    await userEvent.type(box, "SVC-G");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toHaveTextContent("Rule 7");
+    await userEvent.type(box, "zzz");
+    expect(rows()).toHaveLength(0);
+    expect(screen.getByTestId("rule-empty")).toHaveTextContent(routeCopy.noRuleMatch);
+  });
+
+  it("?rule=7 opens rule 7 and scrolls it into view", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mountLong(9, "?rule=7");
+    await loaded();
+    expect(screen.getByRole("region", { name: /^Rule 7\b/ })).toBeInTheDocument();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(rows()[6]);
+    // jsdom has no scrollIntoView; the page calls it only when present.
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("?problems=1&rule=7 still shows and opens the healthy rule 7", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mountLong(9, "?problems=1&rule=7");
+    await loaded();
+    expect(rows().map((r) => within(r).getByRole("button").textContent)).toEqual([
+      expect.stringContaining("Rule 3"),
+      expect.stringContaining("Rule 5"),
+      expect.stringContaining("Rule 7"),
+    ]);
+    expect(screen.getByRole("region", { name: /^Rule 7\b/ })).toBeInTheDocument();
+    expect(scroll.mock.contexts).toEqual([rows()[2]]);
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("changing ?rule=3 to ?rule=7 on the same page scrolls to rule 7", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mountLong(9, "?rule=3");
+    await loaded();
+    expect(scroll.mock.contexts).toEqual([rows()[2]]);
+    await userEvent.click(screen.getByRole("button", { name: "link to rule 7" }));
+    expect(screen.getByRole("region", { name: /^Rule 7\b/ })).toBeInTheDocument();
+    expect(scroll.mock.contexts).toEqual([rows()[2], rows()[6]]);
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("Expand all opens every rule, Collapse all closes them", async () => {
+    mountLong(9);
+    await loaded();
+    await userEvent.click(screen.getByRole("button", { name: routeCopy.expandAll }));
+    expect(openRegions()).toHaveLength(9);
+    await userEvent.click(screen.getByRole("button", { name: routeCopy.collapseAll }));
+    expect(openRegions()).toHaveLength(0);
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("none");
+  });
 });

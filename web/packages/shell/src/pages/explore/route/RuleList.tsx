@@ -1,7 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { dump } from "js-yaml";
-import { useContext } from "react";
+import { useContext, useEffect, useRef } from "react";
 import type { BackendRef, Condition, DelegationRef, Filter, Rule, TraceAttachment } from "../../../api/types";
 import { delegationCopy, routeCopy, traceCopy } from "../../../copy/explorer";
 import { ComputedBadge } from "../../../explore/ComputedBadge";
@@ -17,6 +17,7 @@ import { installPath } from "../../../shell/paths";
 import { InlineLink } from "../../../states/controls";
 import type { HealthState } from "../../../theme/tokens";
 import { tcpKind } from "../../traffic/pathText";
+import { DetailParams } from "../detailParts";
 import { MatchLine } from "./MatchLine";
 import { RefFacts, RefWhy } from "./RefTrace";
 import { backendParam } from "./refs";
@@ -28,7 +29,7 @@ const Rules = styled.div<{ stylesOverride?: SerializedStyles }>`
   gap: ${(p) => p.theme.space(3)};
   ${(p) => p.stylesOverride}
 `;
-const RuleBox = styled.section`
+export const RuleBox = styled.section`
   display: grid;
   gap: ${(p) => p.theme.space(3)};
   min-width: 0;
@@ -314,6 +315,91 @@ function BackendItem({ b, installId, serves, tcp }: BackendItemProps) {
 }
 
 // region Component
+interface RuleBodyProps {
+  installId: string;
+  kind: string;
+  rule: Rule;
+  serves: TraceAttachment[];
+}
+
+/** One rule's match, filters as written, share bar and backend lines; both the full list and the table show it. */
+export function RuleBody({ installId, kind, rule: r, serves }: RuleBodyProps) {
+  const tcp = tcpKind(kind);
+  return (
+    <>
+      {/* TCPRoute and TLSRoute rules match every connection; the Filters area stays (§7.3). */}
+      {tcp ? null : (
+        <div>
+          <h4>{routeCopy.matches}</h4>
+          {/* Omitted matches arrive with the CRD default; only an explicit [] is empty (computed-rules §3.2). */}
+          {/* A GRPCRoute's omitted or empty matches match every method. */}
+          {r.matches.length || kind === "GRPCRoute" ? (
+            <ul>
+              {(r.matches.length ? r.matches : [{}]).map((m, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: positional
+                <li key={i} className="line" data-testid="match">
+                  <MatchLine m={m} grpc={kind === "GRPCRoute"} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="muted" data-testid="match-empty">
+              {routeCopy.emptyMatches}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="filters" data-testid="rule-filters">
+        <h4>{routeCopy.filters}</h4>
+        {r.filters.length ? (
+          <FilterList filters={r.filters} installId={installId} />
+        ) : (
+          <span className="muted">{traceCopy.noFilters}</span>
+        )}
+      </div>
+      <div className="refs">
+        <h4>{routeCopy.backendRefs}</h4>
+        <ShareBar refs={r.backendRefs} tcp={tcp} />
+        {r.backendRefs.length ? (
+          <ul>
+            {r.backendRefs.map((b, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the same backend may repeat in a rule
+              <BackendItem key={i} b={b} installId={installId} serves={serves} tcp={tcp} />
+            ))}
+          </ul>
+        ) : (
+          <span className="muted">{routeCopy.noBackendRefs}</span>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** A rule's display title: its number and, when set, its name. */
+export const ruleTitle = (r: Rule) => `${routeCopy.rule(r.index + 1)}${r.name ? ` ${r.name}` : ""}`;
+
+/** The element id of rule n (1-based), which ?rule=n scrolls into view. */
+export const ruleAnchor = (n: number) => `rule-${n}`;
+
+/** ?rule=n (1-based) as a number, when it names one of rules. */
+export function linkedRule(params: URLSearchParams | undefined, rules: Rule[]): number | undefined {
+  const n = Number(params?.get("rule"));
+  return rules.some((r) => r.index + 1 === n) ? n : undefined;
+}
+
+/** Scrolls ?rule=n's element into view once per distinct n, on the first render that has the element. */
+export function useScrollToRule(n: number | undefined) {
+  const scrolled = useRef<number>(undefined);
+  useEffect(() => {
+    if (n === undefined) scrolled.current = undefined;
+    if (n === undefined || scrolled.current === n) return;
+    const el = document.getElementById(ruleAnchor(n));
+    if (!el) return;
+    scrolled.current = n;
+    el.scrollIntoView?.({ block: "start" });
+  });
+}
+
 interface RuleListProps {
   installId: string;
   /** The route's kind: TCPRoute and TLSRoute rules have no matches, and connections fail. */
@@ -326,68 +412,23 @@ interface RuleListProps {
 
 /**
  * The route trace (design §7.1): each spec rule's match, filters as written, share bar, and one line per backendRef
- * or delegation ref with its share, endpoints and problem.
+ * or delegation ref with its share, endpoints and problem. Every rule is open; long routes use the rule table.
  */
 export function RuleList({ installId, kind, rules, serves = [], stylesOverride }: RuleListProps) {
-  const tcp = tcpKind(kind);
+  const [params] = useContext(DetailParams) ?? [];
+  useScrollToRule(linkedRule(params, rules));
   if (!rules.length) return <p>{routeCopy.noRules}</p>;
   return (
     <Rules stylesOverride={stylesOverride}>
-      {rules.map((r) => {
-        const title = `${routeCopy.rule(r.index + 1)}${r.name ? ` ${r.name}` : ""}`;
-        return (
-          <RuleBox key={r.index} aria-label={title}>
-            <h3>
-              {routeCopy.rule(r.index + 1)}
-              {r.name ? <span className="name">{r.name}</span> : null}
-            </h3>
-            {/* TCPRoute and TLSRoute rules match every connection; the Filters area stays (§7.3). */}
-            {tcp ? null : (
-              <div>
-                <h4>{routeCopy.matches}</h4>
-                {/* Omitted matches arrive with the CRD default; only an explicit [] is empty (computed-rules §3.2). */}
-                {/* A GRPCRoute's omitted or empty matches match every method. */}
-                {r.matches.length || kind === "GRPCRoute" ? (
-                  <ul>
-                    {(r.matches.length ? r.matches : [{}]).map((m, i) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: positional
-                      <li key={i} className="line" data-testid="match">
-                        <MatchLine m={m} grpc={kind === "GRPCRoute"} />
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <span className="muted" data-testid="match-empty">
-                    {routeCopy.emptyMatches}
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="filters" data-testid="rule-filters">
-              <h4>{routeCopy.filters}</h4>
-              {r.filters.length ? (
-                <FilterList filters={r.filters} installId={installId} />
-              ) : (
-                <span className="muted">{traceCopy.noFilters}</span>
-              )}
-            </div>
-            <div className="refs">
-              <h4>{routeCopy.backendRefs}</h4>
-              <ShareBar refs={r.backendRefs} tcp={tcp} />
-              {r.backendRefs.length ? (
-                <ul>
-                  {r.backendRefs.map((b, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: the same backend may repeat in a rule
-                    <BackendItem key={i} b={b} installId={installId} serves={serves} tcp={tcp} />
-                  ))}
-                </ul>
-              ) : (
-                <span className="muted">{routeCopy.noBackendRefs}</span>
-              )}
-            </div>
-          </RuleBox>
-        );
-      })}
+      {rules.map((r) => (
+        <RuleBox key={r.index} id={ruleAnchor(r.index + 1)} aria-label={ruleTitle(r)}>
+          <h3>
+            {routeCopy.rule(r.index + 1)}
+            {r.name ? <span className="name">{r.name}</span> : null}
+          </h3>
+          <RuleBody installId={installId} kind={kind} rule={r} serves={serves} />
+        </RuleBox>
+      ))}
     </Rules>
   );
 }

@@ -59,6 +59,9 @@ const (
 	// FlagGatewayRejecting: the row's current status is True for a Gateway
 	// with an active KGWUI-001 (design §8.4).
 	FlagGatewayRejecting
+	// FlagBackendProblem: a rule backendRef of the row names a backend with an
+	// error or warning finding (D-082).
+	FlagBackendProblem
 )
 
 // flagNames are the wire names of design §6.1, in bit order.
@@ -77,6 +80,7 @@ var flagNames = []struct {
 	{FlagListenerUnknown, "listener-unknown"},
 	{FlagDropped, "dropped"},
 	{FlagGatewayRejecting, "gateway-rejecting"},
+	{FlagBackendProblem, "backend-problem"},
 }
 
 // ParseFlag returns the flag with wire name s.
@@ -152,6 +156,8 @@ type RouteRow struct {
 	Children int
 	Flags    Flag
 	State    health.State
+	// Backend is the first backend that sets FlagBackendProblem; nil without it.
+	Backend *objects.Ref
 	// Owned is true when the install owns the route.
 	Owned bool
 	// Computed is view A per parentRef to a Gateway or ListenerSet, in parentRef order.
@@ -400,6 +406,22 @@ func RowState(ref objects.Ref, rep health.Report) health.State {
 	return w.State(requiredNotOK(rep))
 }
 
+// RouteReason is route row id's reason: Worst.Reason, except that a warning no
+// own finding decides is a rejecting Gateway's first, else a backend's (D-082).
+func (ix *Index) RouteReason(id RowID) *health.RowReason {
+	r := &ix.Routes[id]
+	out := ix.Findings[r.Ref].Reason(r.State)
+	if out == nil || out.Kind != health.ReasonGatewayRejecting || r.Flags&FlagGatewayRejecting != 0 || r.Backend == nil {
+		return out
+	}
+	w := ix.Findings[*r.Backend]
+	f := w.Error
+	if f == nil {
+		f = w.Warning
+	}
+	return &health.RowReason{Kind: health.ReasonBackendProblem, Code: f.Code, Message: f.Message}
+}
+
 // Add counts f and records it if it is the first error or warning.
 func (w Worst) Add(f *health.Finding) Worst {
 	w.N++
@@ -414,24 +436,32 @@ func (w Worst) Add(f *health.Finding) Worst {
 
 // Reason says why a row in state st with these findings is not healthy: its
 // deciding finding, the install-wide unknown, or else a rejecting Gateway,
-// the only other way to warning (D-063). It is nil for a healthy row.
+// the only other way to warning for a Gateway or ListenerSet (D-063). Route
+// rows use Index.RouteReason. It is nil for a healthy row.
 func (w Worst) Reason(st health.State) *health.RowReason {
-	var f *health.Finding
-	switch st {
-	case health.StateError:
-		f = w.Error
-	case health.StateWarning:
-		if f = w.Warning; f == nil {
-			return &health.RowReason{Kind: health.ReasonGatewayRejecting}
-		}
-	case health.StateUnknown:
+	f := w.Decider(st)
+	switch {
+	case st == health.StateWarning && f == nil:
+		return &health.RowReason{Kind: health.ReasonGatewayRejecting}
+	case st == health.StateUnknown:
 		return &health.RowReason{Kind: health.ReasonUnknown}
-	}
-	if f == nil {
+	case f == nil:
 		return nil
 	}
 	// The deciding finding is the object's most severe, so the rest are at its severity or lower.
 	return &health.RowReason{Kind: health.ReasonFinding, Code: f.Code, Message: f.Message, More: w.N - 1}
+}
+
+// Decider is the finding that decides state st: the first error or warning
+// at that severity, or nil.
+func (w Worst) Decider(st health.State) *health.Finding {
+	switch st {
+	case health.StateError:
+		return w.Error
+	case health.StateWarning:
+		return w.Warning
+	}
+	return nil
 }
 
 // State applies the row rule; unknown is set when a required check is not OK.

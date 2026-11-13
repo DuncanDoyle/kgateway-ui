@@ -123,6 +123,8 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 **Design question:** kgateway's merge semantics are translation logic (principle 4). The effective view must be built from policy ancestor status (`Merged`, `Overridden`, …), not from our own merge implementation. If that status is insufficient, the gap is raised upstream.
 
+**Design item (user, 2026-11-13): two signals per route.** Each route gets its own state and a separate traffic-path state, as the Gateway table's Data plane column sits beside its state. `gateway-rejecting` and `backend-problem` (D-082) move from the state into the path signal, and policy problems inherited from a parent join it. Phase 10 adds observed traffic (errors, 5xx) to the same signal.
+
 ### Phase 8 — Search & Route Tester
 **Status:** Not started
 **Docs:** `docs/phases/phase-8/`

@@ -94,6 +94,7 @@ import type {
   DelegationRef,
   DelegationRow,
   DeployerError,
+  DetailReason,
   Diagnostics,
   EffectiveContext,
   EffectiveEdge,
@@ -232,7 +233,7 @@ const shape = <T>(
 
 // The members of each union in types.ts; Record<U, 1> makes tsc require every member and nothing else.
 const healthState = { healthy: 1, warning: 1, error: 1, unknown: 1 } as const;
-const link = { link: { detail: 1, yaml: 1, none: 1 } } as const;
+const link = { link: { detail: 1, yaml: 1, backend: 1, none: 1 } } as const;
 const category = {
   category: {
     gatewayclass: 1,
@@ -531,7 +532,27 @@ const rowReason: Shape = {
         {},
         { kind: { "gateway-rejecting": 1 } },
       ),
+      "backend-problem": shape<Extract<RowReason, { kind: "backend-problem" }>>(
+        { kind: "!", code: "!", message: "?", backend: "?" },
+        { backend: linkedRef },
+        { kind: { "backend-problem": 1 } },
+      ),
     } satisfies Record<RowReason["kind"], Shape>,
+  },
+};
+// A detail page's reason: a row reason, and the deciding finding's id on kind finding.
+const detailReason: Shape = {
+  ...rowReason,
+  tagged: {
+    key: "kind",
+    by: {
+      ...(rowReason.tagged?.by ?? {}),
+      finding: shape<Extract<DetailReason, { kind: "finding" }>>(
+        { kind: "!", code: "!", message: "!", more: "?", finding: "?" },
+        {},
+        { kind: { finding: 1 } },
+      ),
+    },
   },
 };
 const row = shape<GatewayRow>(
@@ -752,6 +773,7 @@ const listenerSetDetail = shape<ListenerSetDetail>(
     ref: "!",
     generation: "!",
     health: "!",
+    reason: "?",
     candidate: "?",
     ruleSet: "?",
     ruleSetLabel: "?",
@@ -766,6 +788,7 @@ const listenerSetDetail = shape<ListenerSetDetail>(
   },
   {
     ref: linkedRef,
+    reason: detailReason,
     candidate,
     parent: linkedRef,
     conditions: condition,
@@ -953,6 +976,7 @@ const routeDetail = shape<RouteDetail>(
     ref: "!",
     generation: "!",
     health: "!",
+    reason: "?",
     candidate: "?",
     ruleSet: "?",
     ruleSetLabel: "?",
@@ -973,6 +997,7 @@ const routeDetail = shape<RouteDetail>(
   },
   {
     ref: linkedRef,
+    reason: detailReason,
     candidate,
     annotations: shape<RouteDetail["annotations"]>({ inheritParentMatcher: "?" }),
     parentRefs: specParentRef,
@@ -1091,7 +1116,16 @@ const diagnostics = shape<Diagnostics>(
           { state: healthState },
         ),
         proxies: shape<Diagnostics["processes"]["proxies"]>(
-          { state: "!", gateways: "!", ready: "!", rejecting: "!", skew: "!", restarting: "!", notObserved: "!" },
+          {
+            state: "!",
+            gateways: "!",
+            ready: "!",
+            rejecting: "!",
+            skew: "!",
+            restarting: "!",
+            notObserved: "!",
+            selfManaged: "?",
+          },
           {},
           { state: healthState },
         ),
@@ -1191,6 +1225,7 @@ const gatewayDetail = shape<GatewayDetail>(
     generation: "!",
     class: "!",
     health: "!",
+    reason: "?",
     candidate: "?",
     ruleSet: "?",
     ruleSetLabel: "?",
@@ -1206,6 +1241,7 @@ const gatewayDetail = shape<GatewayDetail>(
   },
   {
     ref: linkedRef,
+    reason: detailReason,
     candidate,
     conditions: condition,
     listeners: listener,
@@ -1577,8 +1613,9 @@ describe("types.ts matches the golden v1 wire format", () => {
       gatewayDetailGolden,
       routeDetailGolden,
       routeDetailRestrictedGolden,
+      refsGolden,
     ]);
-    for (const l of ["detail", "yaml", "none"]) expect(all).toContain(`"link":"${l}"`);
+    for (const l of ["detail", "yaml", "backend", "none"]) expect(all).toContain(`"link":"${l}"`);
     expect(routesRestrictedGolden.body.deniedInInstall).toBeGreaterThan(0);
     expect(routesRestrictedGolden.body.items.some((r) => r.parents.some((p) => "viaRestricted" in p))).toBe(true);
     expect(routesFilteredGolden.body.next).toBeTruthy();

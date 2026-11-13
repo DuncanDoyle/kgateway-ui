@@ -290,6 +290,7 @@
         "ready": 0,
         "rejecting": 2,
         "restarting": 0,
+        "selfManaged": 0,
         "skew": 0,
         "state": "error"
       }

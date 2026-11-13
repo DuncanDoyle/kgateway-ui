@@ -59,7 +59,8 @@ func (h *handler) pathList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, proj, kept := h.pathModel(p, i)
-	resp, err := pathsPage(p, i, h.view(r), t, proj, kept, q)
+	v := h.view(r)
+	resp, err := pathsPage(h.linker(v, p, i, t, proj), p, i, v, t, proj, kept, q)
 	if err != nil {
 		fail(w, err)
 		return
@@ -98,8 +99,8 @@ func projectInput(p *engine.Published, i *engine.InstallModel) paths.ProjectInpu
 	return paths.ProjectInput{Model: i, Next: m.Next, Snapshot: m.Snapshot, Now: m.ComputedAt, EndpointsCap: endpointsCap(i)}
 }
 
-// pathsPage is the page of t, projected by proj, that q asks for, as the caller of v may see it.
-func pathsPage(p *engine.Published, i *engine.InstallModel, v *view, t *paths.Topology, proj *paths.Projection, kept bool, q paths.Query) (PathsResponse, error) {
+// pathsPage is the page of t, projected by proj, that q asks for, as the caller of v may see it, linked by l.
+func pathsPage(l linker, p *engine.Published, i *engine.InstallModel, v *view, t *paths.Topology, proj *paths.Projection, kept bool, q paths.Query) (PathsResponse, error) {
 	var visible func(explore.DepSet) bool
 	if !v.all {
 		visible = func(d explore.DepSet) bool { return v.allowTable(t, d) }
@@ -109,7 +110,6 @@ func pathsPage(p *engine.Published, i *engine.InstallModel, v *view, t *paths.To
 		return PathsResponse{}, err
 	}
 	pg.Summary.Unmemoised = !kept
-	l := linkerFor(v, p.Model, i)
 	titles := findingTitles(i, proj, pg.Rows)
 	rows := make([]PathRowDTO, 0, len(pg.Rows))
 	for _, k := range pg.Rows {

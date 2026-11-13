@@ -99,6 +99,12 @@
         "progressing": false
       }
     },
+    "reason": {
+      "code": "KGWUI-019",
+      "finding": "f1-mdlewoy6r7n6yxhpjuvoji3bs4",
+      "kind": "finding",
+      "message": "Proxy restarted in the last 15 minutes"
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "Gateway",

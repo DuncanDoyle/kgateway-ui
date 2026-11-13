@@ -350,7 +350,7 @@
             "ref": {
               "group": "",
               "kind": "Service",
-              "link": "none",
+              "link": "backend",
               "name": "cart-svc",
               "namespace": "shop"
             },
@@ -369,7 +369,7 @@
                   "ref": {
                     "group": "",
                     "kind": "Service",
-                    "link": "none",
+                    "link": "backend",
                     "name": "other-svc",
                     "namespace": "shop"
                   },
@@ -409,7 +409,7 @@
             "ref": {
               "group": "",
               "kind": "Service",
-              "link": "none",
+              "link": "backend",
               "name": "other-svc",
               "namespace": "shop"
             },

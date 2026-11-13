@@ -5,6 +5,7 @@ import { explanationCopy } from "../../copy/backends";
 import { routeCopy } from "../../copy/explorer";
 import { SuggestedFixView } from "../../diagnostics/SuggestedFix";
 import { LinkedName } from "../../explore/LinkedName";
+import { linkTarget } from "../../explore/objectPath";
 import { Section } from "../explore/detailParts";
 
 // region Styles
@@ -68,7 +69,12 @@ export function Explanations({ installId, explanations, stylesOverride }: Explan
           >
             <div className="head">
               <span>
-                <span className="muted">{e.route.kind}</span> <LinkedName refValue={e.route} installId={installId} />
+                <span className="muted">{e.route.kind}</span>{" "}
+                <LinkedName
+                  refValue={e.route}
+                  installId={installId}
+                  to={linkTarget(installId, e.route, undefined, { rule: String(e.rule + 1) })}
+                />
               </span>
               <span>{routeCopy.rule(e.rule + 1)}</span>
               <span className="muted">

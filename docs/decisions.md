@@ -882,7 +882,7 @@ Measured on the reference machine, 5 runs per world:
 **Decision:**
 1. `GET …/diagnostics` is built per request from the published Model and the caller's view. Nothing per caller is retained.
 2. `ProcessSummary` is `{state, observed, ready?, desired?, version?, restricted?}`. `state` is the worst controller finding, 005 included; unknown when not observed and none fired (R62).
-3. `ProxySummary` is `{state, gateways, ready, rejecting, skew, restarting, notObserved}`, over visible Gateways. `state` is the worst known Gateway health in the row-state order; a healthy Gateway with unobserved proxies counts as unknown.
+3. `ProxySummary` is `{state, gateways, ready, rejecting, skew, restarting, notObserved, selfManaged}`, over visible Gateways. `selfManaged` counts Gateways with a KGWUI-010; they are also in `notObserved`. `state` is the worst known Gateway health in the row-state order; a healthy Gateway with unobserved proxies counts as unknown.
 4. `ProcessSummary` has no `restartsRecent`. A recent restart shows as a 019 group and on the Processes page, where `ProcessDTO.restartsRecent` is the named Pod's count.
 5. `dataPlane` is `{gateways, rejecting, unavailable?}`. `rejecting` counts Gateways with a 001 over every finding (§14 rule 18). `gateways` counts visible Gateways plus hidden ones a restricted 001 already names, so `rejecting` never exceeds it and no hidden count leaks. `withheld` waits for 024 (3.4).
 6. `DataPlaneDTO` on the Gateway page adds `rejecting`, `unavailable` (the xDS rejects check is not OK, so `rejecting: false` means unknown), `evidenceRestricted` and `proxyStats {available, unavailable?, reason?}` per Gateway. `snapshot` gains `by: "controller"`.
@@ -1321,3 +1321,47 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** Nothing here changes a budget, a finding code or the meaning of API v1. Each item can be reversed on its own.
 
 **Alternatives:** Wait for the user at each question: rejected under the away rule; only pushes, posts and approvals were queued.
+
+## D-079 — A `backend` link opens backend detail (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13)
+
+**Context:** Phase 6 added backend detail, but `link` (design §7.1) knew only `detail`, `yaml` and `none`. A group caused by a missing or unready Service read `none`, though its backend page opened from the Backends list.
+
+**Decision:** `link` gains `backend`: the ref is not `detail`, and backend detail serves it to this caller, absent or not. The link and the endpoint decide by the same listing (`paths.Backends` over `backendsInput`). `detail` wins over `backend`; `backend` wins over `yaml` and `none`. The resource endpoint and the reads that need an admitted object still use `admit`. A Needs attention row opens as a whole: its cause, else its one affected object, else its findings (`findings?group=`); a restricted group never opens. A findings list row keeps its two links, the resource and the finding page.
+
+**Consequences:** Adding an enum value to API v1 `link` is additive. Clients treat an unknown value like `none`, as the SPA does. A listed kgateway Backend now opens its backend page, whose YAML tab keeps `admit`'s rule.
+
+**Alternatives:** Derive the page from the kind in the SPA: rejected, links come from the server (§7.1).
+
+## D-080 — Detail pages carry their row's reason (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13)
+
+**Context:** From 1600 px a ListenerSet's conditions sit in the side column, so its Error badge has no cause in the column read first. The SPA derives no state (R62), and the detail responses had no reason.
+
+**Decision:** Gateway, ListenerSet and route detail gain an optional `reason`: the list row's reason from the same `explore.Worst.Reason`, plus `finding`, the deciding finding's id, on kind `finding`. A problem strip under the header shows it while the state is not healthy, with the first condition the condition list shows as failing (display only) and, on a ListenerSet, the parent Gateway. The header badge links to the strip. Backend detail keeps its status line as the strip.
+
+**Consequences:** API v1 grows by an optional field on three detail bodies (additive). List rows keep D-063's four keys.
+
+**Alternatives:** Pick a condition in the SPA as the cause: rejected, R62. Add the id to the list rows' reason: rejected, the lists have no use for it.
+
+## D-081 — Routes show their rules as a compact table (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13)
+
+**Context:** A route's detail page drew every rule open. With dozens of rules, finding one meant scrolling past all the others.
+
+**Decision:** Every route with rules shows them as a table: each rule is one fixed-height row (number and name, match summary, filter count, backends, state) that opens in place to the full rule. A rule's state is the worst `problem.state` of its backendRefs, as the map's rule node shows it; a rule with no problem data shows none. Error and warning rules, and a route's only rule, start open; the other rules start closed, for short routes too. Above the rows: a Problems only chip, a search box (paths, header and query names and values, methods, filter types, backends) and Expand all / Collapse all. The URL keeps `problems=1`, `q=` and `open=` (1-based rule numbers, `none` when all are closed; absent means the default). `rule=N` opens rule N and scrolls to it, on either layout; the map's rule nodes, Traffic's route cells and a backend's explanations link with it. While `rule=N` is in the URL, rule N shows even when Problems only or the search would hide it.
+
+**Consequences:** No API change. The detail frame shares its URL params through a context, so a section never adds a second `useUrlParams`.
+
+**Alternatives:** Draw short routes open and only long ones as a table: rejected by the user. Start every rule closed: rejected by the user, a problem rule should show why without a click. Keep the open rules in local state: rejected, reload and back would lose the place.
+
+## D-082 — A route with a backend problem is at least warning (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13); the user may revert it
+
+**Context:** A row's state came only from findings on its own object (Phase 2 design §6.3). KGWUI-023 sits on the Service, so a route sending to a Service without ready endpoints showed healthy, while its rule table showed that rule as Warning. A route to a missing Service showed error, because KGWUI-013 is on the route.
+
+**Decision:** A route (HTTPRoute, GRPCRoute, TCPRoute, TLSRoute) whose rule backendRefs name a backend with an active error or warning finding carries the flag `backend-problem` and is at least `warning`, whatever the finding's severity and the traffic share. An error of its own still shows `error`. The targets are those of the backends view (`Index.ByBackend`): never delegation refs or mirror targets. Info findings never count. It copies `gateway-rejecting` (Phase 3 design §8.4). `explore.Build` sets it once, and the route lists, route detail, the `state=backend-problem` filter and the Gateway and ListenerSet route tables read it from the row. Its reason is `{kind: "backend-problem", code, message, backend}`: the first such backend in rule order and its deciding finding. When both flags apply, the reason is `gateway-rejecting`. A caller who may not view the backend gets the same state and the code, without `message` or `backend` (D-013).
+
+**Consequences:** API v1, additive: a new flag and filter value, a reason kind, and `backend` on route reasons. Gateway and ListenerSet states are unchanged. A route to an idle Service now reads warning.
+
+**Alternatives:** Raise the route to the backend's severity: not taken, an error backend may carry only a small share of the traffic. Two signals per route, its own state and a separate traffic-path state (as the Gateway table's Data plane column): cleaner, since one badge now answers both "is it configured right" and "does its traffic work", but more UI work; a Phase 7 design question, covering `gateway-rejecting` too.

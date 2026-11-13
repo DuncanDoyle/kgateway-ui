@@ -263,7 +263,7 @@ describe("Gateway page sections", () => {
     expect(within(dp).getByText(dataPlaneCopy.snapshotNote)).toBeInTheDocument();
   });
 
-  it("Data plane headline says config withheld for a 024 error without rejects, never No rejects", async () => {
+  it("Data plane headline says config withheld for a 024 error without rejects, never Config accepted", async () => {
     serve((u) =>
       u.pathname === `${API}/gateways/infra/nack`
         ? gateway(dataPlaneGolden, {

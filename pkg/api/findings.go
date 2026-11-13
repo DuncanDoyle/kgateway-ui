@@ -225,7 +225,7 @@ func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, nil, nil)
 	items := make([]FindingRow, 0, len(pg.Items))
 	for _, k := range pg.Items {
 		items = append(items, findingRow(v, l, &fs[k]))
@@ -260,7 +260,7 @@ func (h *handler) findingGroups(w http.ResponseWriter, p *engine.Published, i *e
 		fail(w, err)
 		return
 	}
-	l, in := linkerFor(v, p.Model, i), stepsInput(p.Model, i)
+	l, in := h.linker(v, p, i, nil, nil), stepsInput(p.Model, i)
 	items := make([]GroupRow, 0, len(pg.Items))
 	for _, k := range pg.Items {
 		items = append(items, h.groupRow(v, l, &d.Groups[k], fs, d.Rank[tops[k]], in))
@@ -292,7 +292,7 @@ func (h *handler) findingDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := h.view(r)
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, nil, nil)
 	f := &fs[k]
 	row := findingRow(v, l, f)
 	var refs []objects.Ref

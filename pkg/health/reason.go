@@ -8,12 +8,15 @@ const (
 	ReasonUnknown = "unknown"
 	// ReasonGatewayRejecting: the row is warning only because its Gateway rejects config.
 	ReasonGatewayRejecting = "gateway-rejecting"
+	// ReasonBackendProblem: the route is warning only because a backend it sends to has a problem (D-082).
+	ReasonBackendProblem = "backend-problem"
 )
 
 // RowReason says why a list or overview row is not healthy; healthy rows have
 // none. Kind finding carries the deciding finding's code and message, never
 // its detail or evidence, and More counts the object's other findings, all of
-// which are of that severity or lower. The other kinds carry nothing else.
+// which are of that severity or lower. Kind backend-problem carries the
+// backend's deciding finding's code and message. The other kinds carry nothing else.
 type RowReason struct {
 	Kind    string `json:"kind"`
 	Code    string `json:"code,omitempty"`

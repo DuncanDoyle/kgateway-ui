@@ -38,6 +38,15 @@ func (h *handler) backendsInput(p *engine.Published, i *engine.InstallModel, v *
 	return in
 }
 
+// listedBackends reports the backends backendDetail serves the caller of v:
+// the ones Backends lists over the same input, so links and the endpoint
+// agree. The membership is memoised with t; only viewer checks run per request.
+func (h *handler) listedBackends(p *engine.Published, i *engine.InstallModel, v *view, t *paths.Topology) func(objects.Ref) bool {
+	in := h.backendsInput(p, i, v, t)
+	ms := h.pathMemo.Membership(p, i.Resolved.ID(), t, func() *paths.Membership { return paths.NewMembership(t, in) })
+	return func(ref objects.Ref) bool { return ms.Listed(t, in, ref) }
+}
+
 // backendList is GET …/backends (design §8.1): the install's backends as the
 // caller may see them, problems first by default.
 func (h *handler) backendList(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +67,7 @@ func (h *handler) backendList(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, t, proj)
 	sets := make([][]paths.Signal, 0, len(pg.Items))
 	for _, k := range pg.Items {
 		sets = append(sets, set.Items[k].Problem.Signals)
@@ -135,12 +144,12 @@ func (h *handler) backendDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b := &set.Items[0]
-	exposure, err := pathsPage(p, i, v, t, proj, kept, paths.Query{Backends: []objects.Ref{ref}})
+	l := h.linker(v, p, i, t, proj)
+	exposure, err := pathsPage(l, p, i, v, t, proj, kept, paths.Query{Backends: []objects.Ref{ref}})
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	l := linkerFor(v, p.Model, i)
 	titles := signalTitles(i, b.Problem.Signals)
 	out := BackendDetail{Install: i.Resolved.ID(), Ref: l.linked(ref), Kind: backendKind(b), Type: b.Type, Problem: problemDTO(l, titles, b.Problem),
 		Status: problemDTO(l, titles, paths.Problem{Signals: b.Own}).Signals, Exposure: exposure, Consumers: make([]ConsumerDTO, 0, len(b.Consumers)),

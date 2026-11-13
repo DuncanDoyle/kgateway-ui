@@ -8,6 +8,7 @@ import {
   columnCopy,
   listCopy,
   parentLineCopy,
+  routeStateBackendCopy,
   routeStateCopy,
   routeStateDataPlaneCopy,
   routeStateDelegationCopy,
@@ -136,11 +137,13 @@ function columns(installId: string): ObjectColumn<RouteRow>[] {
   ];
 }
 
-/** The data-plane flag (3.2); Phase 3 servers list the findings filters, and 3.1 never shipped alone. */
-const dataPlaneOptions: FilterOption[] = Object.entries(routeStateDataPlaneCopy).map(([value, label]) => ({
-  value,
-  label,
-}));
+/**
+ * The data-plane flag (3.2) and the backend flag (D-082); Phase 3 servers list the findings filters, and 3.1 never
+ * shipped alone. No /meta entry marks the backend flag: the SPA and server ship together (R65).
+ */
+const dataPlaneOptions: FilterOption[] = Object.entries({ ...routeStateDataPlaneCopy, ...routeStateBackendCopy }).map(
+  ([value, label]) => ({ value, label }),
+);
 
 // region Component
 interface RoutesPageProps {

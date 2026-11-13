@@ -22,7 +22,7 @@ import (
 
 const base = "/api/v1/installs/kgw.kgateway"
 
-// engineLinks computes links as the handler of a running engine does.
+// engineLinks computes admit as the handler of a running engine does; backend links are tested over HTTP.
 type engineLinks struct {
 	e     *engine.Engine
 	authz Authorizer
@@ -45,7 +45,47 @@ func (l engineLinks) link(t *testing.T, ref objects.Ref) Link {
 	t.Helper()
 	m, i := l.install(t)
 	h := &handler{src: l.e, authz: l.authz}
-	return linkerFor(h.view(httptest.NewRequest(http.MethodGet, "/", nil)), m, i).link(ref)
+	return linkerFor(h.view(httptest.NewRequest(http.MethodGet, "/", nil)), m, i).admit(ref)
+}
+
+// A group's backend cause links the backend page whenever backendDetail serves
+// it: a missing Service (013) and an existing one (023). A caller who may not view it gets none.
+func TestGroupCauseLinksTheBackendPage(t *testing.T) {
+	cause := func(t *testing.T, srv *httptest.Server, code string) *LinkedRef {
+		t.Helper()
+		for _, g := range get[Diagnostics](t, srv, diagPath, 200).Groups {
+			if g.Code == code && g.Cause != nil && g.Cause.Ref == cartSvc {
+				return g.Cause
+			}
+		}
+		t.Fatalf("no %s group caused by %s", code, cartSvc)
+		return nil
+	}
+	detail := base + backendDetailPath(cartSvc)
+
+	_, missing := groupsWorld(t, nil)
+	if c := cause(t, missing, "KGWUI-013"); c.Link != LinkBackend {
+		t.Errorf("missing Service: link %q", c.Link)
+	}
+	if status, _ := raw(t, missing, detail); status != 200 {
+		t.Errorf("missing Service: backend detail %d", status)
+	}
+
+	h := newHarness(t, setup{endpoints: true}, backendWorld(&notReady)...)
+	endpointsDetail(t, h)
+	if c := cause(t, h.srv, health.CodeBackendNoReadyEndpoints); c.Link != LinkBackend {
+		t.Errorf("existing Service: link %q", c.Link)
+	}
+
+	_, hidden := groupsWorld(t, deny(cartSvc))
+	for _, g := range get[Diagnostics](t, hidden, diagPath, 200).Groups {
+		if g.Cause != nil && g.Cause.Ref == cartSvc && g.Cause.Link != LinkNone {
+			t.Errorf("hidden Service: link %q", g.Cause.Link)
+		}
+	}
+	if status, _ := raw(t, hidden, detail); status != 404 {
+		t.Errorf("hidden Service: backend detail %d", status)
+	}
 }
 
 // resourcePath is the resource endpoint path of ref.

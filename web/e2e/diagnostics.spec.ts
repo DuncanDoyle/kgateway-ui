@@ -97,8 +97,10 @@ for (const theme of themes) {
     expect(first, "the group's first next step").toBeTruthy();
 
     const attention = page.getByRole("region", { name: diagnosticsCopy.needsAttention });
-    const row = attention.getByTestId("group-row").filter({ has: page.getByRole("link", { name: nack, exact: true }) });
+    const row = attention.getByTestId("group-row").filter({ has: page.getByLabel(nack, { exact: true }) });
     await expect(row).toHaveCount(1);
+    // The whole row opens its cause, the Gateway.
+    await expect(row.getByRole("link", { name: group.title })).toHaveAttribute("href", /\/gateways\/infra\/nack/);
     await expect(row).toContainText(group.title);
     await expect(row).toContainText(group.code);
 
@@ -338,9 +340,9 @@ for (const theme of themes) {
     await expect(details).toContainText((f.detail ?? "").replaceAll("`", ""));
     const svcValue = factValue(details, diagnosticsCopy.service);
     await expect(svcValue).toHaveText("shop/idle");
-    // Services are watched for 023 but never served, so the ref has no page: link "none".
-    expect(f.resource?.link).toBe("none");
-    await expect(svcValue.getByRole("link")).toHaveCount(0);
+    // A route names the Service, so it opens its backend page (D-079).
+    expect(f.resource?.link).toBe("backend");
+    await expect(svcValue.getByRole("link")).toHaveAttribute("href", /\/backends\/-\/Service\/shop\/idle$/);
     await expect(factValue(details, diagnosticsCopy.servicePort)).toHaveText(
       ev.portName ? `${ev.port} (${ev.portName})` : String(ev.port),
     );
