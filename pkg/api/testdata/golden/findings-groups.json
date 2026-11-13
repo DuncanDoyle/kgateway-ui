@@ -56,7 +56,7 @@
         "cause": {
           "group": "",
           "kind": "Service",
-          "link": "none",
+          "link": "backend",
           "name": "cart",
           "namespace": "shop"
         },

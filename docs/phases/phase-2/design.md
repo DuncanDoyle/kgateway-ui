@@ -423,6 +423,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 **Link metadata.** One function, `admit(install, caller, ref) → detail | yaml | none`, implements admission and the Authorizer. Both endpoints call it, and every payload labels each reference with it **(our call)**:
 - every rendered reference is a `LinkedRef` (rows, parents, `via`, parent routes, ancestor steps, backendRefs, delegation targets, ExtensionRef filters, the ListenerSet's parent, a candidate's `by`);
 - `detail`: admitted with a detail view; `yaml`: admitted without one, or a `no-parent` row; `none`: not admitted, denied, absent or never served (Secret certificateRefs, Services). Denied and absent both give `none` (D-013);
+- `backend`: not `detail`, and the Phase 6 backend detail serves it to the caller, absent or not. It replaces `yaml` or `none` on a listed backend; the resource endpoint still follows `admit` (D-079). Clients treat an unknown value like `none`;
 - admission does not follow chains: a route D named only by candidate C is `none` on C's page;
 - Phase 1 findings gain an optional `link` on their resource, and overview Gateway rows an optional `link` (§7.6). The SPA renders `link` as given and never derives one from a kind.
 

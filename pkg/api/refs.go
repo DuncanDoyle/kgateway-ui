@@ -101,7 +101,7 @@ func (h *handler) refs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	l := linkerFor(h.view(r), p.Model, i)
+	l := h.linker(h.view(r), p, i, nil, nil)
 	out := TrailRefs{Install: i.Resolved.ID(), Refs: make([]LinkedRef, 0, len(want))}
 	for _, ref := range want {
 		out.Refs = append(out.Refs, l.linked(ref))

@@ -72,8 +72,12 @@ func TestOrdinaryHTTPRouteBackend(t *testing.T) {
 				}
 			}
 			m := get[RouteDetail](t, srv, routeDetail+"shop/m", 200)
-			if l := m.Rules[0].BackendRefs[0].Filters[0].Mirror.BackendRef.Link; (l != LinkNone) != (tc.rules != nil) {
+			// shop/be-m is an in-scope Backend, so its backend page opens either way; only its admission follows the mirror.
+			if l := m.Rules[0].BackendRefs[0].Filters[0].Mirror.BackendRef.Link; l != LinkBackend {
 				t.Errorf("mirror target link %q", l)
+			}
+			if code, _ := raw(t, srv, resourcePath(backendRef("shop", "be-m"))); (code == 200) != (tc.rules != nil) {
+				t.Errorf("mirror target YAML: %d", code)
 			}
 		})
 	}

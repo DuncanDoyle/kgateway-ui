@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"flag"
 	"io"
@@ -201,7 +202,7 @@ func partialLS() *unstructured.Unstructured {
 }
 
 // TestGoldenLinksAgreeWithEndpoints serves every link in every golden body from
-// the server that produced it (design §7.1): detail and yaml open, none is a 404.
+// the server that produced it (design §7.1): detail, yaml and backend open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
 	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t), pathsCases(t), backendsCases(t), traceCases(t)) {
@@ -223,8 +224,11 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 				wantStatus(t, tc, installBase+dp, 200)
 			case LinkYAML:
 				wantStatus(t, tc, res, 200)
+			case LinkBackend:
+				wantStatus(t, tc, installBase+backendDetailPath(l.ref), 200)
 			case LinkNone:
 				wantStatus(t, tc, res, 404)
+				wantStatus(t, tc, installBase+backendDetailPath(l.ref), 404)
 				if hasDetail {
 					wantStatus(t, tc, installBase+dp, 404)
 				}
@@ -251,6 +255,11 @@ func detailPath(r objects.Ref) (string, bool) {
 		return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name, true
 	}
 	return "", false
+}
+
+// backendDetailPath is ref's backend detail endpoint below the install.
+func backendDetailPath(r objects.Ref) string {
+	return "/backends/" + cmp.Or(r.Group, "-") + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
 }
 
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.

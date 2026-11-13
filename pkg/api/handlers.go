@@ -294,7 +294,7 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 		v := h.view(r)
 		ov := h.visibleOverview(v, p.Model, i, visibleHealth(v, i))
 		ov.Counts = h.applicableCounts(i, ov.Counts)
-		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), linkerFor(v, p.Model, i)
+		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), h.linker(v, p, i, nil, nil)
 		rejecting, withheld := rejectingGateways(i), withheldGateways(i)
 		checked := slices.ContainsFunc(i.Health.Checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName && c.OK })
 		for _, g := range ov.Gateways {
@@ -338,7 +338,8 @@ func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		writeJSON(w, healthResponse(h.view(r), p.Model, i, p.ConfirmedAt))
+		v := h.view(r)
+		writeJSON(w, healthResponse(v, h.linker(v, p, i, nil, nil), i, p.ConfirmedAt))
 	}
 }
 
@@ -347,11 +348,10 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 // all of has its detail replaced and no typed evidence, and a since it has is
 // replaced by the resource's own (design §7.4 rule 7, Phase 3 §14 rule 12).
 // Typed evidence is in wire form (§14 rule 14). State, counts and severities stay.
-func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
+func healthResponse(v *view, l linker, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
 	rep := wireHealth(visibleHealth(v, i), confirmedAt)
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
 	out.Report.Findings = nil // shadowed by out.Findings
-	l := linkerFor(v, m, i)
 	for k, f := range rep.Findings {
 		d := FindingDTO{Finding: f}
 		if f.Resource != nil {
@@ -377,7 +377,7 @@ func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedA
 }
 
 // resource serves one object the install admits (design §7.1) when the
-// caller may view it and it exists: its link is not none. Only
+// caller may view it and it exists: admit is not none. Only
 // metadata.managedFields is stripped (D-013). Secrets are never watched, so
 // they are never reachable. "-" stands for the empty group or namespace.
 func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
@@ -392,7 +392,7 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		return s
 	}
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
-	if linkerFor(h.view(r), p.Model, i).link(want) != LinkNone {
+	if linkerFor(h.view(r), p.Model, i).admit(want) != LinkNone {
 		if obj := object(p.Model, want); obj != nil {
 			// The body is the raw object, so the collection time travels in a header (D-017 §6).
 			w.Header().Set("Collected-At", wireTime(p.ConfirmedAt).Format(time.RFC3339Nano))

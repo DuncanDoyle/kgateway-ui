@@ -90,13 +90,31 @@ type backends struct {
 // (attached or not), and every consumer's backend. A backend, row, route or
 // consumer the viewer may not see is left out and counted nowhere.
 func Backends(t *Topology, p *Projection, in BackendsInput) BackendSet {
+	b := collect(t, p, in)
+	b.finish()
+	return b.set
+}
+
+// Listed is the set of refs Backends lists, without computing their problems.
+func Listed(t *Topology, p *Projection, in BackendsInput) map[objects.Ref]bool {
+	b := collect(t, p, in)
+	out := make(map[objects.Ref]bool, len(b.set.Items))
+	for i, it := range b.set.Items {
+		if b.listed[i] {
+			out[it.Ref] = true
+		}
+	}
+	return out
+}
+
+// collect adds every candidate backend and marks the ones a visible reason lists.
+func collect(t *Topology, p *Projection, in BackendsInput) *backends {
 	b := &backends{t: t, p: p, in: in, index: map[objects.Ref]int{}}
 	b.rows()
 	b.written()
 	b.inScope()
 	b.consumers()
-	b.finish()
-	return b.set
+	return b
 }
 
 func (b *backends) can(ref objects.Ref) bool { return b.in.Can == nil || b.in.Can(ref) }

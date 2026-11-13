@@ -127,7 +127,7 @@ func (h *handler) startDetail(w http.ResponseWriter, r *http.Request) *detail {
 		ix = &explore.Index{}
 	}
 	v := h.view(r)
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, nil, nil)
 	return &detail{h: h, r: r, p: p, i: i, ix: ix, v: v, l: l, f: facts{ix: ix, v: v, l: l}}
 }
 
@@ -446,7 +446,7 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	// The parent is read only when it opens: a hidden, absent or unadmitted
 	// parent reads as not found, and admission never follows chains (D-013).
 	var pu *unstructured.Unstructured
-	if out.Parent.Link != LinkNone {
+	if d.l.admit(parent) != LinkNone {
 		pu, _ = stored(d.p.Model, parent)
 	}
 	out.ParentFound = pu != nil
@@ -669,7 +669,7 @@ func (d *detail) backendRef(route objects.Ref, rule, i int, b objects.BackendRef
 	}
 	out.Ref = d.l.linked(b.Ref)
 	if b.Ref.Group == kinds.KgatewayGroup && b.Ref.Kind == "Backend" {
-		out.Backend = d.backendState(b.Ref, out.Ref.Link)
+		out.Backend = d.backendState(b.Ref)
 	}
 	return out
 }
@@ -694,11 +694,11 @@ func (d *detail) delegationState(parent, child objects.Ref) string {
 // the caller may not view it, omitted when it does not open (absent or not
 // admitted; admission never follows chains). The state comes from the rule
 // set's computed.BackendJudge; without one the condition shows alone.
-func (d *detail) backendState(ref objects.Ref, link Link) *BackendStateDTO {
+func (d *detail) backendState(ref objects.Ref) *BackendStateDTO {
 	if !d.v.can(ref) {
 		return &BackendStateDTO{Restricted: true}
 	}
-	if link == LinkNone {
+	if d.l.admit(ref) == LinkNone {
 		return nil
 	}
 	u, _ := stored(d.p.Model, ref)

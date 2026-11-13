@@ -22,6 +22,8 @@ const (
 	LinkDetail Link = "detail"
 	// LinkYAML: admitted without a detail view, or a no-parent row.
 	LinkYAML Link = "yaml"
+	// LinkBackend: not detail, and the backend detail serves it to the caller, absent or not (D-079).
+	LinkBackend Link = "backend"
 	// LinkNone: denied, absent, never served or not admitted (D-013).
 	LinkNone Link = "none"
 )

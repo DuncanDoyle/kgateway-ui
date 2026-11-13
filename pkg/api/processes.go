@@ -382,7 +382,7 @@ func (h *handler) processes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := h.view(r)
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, nil, nil)
 	ps := newProcSummary(v, i)
 	gws := ps.gateways()
 	byRef := make(map[objects.Ref]*gatewayProc, len(gws))

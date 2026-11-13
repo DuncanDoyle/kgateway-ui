@@ -40,7 +40,7 @@ func (h *handler) startList(w http.ResponseWriter, r *http.Request, kind listKin
 		ix = &explore.Index{}
 	}
 	v := h.view(r)
-	l := linkerFor(v, p.Model, i)
+	l := h.linker(v, p, i, nil, nil)
 	return &list{h: h, r: r, p: p, i: i, ix: ix, q: q, v: v, l: l, f: facts{ix: ix, v: v, l: l}}
 }
 
