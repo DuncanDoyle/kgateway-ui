@@ -1364,4 +1364,4 @@ Measured on the reference machine, 5 runs per world:
 
 **Consequences:** API v1, additive: a new flag and filter value, a reason kind, and `backend` on route reasons. Gateway and ListenerSet states are unchanged. A route to an idle Service now reads warning.
 
-**Alternatives:** Raise the route to the backend's severity: not taken, an error backend may carry only a small share of the traffic.
+**Alternatives:** Raise the route to the backend's severity: not taken, an error backend may carry only a small share of the traffic. Two signals per route, its own state and a separate traffic-path state (as the Gateway table's Data plane column): cleaner, since one badge now answers both "is it configured right" and "does its traffic work", but more UI work; a Phase 7 design question, covering `gateway-rejecting` too.
