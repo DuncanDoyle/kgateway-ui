@@ -62,6 +62,7 @@ const Header = styled.header<{ stylesOverride?: SerializedStyles }>`
     font-size: ${(p) => p.theme.font.size.sm};
   }
   .ns code {
+    color: ${(p) => p.theme.color.text};
     font-family: ${(p) => p.theme.font.mono};
     font-size: ${(p) => p.theme.font.size.code};
   }
