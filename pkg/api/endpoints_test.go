@@ -152,6 +152,125 @@ func TestBackendProblemAtTheAPI(t *testing.T) {
 	}
 }
 
+// D-082 for the other route kinds: with cart-svc not ready, the GRPCRoute,
+// TCPRoute and TLSRoute of traceWorld are warning with a backend-problem reason.
+func TestBackendProblemOtherRouteKinds(t *testing.T) {
+	objs := traceWorld()
+	for _, o := range objs {
+		if es, ok := o.(*discoveryv1.EndpointSlice); ok && es.Name == "cart-svc-x" {
+			es.Endpoints[0].Conditions.Ready = &notReady
+		}
+	}
+	h := newHarness(t, afterHold(nil), objs...)
+	endpointsDetail(t, h)
+	svc := objects.Ref{Kind: "Service", Namespace: "shop", Name: "cart-svc"}
+	rows := get[Page[RouteRow]](t, h.srv, listBase+"/routes?limit=200", 200)
+	filtered := routeNames(get[Page[RouteRow]](t, h.srv, listBase+"/routes?state=backend-problem&limit=200", 200))
+	for _, c := range []struct{ name, url string }{{"grpc", grpcDetail}, {"tcp", tcpDetail}, {"tls", tlsDetail}} {
+		r := routeByName(t, rows, "shop/"+c.name)
+		if r.Health != health.StateWarning || r.Reason == nil || r.Reason.Kind != health.ReasonBackendProblem || r.Reason.Backend == nil || r.Reason.Backend.Ref != svc {
+			t.Errorf("%s: health %s flags %v reason %+v", c.name, r.Health, r.Flags, r.Reason)
+		}
+		d := get[RouteDetail](t, h.srv, c.url, 200)
+		if d.Health != health.StateWarning || d.Reason == nil || d.Reason.Kind != health.ReasonBackendProblem {
+			t.Errorf("%s detail: health %s reason %+v", c.name, d.Health, d.Reason)
+		}
+		if !slices.Contains(filtered, "shop/"+c.name) {
+			t.Errorf("state=backend-problem %v lacks shop/%s", filtered, c.name)
+		}
+	}
+}
+
+// D-082 boundaries: a mirror-only reference does not count, an error on a
+// Backend still gives warning, and the reason names the first problem backend
+// in rule order.
+func TestBackendProblemBoundaries(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	cart := map[string]any{"name": "cart", "port": int64(8080)}
+	be := testutil.Backend("shop", "be-bad", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")})
+	beBad := objects.Ref{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "shop", Name: "be-bad"}
+	route := func(name string, rule map[string]any) *unstructured.Unstructured {
+		return testutil.WithRules(testutil.HTTPRoute("shop", name, []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), rule)
+	}
+	h := newHarness(t, afterHold(nil), backendWorld(&notReady, be,
+		route("mirror", backendRule([]any{beRef("be-ok")}, map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": cart}})),
+		testutil.Backend("shop", "be-ok", nil),
+		route("be-first", backendRule([]any{beRef("be-bad"), cart})),
+		route("cart-first", backendRule([]any{cart, beRef("be-bad")})),
+	)...)
+	endpointsDetail(t, h)
+	if !hasSev(get[HealthResponse](t, h.srv, listBase+"/health", 200), health.CodeConditionFalse, health.SeverityError, "shop/be-bad") {
+		t.Fatal("no 002 error on Backend shop/be-bad")
+	}
+	cases := []struct {
+		kind, name string
+		backend    objects.Ref // zero: healthy, no backend-problem
+	}{
+		{"HTTPRoute", "mirror", objects.Ref{}},
+		{"HTTPRoute", "be-first", beBad},
+		{"HTTPRoute", "cart-first", cartSvc},
+	}
+	rows := get[Page[RouteRow]](t, h.srv, listBase+"/routes?limit=200", 200)
+	var want []string
+	for _, c := range cases {
+		r := routeByName(t, rows, "shop/"+c.name)
+		d := get[RouteDetail](t, h.srv, base+"/routes/gateway.networking.k8s.io/"+c.kind+"/shop/"+c.name, 200)
+		if c.backend == (objects.Ref{}) {
+			if r.Health != health.StateHealthy || slices.Contains(r.Flags, "backend-problem") || r.Reason != nil || d.Health != health.StateHealthy {
+				t.Errorf("%s: health %s flags %v reason %+v detail %s", c.name, r.Health, r.Flags, r.Reason, d.Health)
+			}
+			continue
+		}
+		want = append(want, "shop/"+c.name)
+		var dr *RouteReason
+		if d.Reason != nil {
+			dr = &RouteReason{RowReason: d.Reason.RowReason, Backend: d.Reason.Backend}
+		}
+		for _, got := range []struct {
+			state  health.State
+			reason *RouteReason
+		}{{r.Health, r.Reason}, {d.Health, dr}} {
+			if got.state != health.StateWarning || got.reason == nil || got.reason.Kind != health.ReasonBackendProblem ||
+				got.reason.Backend == nil || got.reason.Backend.Ref != c.backend {
+				t.Errorf("%s: health %s reason %+v, want warning naming %s", c.name, got.state, got.reason, c.backend)
+			}
+		}
+	}
+	p := get[Page[RouteRow]](t, h.srv, listBase+"/routes?state=backend-problem&limit=200", 200)
+	for _, n := range want {
+		if !slices.Contains(routeNames(p), n) {
+			t.Errorf("state=backend-problem %v lacks %s", routeNames(p), n)
+		}
+	}
+	if slices.Contains(routeNames(p), "shop/mirror") {
+		t.Errorf("state=backend-problem lists the mirror-only route: %v", routeNames(p))
+	}
+}
+
+// A route whose Gateway rejects config and whose backend has a problem gives
+// the gateway-rejecting reason, with both flags (D-082).
+func TestGatewayRejectingBeatsBackendProblem(t *testing.T) {
+	be := testutil.Backend("shop", "be-bad", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")})
+	rt := testutil.WithRules(testutil.HTTPRoute("shop", "both", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		backendRule([]any{beRef("be-bad")}))
+	h := xdsHarness(t, setup{}, edgeRejects(t), nackWorld(be, rt)...)
+	if xdsFinding(h.at(t, testutil.Now), "infra", "edge") == nil {
+		t.Fatal("no 001 on edge")
+	}
+	r := routeByName(t, get[Page[RouteRow]](t, h.srv, listBase+"/routes?limit=200", 200), "shop/both")
+	if r.Health != health.StateWarning || !slices.Contains(r.Flags, "gateway-rejecting") || !slices.Contains(r.Flags, "backend-problem") ||
+		r.Reason == nil || r.Reason.Kind != health.ReasonGatewayRejecting {
+		t.Errorf("shop/both: health %s flags %v reason %+v", r.Health, r.Flags, r.Reason)
+	}
+	d := get[RouteDetail](t, h.srv, routeDetail+"shop/both", 200)
+	if d.Health != health.StateWarning || d.Reason == nil || d.Reason.Kind != health.ReasonGatewayRejecting {
+		t.Errorf("shop/both detail: health %s reason %+v", d.Health, d.Reason)
+	}
+	if p := get[Page[RouteRow]](t, h.srv, listBase+"/routes?state=backend-problem&limit=200", 200); !slices.Contains(routeNames(p), "shop/both") {
+		t.Errorf("state=backend-problem: %v", routeNames(p))
+	}
+}
+
 // A route to a ready Service stays healthy.
 func TestReadyBackendKeepsRouteHealthy(t *testing.T) {
 	h := newHarness(t, afterHold(nil), backendWorld(nil)...)
