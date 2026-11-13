@@ -709,7 +709,7 @@ describe("GroupRow", () => {
     expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Proxies reject this Gateway's config")).toBeInTheDocument();
     // The whole row opens the cause: one link, with the row's hover and active and the link's focus ring.
-    const link = screen.getByRole("link", { name: "Proxies reject this Gateway's config" });
+    const link = screen.getByRole("link", { name: "Proxies reject this Gateway's config, Gateway infra/edge" });
     expect(link).toHaveAttribute("href", "/i/kgw.kgateway/gateways/infra/edge");
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByLabelText("infra/edge")).toBeInTheDocument();
@@ -727,6 +727,21 @@ describe("GroupRow", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
     expect(panel).toHaveTextContent("kubectl logs -n kgw kgateway-0");
+  });
+
+  it("two groups with the same title name their different causes in the link", () => {
+    const cause = (name: string) => ({ group: "", kind: "Service", namespace: "shop", name, link: "backend" as const });
+    const title = "This backend has no ready endpoints";
+    renderWithTheme(
+      <>
+        <DiagnosticsGroupRow group={group({ id: "a", title, cause: cause("cart") })} installId="kgw.kgateway" />
+        <DiagnosticsGroupRow group={group({ id: "b", title, cause: cause("pay") })} installId="kgw.kgateway" />
+      </>,
+    );
+    expect(screen.getAllByRole("link").map((l) => l.getAttribute("aria-label"))).toEqual([
+      `${title}, Service shop/cart`,
+      `${title}, Service shop/pay`,
+    ]);
   });
 
   it("a Not permitted group names its grant shape instead of a cause", () => {

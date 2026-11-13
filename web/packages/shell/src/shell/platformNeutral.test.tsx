@@ -209,7 +209,7 @@ it("H3: without the workloads capability there is no replica wording and no Depl
   // The Gateway group links by its server-computed link; the Deployment's is none.
   const rows = await screen.findAllByTestId("group-row");
   const gateway = rows.find((r) => r.textContent?.includes("Gateway not programmed")) as HTMLElement;
-  const gatewayLink = await within(gateway).findByRole("link", { name: "Gateway not programmed" });
+  const gatewayLink = await within(gateway).findByRole("link", { name: "Gateway not programmed, Gateway prod/edge" });
   expect(gatewayLink.getAttribute("href")).toContain("/gateways/prod/edge");
   const deployment = rows.find((r) => r.textContent?.includes("Controller not ready")) as HTMLElement;
   expect(within(deployment).getByRole("link").getAttribute("href")).not.toContain("Deployment");

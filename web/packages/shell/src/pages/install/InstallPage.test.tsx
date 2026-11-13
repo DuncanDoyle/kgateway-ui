@@ -120,10 +120,9 @@ it("10 groups in rank order with Show all to the grouped findings page", async (
   await screen.findByTestId("health-strip");
   // The server ranks; the page keeps its order.
   expect(groupRows().map((r) => within(r).getByTitle(/^Problem/).textContent)).toEqual(groups.map((g) => g.title));
-  expect(within(groupRows()[0] as HTMLElement).getByRole("link", { name: "Problem 0" })).toHaveAttribute(
-    "href",
-    "/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/route-0",
-  );
+  expect(
+    within(groupRows()[0] as HTMLElement).getByRole("link", { name: "Problem 0, HTTPRoute shop/route-0" }),
+  ).toHaveAttribute("href", "/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/route-0");
   const all = screen.getByRole("link", { name: "Show all groups (14)" });
   expect(all).toHaveAttribute("href", "/i/kgw.kgateway/findings?view=groups");
   // Unhealthy: What was checked starts collapsed and opens on demand.
@@ -777,7 +776,7 @@ it("a group row opens its cause, else its one affected object, else its findings
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway");
 
-  await userEvent.click(within(backend).getByRole("link", { name: "Backend not found" }));
+  await userEvent.click(within(backend).getByRole("link", { name: "Backend not found, Service demo/payments" }));
   expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway/backends/-/Service/demo/payments");
 });
 

@@ -165,6 +165,14 @@ export function groupTarget(installId: string, g: GroupRowData): string | undefi
   );
 }
 
+/** The row link's accessible name: the title, plus the object it opens, so same-titled rows differ. */
+function linkName(installId: string, g: GroupRowData): string {
+  const one = g.affectedTotal === 1 ? g.affected[0] : undefined;
+  const obj = g.cause && objectPath(installId, g.cause) ? g.cause : one && objectPath(installId, one) ? one : undefined;
+  if (!obj) return g.title;
+  return `${g.title}, ${obj.kind} ${obj.namespace ? `${obj.namespace}/${obj.name}` : obj.name}`;
+}
+
 // region Component
 interface GroupRowProps {
   group: GroupRowData;
@@ -196,7 +204,7 @@ export function DiagnosticsGroupRow({ group: g, installId, stylesOverride }: Gro
           ) : (
             <div className="title" title={g.title}>
               {to ? (
-                <Link className="row-link" to={to}>
+                <Link className="row-link" to={to} aria-label={linkName(installId, g)}>
                   {g.title}
                 </Link>
               ) : (
