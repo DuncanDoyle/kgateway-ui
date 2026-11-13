@@ -11,6 +11,12 @@ import { defaultThemes } from "../../theme/themes";
 import { GatewayPage } from "../explore/GatewayPage";
 import { dedupeRows, useMapPaths } from "./mapData";
 
+// No timed polls: a slow draw would let one walk the pages again mid-test. Tests poll with mutate.
+vi.mock("../../api/hooks", async (importOriginal) => {
+  const hooks = await importOriginal<typeof import("../../api/hooks")>();
+  return { ...hooks, live: { ...hooks.live, refreshInterval: 0 } };
+});
+
 const ID = "kgw.kgateway";
 const API = `/api/v1/installs/${ID}`;
 const GW_PATH = `/i/${ID}/gateways/infra/edge`;
@@ -384,7 +390,7 @@ it("two distinct rows that look alike both reach the map and its table", async (
   expect(result.current.rows.map((r) => r.id)).toEqual(["d1", "d2", "c1", "c2"]);
 });
 
-// Drawing 2,003 nodes in jsdom takes ~2 s on a laptop and over 5 s on a busy CI runner.
+// The time budget for drawing hundreds of nodes in jsdom: ~2 s for 2,003 on a laptop, over 5 s on a busy runner.
 const drawLimit = { timeout: 15_000 };
 
 it(
@@ -449,45 +455,54 @@ it("hovering a route lights every node on the rows through it and dims the rest"
   await waitFor(() => expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0));
 });
 
-it("a Gateway with more than 60 routes opens on problems only after its first page, with a prompt to narrow", async () => {
-  // 61 routes over 450 paths: three pages unfiltered, but only the first is read.
-  serve((u) => {
-    const p = page(pageOf(u), u.searchParams.has("state") ? 3 : 450);
-    return { ...p, summary: { ...p.summary, routes: u.searchParams.has("state") ? 3 : 61 } };
-  });
-  mount("?tab=map");
-  await waitFor(
-    () =>
-      expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe(
-        "error,warning,unknown",
-      ),
-    drawLimit,
-  );
-  expect(await screen.findByTestId("map-large")).toHaveTextContent(
-    "This Gateway has 61 routes and 4 backends, so the map shows problems only. Narrow by kind or namespace, or clear Problems only to load every path.",
-  );
-  await screen.findByTestId("gateway-map");
-  const unfiltered = pathCalls().filter((u) => !u.searchParams.has("state"));
-  expect(unfiltered.map((u) => u.searchParams.get("cursor"))).toEqual([null]);
-  expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]);
-  expect(screen.getByRole("button", { name: "Problems only" })).toHaveAttribute("aria-pressed", "true");
-  // Releasing the chip shows every path and drops the prompt. The stopped first walk is not the whole result:
-  // it shows as partial and is walked again in full.
-  await userEvent.setup().click(screen.getByRole("button", { name: "Problems only" }));
-  await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("state="));
-  expect(screen.queryByTestId("map-large")).toBeNull();
-  // SWR's own revalidation may add a second full walk; the test SWR config does not dedupe.
-  await waitFor(() =>
-    expect(
-      pathCalls()
-        .filter((u) => !u.searchParams.has("state"))
-        .map((u) => u.searchParams.get("cursor"))
-        .slice(0, 4),
-    ).toEqual([null, null, "p1", "p2"]),
-  );
-  await waitFor(() => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(453));
-  expect(screen.queryByTestId("map-partial")).toBeNull();
-});
+it(
+  "a Gateway with more than 60 routes opens on problems only after its first page, with a prompt to narrow",
+  async () => {
+    // 61 routes over 450 paths: three pages unfiltered, but only the first is read.
+    serve((u) => {
+      const p = page(pageOf(u), u.searchParams.has("state") ? 3 : 450);
+      return { ...p, summary: { ...p.summary, routes: u.searchParams.has("state") ? 3 : 61 } };
+    });
+    mount("?tab=map");
+    await waitFor(
+      () =>
+        expect(new URLSearchParams(screen.getByTestId("location").textContent ?? "").get("state")).toBe(
+          "error,warning,unknown",
+        ),
+      drawLimit,
+    );
+    expect(await screen.findByTestId("map-large")).toHaveTextContent(
+      "This Gateway has 61 routes and 4 backends, so the map shows problems only. Narrow by kind or namespace, or clear Problems only to load every path.",
+    );
+    await screen.findByTestId("gateway-map");
+    const unfiltered = pathCalls().filter((u) => !u.searchParams.has("state"));
+    expect(unfiltered.map((u) => u.searchParams.get("cursor"))).toEqual([null]);
+    expect(pathCalls().at(-1)?.searchParams.getAll("state")).toEqual(["error", "warning", "unknown"]);
+    expect(screen.getByRole("button", { name: "Problems only" })).toHaveAttribute("aria-pressed", "true");
+    // Releasing the chip shows every path and drops the prompt. The stopped first walk is not the whole result:
+    // it shows as partial and is walked again in full.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Problems only" }));
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("state="));
+    expect(screen.queryByTestId("map-large")).toBeNull();
+    // SWR's own revalidation may add a second full walk; the test SWR config does not dedupe.
+    await waitFor(
+      () =>
+        expect(
+          pathCalls()
+            .filter((u) => !u.searchParams.has("state"))
+            .map((u) => u.searchParams.get("cursor"))
+            .slice(0, 4),
+        ).toEqual([null, null, "p1", "p2"]),
+      drawLimit,
+    );
+    await waitFor(
+      () => expect(within(screen.getByTestId("gateway-map")).getAllByTestId("map-node")).toHaveLength(453),
+      drawLimit,
+    );
+    expect(screen.queryByTestId("map-partial")).toBeNull();
+  },
+  2 * drawLimit.timeout,
+);
 
 it("a walk still loading says how many paths it shows so far", async () => {
   let release: () => void = () => {};
