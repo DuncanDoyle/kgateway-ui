@@ -5,12 +5,13 @@ import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
-import type { Candidate, LinkedRef, Page } from "../../api/types";
+import type { Candidate, DetailReason, LinkedRef, Page } from "../../api/types";
 import { detailCopy, listCopy } from "../../copy/explorer";
 import { CandidateBanner } from "../../explore/CandidateBanner";
 import { CopyCommandButton } from "../../explore/CopyCommandButton";
 import { DetailTabs } from "../../explore/DetailTabs";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
+import { PROBLEM_ID, ProblemStrip, type ProblemStripProps } from "../../explore/ProblemStrip";
 import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
@@ -103,8 +104,12 @@ interface DetailFrameProps {
   /** The object from the URL, so the header renders before the data. */
   refValue: LinkedRef;
   noun: string;
-  data?: { health: HealthState; candidate?: Candidate; collectedAt: string };
+  data?: { health: HealthState; candidate?: Candidate; collectedAt: string; reason?: DetailReason };
   error?: ApiError;
+  /** The page's part of the problem strip, shown over the main column while the state is not healthy. */
+  problem?: Pick<ProblemStripProps, "condition" | "conditionsId" | "parent">;
+  /** The page draws its own strip with id PROBLEM_ID, e.g. the backend status line; the badge still links to it. */
+  ownProblem?: boolean;
   /** The Overview tab's main column; rendered only once data has loaded. */
   children: ReactNode;
   /** The Overview tab's side column, e.g. conditions and related objects from 1600 px. Contributed sections follow it. */
@@ -127,6 +132,8 @@ export function DetailFrame({
   noun,
   data,
   error,
+  problem,
+  ownProblem,
   children,
   side,
   sideWhenWide,
@@ -163,6 +170,8 @@ export function DetailFrame({
   const by = data?.candidate?.by;
   const heldRefs = useMemo(() => [...(trailRefs ?? []), ...(by ? [by] : [])], [trailRefs, by]);
   const [pageRefs, reportRefs] = useTrailRefsCollector(heldRefs);
+  // The strip explains the server's state; a stale view replaces that state, so it goes too.
+  const problemShown = !!data && !stale && data.health !== "healthy" && tab === "overview";
   // A hidden object 404s as an absent one does (D-013).
   if (error?.status === 404 && !data)
     return (
@@ -185,7 +194,14 @@ export function DetailFrame({
       <Slot key={own.id} id={`detail-tab:${own.id}`} resetKey={objectKey} render={() => own.render(ctx)} />
     ) : (
       <DetailColumns
-        main={children}
+        main={
+          <>
+            {problemShown && !ownProblem ? (
+              <ProblemStrip installId={installId} state={data.health} reason={data.reason} {...problem} />
+            ) : null}
+            {children}
+          </>
+        }
         side={
           side || sections.length ? (
             <>
@@ -237,6 +253,7 @@ export function DetailFrame({
             name={refValue.name}
             namespace={refValue.namespace}
             state={data?.health}
+            stateHref={problemShown ? `#${PROBLEM_ID}` : undefined}
             collectedAt={data?.collectedAt}
             trailRefs={pageRefs}
             current={data ? "shown" : "pending"}

@@ -1332,3 +1332,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** Adding an enum value to API v1 `link` is additive. Clients treat an unknown value like `none`, as the SPA does. A listed kgateway Backend now opens its backend page, whose YAML tab keeps `admit`'s rule.
 
 **Alternatives:** Derive the page from the kind in the SPA: rejected, links come from the server (§7.1).
+
+## D-080 — Detail pages carry their row's reason (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13)
+
+**Context:** From 1600 px a ListenerSet's conditions sit in the side column, so its Error badge has no cause in the column read first. The SPA derives no state (R62), and the detail responses had no reason.
+
+**Decision:** Gateway, ListenerSet and route detail gain an optional `reason`: the list row's reason from the same `explore.Worst.Reason`, plus `finding`, the deciding finding's id, on kind `finding`. A problem strip under the header shows it while the state is not healthy, with the first condition the condition list shows as failing (display only) and, on a ListenerSet, the parent Gateway. The header badge links to the strip. Backend detail keeps its status line as the strip.
+
+**Consequences:** API v1 grows by an optional field on three detail bodies (additive). List rows keep D-063's four keys.
+
+**Alternatives:** Pick a condition in the SPA as the cause: rejected, R62. Add the id to the list rows' reason: rejected, the lists have no use for it.

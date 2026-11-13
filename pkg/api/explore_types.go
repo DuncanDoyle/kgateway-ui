@@ -308,6 +308,13 @@ type Candidate struct {
 	By     *LinkedRef              `json:"by,omitempty"`
 }
 
+// DetailReason is a detail page's reason: the list row's (D-063) plus, for
+// kind finding, the deciding finding's id, so the page can open it.
+type DetailReason struct {
+	health.RowReason
+	Finding string `json:"finding,omitempty"`
+}
+
 // GatewayDetail is GET …/gateways/{ns}/{name}. Its ListenerSets are paged
 // through the ListenerSets list, never embedded; ListenerSets is that list's
 // total for the caller (design §7.4 rule 5).
@@ -317,6 +324,7 @@ type GatewayDetail struct {
 	Generation           int64         `json:"generation"`
 	Class                string        `json:"class"`
 	Health               health.State  `json:"health"`
+	Reason               *DetailReason `json:"reason,omitempty"`
 	Candidate            *Candidate    `json:"candidate,omitempty"`
 	RuleSet              string        `json:"ruleSet,omitempty"`
 	RuleSetLabel         string        `json:"ruleSetLabel,omitempty"`
@@ -353,6 +361,7 @@ type ListenerSetDetail struct {
 	Ref                    LinkedRef            `json:"ref"`
 	Generation             int64                `json:"generation"`
 	Health                 health.State         `json:"health"`
+	Reason                 *DetailReason        `json:"reason,omitempty"`
 	Candidate              *Candidate           `json:"candidate,omitempty"`
 	RuleSet                string               `json:"ruleSet,omitempty"`
 	RuleSetLabel           string               `json:"ruleSetLabel,omitempty"`
@@ -383,6 +392,7 @@ type RouteDetail struct {
 	Ref                LinkedRef            `json:"ref"`
 	Generation         int64                `json:"generation"`
 	Health             health.State         `json:"health"`
+	Reason             *DetailReason        `json:"reason,omitempty"`
 	Candidate          *Candidate           `json:"candidate,omitempty"`
 	RuleSet            string               `json:"ruleSet,omitempty"`
 	RuleSetLabel       string               `json:"ruleSetLabel,omitempty"`

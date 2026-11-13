@@ -233,6 +233,20 @@ func (d *detail) listeners(u *unstructured.Unstructured, ls []objects.Listener, 
 	return out
 }
 
+// reason is the list rows' reason for ref in state st, with the deciding finding's id.
+func (d *detail) reason(ref objects.Ref, st health.State) *DetailReason {
+	w := d.ix.Findings[ref]
+	r := w.Reason(st)
+	if r == nil {
+		return nil
+	}
+	out := &DetailReason{RowReason: *r}
+	if f := w.Decider(st); f != nil && r.Kind == health.ReasonFinding {
+		out.Finding = f.ID
+	}
+	return out
+}
+
 func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 	d := h.startDetail(w, r)
 	if d == nil {
@@ -254,6 +268,7 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
 		Listeners: d.listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
 		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
+	out.Reason = d.reason(ref, st)
 	if cand == nil {
 		out.DataPlane, out.Proxies = d.dataPlane(ref)
 	}
@@ -440,6 +455,7 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	out := ListenerSetDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
 		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
 		RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
+	out.Reason = d.reason(ref, st)
 	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && d.i.Resolved.Experimental(k) {
 		out.ExperimentalHint = experimentalHint(k)
 	}
@@ -501,6 +517,7 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
+	out.Reason = d.reason(ref, st)
 	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok && ref.Kind == "HTTPRoute" {
 		b := v.InheritParentMatcher
 		out.Annotations.InheritParentMatcher = &b

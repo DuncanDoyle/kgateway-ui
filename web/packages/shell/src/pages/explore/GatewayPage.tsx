@@ -10,6 +10,7 @@ import { mapCopy } from "../../copy/map";
 import { trafficCopy } from "../../copy/traffic";
 import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
+import { firstFailing } from "../../explore/ProblemStrip";
 import { HealthBadge } from "../../health/HealthBadge";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
@@ -105,6 +106,7 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
       noun="Gateway"
       data={data}
       error={error}
+      problem={data && { condition: firstFailing(data.conditions), conditionsId: "gw-conditions" }}
       side={wide ? conditions : null}
       sideWhenWide
       extraTabs={extraTabs}

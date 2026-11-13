@@ -228,6 +228,13 @@
         "progressing": false
       }
     },
+    "reason": {
+      "code": "KGWUI-003",
+      "finding": "f1-5nov6s6nlushuhjthsetcnyerz",
+      "kind": "finding",
+      "message": "Not yet processed by the controller",
+      "more": 1
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "Gateway",

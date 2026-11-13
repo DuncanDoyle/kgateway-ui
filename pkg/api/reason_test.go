@@ -127,6 +127,41 @@ func reasonKeys(t *testing.T, srv *httptest.Server) {
 	}](t, srv, listBase+"/overview", 200).Gateways)
 }
 
+// detailReasons checks that each Gateway, ListenerSet and route detail
+// carries its list row's reason, and that a finding reason names one of the
+// object's own findings by id.
+func detailReasons(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	fs := get[HealthResponse](t, srv, listBase+"/health", 200).Findings
+	check := func(name string, ref objects.Ref, row *health.RowReason, got *DetailReason) {
+		switch {
+		case row == nil && got == nil:
+			return
+		case row == nil || got == nil || got.RowReason != *row:
+			t.Errorf("%s: detail reason %+v, row reason %+v", name, got, row)
+			return
+		}
+		ok := slices.ContainsFunc(fs, func(f FindingDTO) bool {
+			return f.ID == got.Finding && f.Code == got.Code && f.Resource != nil && f.Resource.Ref == ref
+		})
+		if (got.Kind == health.ReasonFinding) != ok || (got.Kind != health.ReasonFinding && got.Finding != "") {
+			t.Errorf("%s: reason %+v names finding %q", name, got, got.Finding)
+		}
+	}
+	for _, r := range get[Page[RouteRow]](t, srv, listBase+"/routes?limit=200", 200).Items {
+		p := fmt.Sprintf("%s/routes/%s/%s/%s/%s", listBase, r.Ref.Group, r.Ref.Kind, r.Ref.Namespace, r.Ref.Name)
+		check("route "+r.Ref.Name, r.Ref.Ref, r.Reason, get[RouteDetail](t, srv, p, 200).Reason)
+	}
+	for _, r := range get[Page[GatewayListRow]](t, srv, listBase+"/gateways", 200).Items {
+		p := fmt.Sprintf("%s/gateways/%s/%s", listBase, r.Ref.Namespace, r.Ref.Name)
+		check("gateway "+r.Ref.Name, r.Ref.Ref, r.Reason, get[GatewayDetail](t, srv, p, 200).Reason)
+	}
+	for _, r := range get[Page[ListenerSetRow]](t, srv, listBase+"/listenersets", 200).Items {
+		p := fmt.Sprintf("%s/listenersets/%s/%s/%s/%s", listBase, r.Ref.Group, r.Ref.Kind, r.Ref.Namespace, r.Ref.Name)
+		check("listenerset "+r.Ref.Name, r.Ref.Ref, r.Reason, get[ListenerSetDetail](t, srv, p, 200).Reason)
+	}
+}
+
 // A row's reason names its deciding finding, the install-wide unknown or the
 // rejecting Gateway; healthy rows carry none (D-063).
 func TestRowReasons(t *testing.T) {
@@ -140,6 +175,7 @@ func TestRowReasons(t *testing.T) {
 	_, rej, _ := startWith(t, setup{metrics: rejects}, explorerWorld(broken)...)
 	seen := checkReasons(t, rej)
 	reasonKeys(t, rej)
+	detailReasons(t, rej)
 	if !slices.Contains(seen[health.ReasonFinding], "gateway edge") || !slices.Contains(seen[health.ReasonFinding], "overview edge") ||
 		!slices.Contains(seen[health.ReasonFinding], "route shop/broken") || !slices.Contains(seen[health.ReasonFinding], "route blog/posts") {
 		t.Errorf("finding reasons on %v", seen[health.ReasonFinding])
@@ -159,6 +195,7 @@ func TestRowReasons(t *testing.T) {
 	_, unk, _ := startWith(t, setup{metrics: down}, explorerWorld()...)
 	seen = checkReasons(t, unk)
 	reasonKeys(t, unk)
+	detailReasons(t, unk)
 	if !slices.Contains(seen[health.ReasonUnknown], "route shop/cart") || !slices.Contains(seen[health.ReasonUnknown], "gateway edge") ||
 		!slices.Contains(seen[health.ReasonUnknown], "listenerset ls1") || !slices.Contains(seen[health.ReasonUnknown], "overview edge") {
 		t.Errorf("unknown reasons on %v", seen[health.ReasonUnknown])
@@ -166,6 +203,7 @@ func TestRowReasons(t *testing.T) {
 
 	_, ok, _ := startWith(t, setup{}, explorerWorld()...)
 	seen = checkReasons(t, ok)
+	detailReasons(t, ok)
 	if !slices.Contains(seen["none"], "route shop/cart") || !slices.Contains(seen["none"], "gateway edge") ||
 		!slices.Contains(seen["none"], "listenerset ls1") || !slices.Contains(seen["none"], "overview edge") {
 		t.Errorf("rows without a reason %v", seen["none"])

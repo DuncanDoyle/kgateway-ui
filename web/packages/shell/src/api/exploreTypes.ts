@@ -107,6 +107,8 @@ export interface RouteRow {
   reason?: RowReason;
   mirror?: boolean;
 }
+/** A detail page's reason: its list row's reason plus, for kind finding, the deciding finding's id. */
+export type DetailReason = RowReason & { finding?: string };
 /** One row of the Gateways list. */
 export interface GatewayListRow {
   ref: LinkedRef;
@@ -199,6 +201,7 @@ export interface GatewayDetail {
   generation: number;
   class: string;
   health: HealthState;
+  reason?: DetailReason;
   candidate?: Candidate;
   ruleSet?: string;
   /** ruleSet's display name; absent from older servers. */
@@ -232,6 +235,7 @@ export interface ListenerSetDetail {
   ref: LinkedRef;
   generation: number;
   health: HealthState;
+  reason?: DetailReason;
   candidate?: Candidate;
   ruleSet?: string;
   /** ruleSet's display name; absent from older servers. */
@@ -350,6 +354,7 @@ export interface RouteDetail {
   ref: LinkedRef;
   generation: number;
   health: HealthState;
+  reason?: DetailReason;
   candidate?: Candidate;
   ruleSet?: string;
   /** ruleSet's display name; absent from older servers. */

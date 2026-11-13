@@ -350,8 +350,9 @@ it("ListenerSet page says when the parent Gateway is missing", async () => {
     serve(api({ ls: body }));
     const view = mount(LS_PATH("na"));
     // Hidden and absent read alike, so the page says "not available", never "not found" (design §7.3).
-    expect(await screen.findByText("Not available")).toBeInTheDocument();
-    expect(screen.getByText("Not available").closest("dd")).toHaveTextContent("infra/edge");
+    const parent = await screen.findByRole("region", { name: "Parent" });
+    expect(within(parent).getByText("Not available").closest("dd")).toHaveTextContent("infra/edge");
+    expect(within(screen.getByTestId("problem-parent")).getByText("Not available")).toBeInTheDocument();
     expect(screen.queryByText(/not found/i)).toBeNull();
     expect(screen.queryByRole("link", { name: "infra/edge" })).toBeNull();
     expect(screen.getByTestId("condition-Accepted")).toHaveTextContent("NotAllowed");
@@ -363,7 +364,8 @@ it("ListenerSet page says when the parent Gateway is missing", async () => {
 it("a found parent Gateway links to its page", async () => {
   serve(api({ ls: ls(lsInvalidGolden) }));
   mount(LS_PATH("partial"));
-  expect(hrefPath(await screen.findByRole("link", { name: "infra/edge" }))).toBe(`/i/${ID}/gateways/infra/edge`);
+  const parent = await screen.findByRole("region", { name: "Parent" });
+  expect(hrefPath(within(parent).getByRole("link", { name: "infra/edge" }))).toBe(`/i/${ID}/gateways/infra/edge`);
   expect(screen.queryByText("Not available")).toBeNull();
 });
 
@@ -1231,4 +1233,65 @@ it("from 1600 px a ListenerSet's parent and conditions render in the side column
   expect(within(side).getByRole("region", { name: "Conditions" })).toBeInTheDocument();
   expect(within(side).getByText("Parent Gateway")).toBeInTheDocument();
   expect(within(screen.getByTestId("detail-main")).getByRole("table", { name: "Listeners" })).toBeInTheDocument();
+});
+
+// region Problem strip
+const NOT_ALLOWED = "Unable to attach to parent, gateway has not enabled allowedListeners";
+
+it("a ListenerSet's strip names the failing condition and the parent Gateway, at the top of the main column", async () => {
+  viewport(true);
+  const base = ls(lsGolden);
+  const conditions = base.conditions.map((c) => ({ ...c, message: NOT_ALLOWED }));
+  serve(api({ ls: { ...base, conditions } }));
+  mount(LS_PATH("na"));
+  const strip = await screen.findByTestId("problem-strip");
+  expect(screen.getByTestId("detail-main").firstElementChild).toBe(strip);
+  const condition = within(strip).getByTestId("problem-condition");
+  expect(within(condition).getByText("Accepted: False")).toBeInTheDocument();
+  expect(within(condition).getByText("NotAllowed")).toBeInTheDocument();
+  expect(within(condition).getByText(NOT_ALLOWED)).toBeInTheDocument();
+  expect(within(condition).getByRole("link", { name: "See conditions" })).toHaveAttribute("href", "#ls-conditions");
+  expect(document.getElementById("ls-conditions")).toHaveTextContent("Conditions");
+  const parent = within(strip).getByTestId("problem-parent");
+  expect(parent).toHaveTextContent("Parent Gateway");
+  expect(hrefPath(within(parent).getByRole("link", { name: "infra/edge" }))).toBe(`/i/${ID}/gateways/infra/edge`);
+});
+
+it("a page with a finding shows the finding's message and opens the finding", async () => {
+  serve(api());
+  mount(GW_PATH);
+  const strip = await screen.findByTestId("problem-strip");
+  expect(strip).toHaveAttribute("data-state", "warning");
+  expect(within(strip).getByTestId("problem-reason")).toHaveTextContent(
+    "KGWUI-003: Not yet processed by the controller (+1 more)",
+  );
+  expect(hrefPath(within(strip).getByRole("link", { name: "Open finding" }))).toBe(
+    `/i/${ID}/findings/f1-5nov6s6nlushuhjthsetcnyerz`,
+  );
+  // Every condition is True, so there is no condition line.
+  expect(within(strip).queryByTestId("problem-condition")).toBeNull();
+});
+
+it("a healthy page has no strip and a plain state badge", async () => {
+  serve(api({ gateway: { ...gateway(), health: "healthy", reason: undefined } }));
+  mount(GW_PATH);
+  await screen.findByRole("table", { name: "Listeners" });
+  expect(within(screen.getByTestId("detail-header")).getByText("Healthy")).toBeInTheDocument();
+  expect(screen.queryByTestId("problem-strip")).toBeNull();
+  expect(screen.queryByTestId("state-link")).toBeNull();
+});
+
+it("the state badge links to the strip only while the strip is shown", async () => {
+  serve(api());
+  const view = mount(GW_PATH);
+  const link = await screen.findByTestId("state-link");
+  expect(link).toHaveAttribute("href", "#problem");
+  expect(link).toHaveAccessibleName("Warning, see why");
+  expect(document.getElementById("problem")).toBe(screen.getByTestId("problem-strip"));
+  view.unmount();
+  // The YAML tab has no strip, so the badge is plain there.
+  mount(`${GW_PATH}?tab=yaml`);
+  expect(await within(screen.getByTestId("detail-header")).findByText("Warning")).toBeInTheDocument();
+  expect(screen.queryByTestId("problem-strip")).toBeNull();
+  expect(screen.queryByTestId("state-link")).toBeNull();
 });

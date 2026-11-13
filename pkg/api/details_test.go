@@ -887,7 +887,7 @@ func TestRouteDetailTraceKeysOnly(t *testing.T) {
 	if err := json.Unmarshal(wire(t, srv, routeDetail+"shop/mid"), &body); err != nil {
 		t.Fatal(err)
 	}
-	top := []string{"install", "ref", "generation", "health", "ruleSet", "ruleSetLabel", "hostnames", "annotations", "parentRefs", "parents",
+	top := []string{"install", "ref", "generation", "health", "reason", "ruleSet", "ruleSetLabel", "hostnames", "annotations", "parentRefs", "parents",
 		"attachments", "serves", "rules", "effective", "effectiveTruncated", "ancestors", "ancestorsTruncated", "childCount", "declaredCount", "collectedAt"}
 	ref := []string{"ref", "port", "weight", "weightDefaulted", "filters", "delegation", "backend", "share", "shareState", "problem", "endpoints"}
 	only := func(what string, m map[string]any, keys []string) {

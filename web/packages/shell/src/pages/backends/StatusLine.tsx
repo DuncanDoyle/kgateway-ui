@@ -4,6 +4,7 @@ import { useContext } from "react";
 import type { BackendDetail } from "../../api/types";
 import { statusCopy, statusPhrase } from "../../copy/backends";
 import { shareCopy } from "../../copy/traffic";
+import { PROBLEM_ID } from "../../explore/ProblemStrip";
 import { HealthIcon } from "../../health/HealthIcon";
 import { StaleView } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
@@ -63,7 +64,7 @@ export function StatusLine({ detail, stylesOverride }: { detail: BackendDetail; 
   const stale = useContext(StaleView);
   const state = stale ? "unknown" : detail.problem.state;
   return (
-    <Line $state={state} data-testid="status-line" data-state={state} stylesOverride={stylesOverride}>
+    <Line id={PROBLEM_ID} $state={state} data-testid="status-line" data-state={state} stylesOverride={stylesOverride}>
       <HealthIcon state={state} />
       <span className="state">{stateLabel(state)}</span>
       <span>{statusText(detail, stale)}</span>

@@ -145,6 +145,13 @@
         "progressing": false
       }
     },
+    "reason": {
+      "code": "KGWUI-001",
+      "finding": "f1-yyqurhzvuvrtf4nk6icaeoc2sr",
+      "kind": "finding",
+      "message": "Proxies reject this Gateway's config",
+      "more": 1
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "Gateway",

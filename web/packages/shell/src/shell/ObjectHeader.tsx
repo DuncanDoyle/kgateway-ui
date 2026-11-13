@@ -4,8 +4,10 @@ import { Box, Layers, Network, Route, Server } from "lucide-react";
 import type { ReactNode } from "react";
 import { useKindCategory } from "../api/hooks";
 import type { Category, LinkedRef } from "../api/types";
+import { problemCopy } from "../copy/explorer";
 import { objectHeaderCopy } from "../copy/navigation";
 import { HealthBadge } from "../health/HealthBadge";
+import { stateLabel } from "../health/state";
 import { DataAge } from "../pages/DataAge";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { HealthState } from "../theme/tokens";
@@ -80,6 +82,27 @@ const Header = styled.header<{ stylesOverride?: SerializedStyles }>`
     align-items: center;
     min-height: 20px;
   }
+  .state a {
+    display: inline-flex;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    border-radius: ${(p) => p.theme.radius.sm};
+    text-decoration: none;
+  }
+  /* The badge is inline-flex, so the underline goes on it, not through the link. */
+  .state a:hover > span {
+    text-decoration: underline;
+  }
+  .state a:hover {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.bg});
+  }
+  .state a:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 12%, ${(p) => p.theme.color.bg});
+  }
+  .state a:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
   ${(p) => p.stylesOverride}
 `;
 
@@ -111,6 +134,8 @@ export interface ObjectHeaderProps {
   namespace?: string;
   /** Absent while loading, or for an object without a health state. */
   state?: HealthState;
+  /** Where the state badge jumps, e.g. the page's problem strip; absent leaves it plain. */
+  stateHref?: string;
   /** When the shown data was collected; absent while loading. */
   collectedAt?: string;
   /** Buttons and links for the object, e.g. copy buttons. */
@@ -131,6 +156,7 @@ export function ObjectHeader({
   name,
   namespace,
   state,
+  stateHref,
   collectedAt,
   actions,
   trailRefs,
@@ -147,7 +173,15 @@ export function ObjectHeader({
           {kind.icon ?? defaultIcon(kind, category)}
           {kind.label}
         </span>
-        <span className="state">{state ? <HealthBadge state={state} /> : null}</span>
+        <span className="state">
+          {state && stateHref ? (
+            <a href={stateHref} aria-label={problemCopy.badgeLink(stateLabel(state))} data-testid="state-link">
+              <HealthBadge state={state} />
+            </a>
+          ) : state ? (
+            <HealthBadge state={state} />
+          ) : null}
+        </span>
         <div className="title">
           <h1 title={namespace ? `${namespace}/${name}` : name}>
             <VisuallyHidden>{namespace ? `${kind.label} ${namespace}/` : `${kind.label} `}</VisuallyHidden>

@@ -261,6 +261,10 @@ Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v
 
 ## Upgrade notes
 
+### v0.7.1
+
+API v1, additive: Gateway, ListenerSet and route detail gain an optional `reason`, the list row's reason plus `finding`, the deciding finding's id (D-080).
+
 ### Traffic flow and backends (Phase 6)
 
 API v1 changes are additive. New endpoints: `…/paths`, `…/backends` and `…/backends/{group}/{kind}/{ns}/{name}`. Route detail serves GRPCRoute, TCPRoute and TLSRoute instead of 404, and `BackendRefDTO` gains optional `share`, `shareState`, `problem` and `endpoints`. The install nav gains Traffic and Backends.

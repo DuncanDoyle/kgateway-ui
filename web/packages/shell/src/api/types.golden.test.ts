@@ -94,6 +94,7 @@ import type {
   DelegationRef,
   DelegationRow,
   DeployerError,
+  DetailReason,
   Diagnostics,
   EffectiveContext,
   EffectiveEdge,
@@ -534,6 +535,21 @@ const rowReason: Shape = {
     } satisfies Record<RowReason["kind"], Shape>,
   },
 };
+// A detail page's reason: a row reason, and the deciding finding's id on kind finding.
+const detailReason: Shape = {
+  ...rowReason,
+  tagged: {
+    key: "kind",
+    by: {
+      ...(rowReason.tagged?.by ?? {}),
+      finding: shape<Extract<DetailReason, { kind: "finding" }>>(
+        { kind: "!", code: "!", message: "!", more: "?", finding: "?" },
+        {},
+        { kind: { finding: 1 } },
+      ),
+    },
+  },
+};
 const row = shape<GatewayRow>(
   {
     ref: "!",
@@ -752,6 +768,7 @@ const listenerSetDetail = shape<ListenerSetDetail>(
     ref: "!",
     generation: "!",
     health: "!",
+    reason: "?",
     candidate: "?",
     ruleSet: "?",
     ruleSetLabel: "?",
@@ -766,6 +783,7 @@ const listenerSetDetail = shape<ListenerSetDetail>(
   },
   {
     ref: linkedRef,
+    reason: detailReason,
     candidate,
     parent: linkedRef,
     conditions: condition,
@@ -953,6 +971,7 @@ const routeDetail = shape<RouteDetail>(
     ref: "!",
     generation: "!",
     health: "!",
+    reason: "?",
     candidate: "?",
     ruleSet: "?",
     ruleSetLabel: "?",
@@ -973,6 +992,7 @@ const routeDetail = shape<RouteDetail>(
   },
   {
     ref: linkedRef,
+    reason: detailReason,
     candidate,
     annotations: shape<RouteDetail["annotations"]>({ inheritParentMatcher: "?" }),
     parentRefs: specParentRef,
@@ -1200,6 +1220,7 @@ const gatewayDetail = shape<GatewayDetail>(
     generation: "!",
     class: "!",
     health: "!",
+    reason: "?",
     candidate: "?",
     ruleSet: "?",
     ruleSetLabel: "?",
@@ -1215,6 +1236,7 @@ const gatewayDetail = shape<GatewayDetail>(
   },
   {
     ref: linkedRef,
+    reason: detailReason,
     candidate,
     conditions: condition,
     listeners: listener,

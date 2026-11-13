@@ -971,6 +971,13 @@
         }
       }
     ],
+    "reason": {
+      "code": "KGWUI-013",
+      "finding": "f1-3wufqpqyklpby4glalwrwjzzqb",
+      "kind": "finding",
+      "message": "Backend not found",
+      "more": 6
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "HTTPRoute",

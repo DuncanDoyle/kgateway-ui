@@ -416,22 +416,29 @@ func (w Worst) Add(f *health.Finding) Worst {
 // deciding finding, the install-wide unknown, or else a rejecting Gateway,
 // the only other way to warning (D-063). It is nil for a healthy row.
 func (w Worst) Reason(st health.State) *health.RowReason {
-	var f *health.Finding
-	switch st {
-	case health.StateError:
-		f = w.Error
-	case health.StateWarning:
-		if f = w.Warning; f == nil {
-			return &health.RowReason{Kind: health.ReasonGatewayRejecting}
-		}
-	case health.StateUnknown:
+	f := w.Decider(st)
+	switch {
+	case st == health.StateWarning && f == nil:
+		return &health.RowReason{Kind: health.ReasonGatewayRejecting}
+	case st == health.StateUnknown:
 		return &health.RowReason{Kind: health.ReasonUnknown}
-	}
-	if f == nil {
+	case f == nil:
 		return nil
 	}
 	// The deciding finding is the object's most severe, so the rest are at its severity or lower.
 	return &health.RowReason{Kind: health.ReasonFinding, Code: f.Code, Message: f.Message, More: w.N - 1}
+}
+
+// Decider is the finding that decides state st: the first error or warning
+// at that severity, or nil.
+func (w Worst) Decider(st health.State) *health.Finding {
+	switch st {
+	case health.StateError:
+		return w.Error
+	case health.StateWarning:
+		return w.Warning
+	}
+	return nil
 }
 
 // State applies the row rule; unknown is set when a required check is not OK.

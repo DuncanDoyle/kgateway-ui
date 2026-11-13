@@ -80,6 +80,12 @@
       "namespace": "infra"
     },
     "parentFound": true,
+    "reason": {
+      "code": "KGWUI-002",
+      "finding": "f1-loqi4jkjlj5bdbhhr74gdwakyr",
+      "kind": "finding",
+      "message": "Listener port unavailable"
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "ListenerSet",

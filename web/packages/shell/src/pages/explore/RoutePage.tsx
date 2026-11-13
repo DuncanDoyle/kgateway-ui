@@ -7,6 +7,7 @@ import { useInstallFeature } from "../../api/hooks";
 import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
 import { detailCopy, routeCopy, traceCopy } from "../../copy/explorer";
 import { trafficCopy } from "../../copy/traffic";
+import { firstFailing } from "../../explore/ProblemStrip";
 import { useInstallId } from "../../shell/extension";
 import { useTwoColumns } from "../../shell/layout";
 import { installPath } from "../../shell/paths";
@@ -137,6 +138,13 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
       sideWhenWide
       data={data}
       error={error}
+      // Conditions live per parent; only this install's controller's entries count.
+      problem={
+        data && {
+          condition: firstFailing(data.parents.filter((p) => p.ours).flatMap((p) => p.conditions)),
+          conditionsId: "route-parents",
+        }
+      }
       trailRefs={trailRefs}
       stylesOverride={stylesOverride}
     >

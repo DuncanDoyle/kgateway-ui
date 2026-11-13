@@ -135,6 +135,13 @@ export const detailCopy = {
   backendLookup: "Routes that send traffic here", // S96 (fixed)
 };
 
+/** The problem strip under a detail page's header, and the header badge that jumps to it. */
+export const problemCopy = {
+  seeConditions: "See conditions", // S825
+  openFinding: "Open finding", // S826
+  badgeLink: (state: string) => `${state}, see why`, // S827
+};
+
 // region Gateway page
 export const gatewayCopy = {
   listeners: "Listeners",
