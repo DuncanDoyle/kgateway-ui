@@ -32,13 +32,14 @@ function serve(routes: Record<string, RouteDetail>) {
   );
 }
 
-async function open(kind: string, ns: string, name: string, d: RouteDetail) {
+/** Renders the route; a multi-rule route needs a query such as ?open=1,2 to show its rules. */
+async function open(kind: string, ns: string, name: string, d: RouteDetail, query = "") {
   serve({ [`${kind}/${ns}/${name}`]: d });
   renderWithTheme(
     <Routes>
       <Route path="/i/:id/routes/:group/:kind/:ns/:name" element={<RoutePage />} />
     </Routes>,
-    { path: `/i/${ID}/routes/${GW}/${kind}/${ns}/${name}` },
+    { path: `/i/${ID}/routes/${GW}/${kind}/${ns}/${name}${query}` },
   );
   return screen.findByRole("region", { name: /^Rule 1\b/ });
 }
@@ -128,7 +129,7 @@ it("a rule mixing delegation and ordinary refs shows no bar and no share", async
   const d = detail(routeGolden);
   const plain = refs(d, 2)[0] as BackendRef;
   refs(d).push({ ...plain, share: undefined, shareState: "not-shown" });
-  const rule = await open("HTTPRoute", "shop", "mid", d);
+  const rule = await open("HTTPRoute", "shop", "mid", d, "?open=1");
   const bar = within(rule).getByTestId("share-bar");
   expect(bar).toHaveAttribute("data-state", "not-shown");
   expect(bar).toHaveTextContent("No share: this rule also delegates.");
@@ -137,7 +138,7 @@ it("a rule mixing delegation and ordinary refs shows no bar and no share", async
 });
 
 it("may-fail refs flag their share; a rule of delegation refs only has no bar", async () => {
-  await open("HTTPRoute", "shop", "mid", detail(routeGolden));
+  await open("HTTPRoute", "shop", "mid", detail(routeGolden), "?open=1,2");
   const second = screen.getByRole("region", { name: /^Rule 2\b/ });
   expect(within(second).getByTestId("share-may-fail")).toHaveTextContent("100 % may fail");
   expect(

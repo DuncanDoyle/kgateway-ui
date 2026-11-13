@@ -581,7 +581,7 @@ it("a route with no delegation refs has no Delegation tab", async () => {
 
 it("a delegation ref shows selected and attached counts with a ComputedBadge", async () => {
   serve(api({ name: "mid", d: detail(routeGolden) }));
-  mount(page("shop/mid"));
+  mount(`${page("shop/mid")}?open=1`);
   await loaded();
   const declared = screen.getByTestId("backend-declared");
   expect(declared).toHaveTextContent(delegationCopy.selected(2));
@@ -596,7 +596,7 @@ it("a delegation ref shows selected and attached counts with a ComputedBadge", a
 
 it("a restricted delegation ref shows its badge hidden and no attached count", async () => {
   serve(api({ name: "p", d: detail(detailRestrictedGolden) }));
-  mount(page("shop/p"));
+  mount(`${page("shop/p")}?rule=1`);
   await loaded();
   const c = screen.getByTestId("backend-c");
   expect(within(c).getByTestId("computed-badge")).toHaveTextContent(computedCopy.short.restricted);

@@ -122,8 +122,6 @@ const cellTip = css`
 `;
 
 // region Helpers
-/** More rules than this show as the compact table; up to it, every rule is drawn open. */
-export const COMPACT_ABOVE = 5;
 
 // Outside a detail page the table has no URL to keep its state in, and shows the defaults.
 const NO_PARAMS: [URLSearchParams, (c: ParamChanges) => void] = [new URLSearchParams(), () => {}];
@@ -189,9 +187,8 @@ function searchText(r: Rule): string {
 function openRules(params: URLSearchParams, rules: Rule[], linked?: number): Set<number> {
   const written = params.get("open");
   const out = new Set(
-    written === null
-      ? rules.filter((r) => ["error", "warning"].includes(ruleState(r) ?? "")).map((r) => r.index + 1)
-      : written.split(",").map(Number).filter(Number.isInteger),
+    // Rules start closed; a route's only rule starts open.
+    written === null ? (rules.length === 1 ? [1] : []) : written.split(",").map(Number).filter(Number.isInteger),
   );
   if (linked !== undefined) out.add(linked);
   return out;
@@ -213,7 +210,7 @@ interface RuleTableProps {
 }
 
 /**
- * A long route's rules as compact rows that open in place to the full rule (D-081). Problems only, the search text
+ * A route's rules as compact rows that open in place to the full rule (D-081). Problems only, the search text
  * and the open rules live in the URL: ?problems=1, ?q= and ?open=; ?rule=n opens rule n and scrolls to it.
  */
 export function RuleTable({ installId, kind, rules, serves = [], stylesOverride }: RuleTableProps) {

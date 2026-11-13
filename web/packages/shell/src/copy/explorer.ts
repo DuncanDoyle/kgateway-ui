@@ -260,7 +260,7 @@ export const routeCopy = {
   childRoutes: "Child routes",
   toggleChildren: (open: boolean) => (open ? "Hide child routes" : "Show child routes"), // S92
   noChildRoutes: "No reported child routes.", // S93
-  // The rule table of a route with more than five rules (D-081).
+  // A route's rule table (D-081).
   problemsOnly: "Problems only", // S771
   searchRules: "Filter rules", // S828
   expandAll: "Expand all", // S829
