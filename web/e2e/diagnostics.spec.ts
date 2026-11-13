@@ -340,9 +340,9 @@ for (const theme of themes) {
     await expect(details).toContainText((f.detail ?? "").replaceAll("`", ""));
     const svcValue = factValue(details, diagnosticsCopy.service);
     await expect(svcValue).toHaveText("shop/idle");
-    // Services are watched for 023 but never served, so the ref has no page: link "none".
-    expect(f.resource?.link).toBe("none");
-    await expect(svcValue.getByRole("link")).toHaveCount(0);
+    // A route names the Service, so it opens its backend page (D-079).
+    expect(f.resource?.link).toBe("backend");
+    await expect(svcValue.getByRole("link")).toHaveAttribute("href", /\/backends\/-\/Service\/shop\/idle$/);
     await expect(factValue(details, diagnosticsCopy.servicePort)).toHaveText(
       ev.portName ? `${ev.port} (${ev.portName})` : String(ev.port),
     );
