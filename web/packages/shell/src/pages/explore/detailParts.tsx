@@ -1,7 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { FileCode, LayoutList, type LucideIcon } from "lucide-react";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { createContext, type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
@@ -98,6 +98,9 @@ export interface ExtraTab {
 /** group/Kind/namespace/name, as the list endpoints take a parent (design §7.2). */
 export const refParam = (r: LinkedRef) => [r.group, r.kind, r.namespace ?? "", r.name].join("/");
 
+/** The frame's URL params, so a section keeps its state in the page's one {@link useUrlParams}. */
+export const DetailParams = createContext<ReturnType<typeof useUrlParams> | null>(null);
+
 // region Component
 interface DetailFrameProps {
   installId: string;
@@ -144,7 +147,8 @@ export function DetailFrame({
 }: DetailFrameProps) {
   const wide = useTwoColumns();
   const vocab = useVocabulary();
-  const [params, update] = useUrlParams();
+  const urlParams = useUrlParams();
+  const [params, update] = urlParams;
   const coreIds = useMemo(() => [...CORE_TAB_IDS, ...(extraTabs ?? []).map((t) => t.id)], [extraTabs]);
   const asked = params.get("tab");
   const contributed = useShownDetailTabs(installId, refValue, data, coreIds, asked);
@@ -270,7 +274,9 @@ export function DetailFrame({
             selected={tab}
             onSelect={(t) => update({ tab: t === "overview" ? null : t })}
           >
-            {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
+            <DetailParams.Provider value={urlParams}>
+              {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
+            </DetailParams.Provider>
           </DetailTabs>
         </Frame>
       </TrailRefsProvider>

@@ -3,7 +3,7 @@ import { useContext } from "react";
 import type { LinkedRef, PathRow } from "../../api/types";
 import { columnCopy, routeCopy } from "../../copy/explorer";
 import { actionCopy, cellCopy, noteCopy, shareCopy } from "../../copy/traffic";
-import { backendPath } from "../../explore/objectPath";
+import { backendPath, linkTarget } from "../../explore/objectPath";
 import { HealthIcon } from "../../health/HealthIcon";
 import { StaleView, useShownState } from "../../health/staleView";
 import { stateLabel } from "../../health/state";
@@ -110,7 +110,11 @@ export function RouteCell({ r, installId }: { r: PathRow; installId: string }) {
   return (
     <Tooltip label={`${chain} · ${rule}`} stylesOverride={nameTip}>
       <Pair>
-        <NameCell r={last} installId={installId} />
+        <NameCell
+          r={last}
+          installId={installId}
+          to={linkTarget(installId, last, undefined, { rule: String(r.rule + 1) })}
+        />
         {r.delegated ? <Tag>{cellCopy.delegated}</Tag> : null}
         <span className="second">{rule}</span>
       </Pair>

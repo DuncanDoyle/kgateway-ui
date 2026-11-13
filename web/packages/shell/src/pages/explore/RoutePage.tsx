@@ -18,6 +18,7 @@ import { ChildRoutes } from "./route/ChildRoutes";
 import { EffectiveMatches } from "./route/EffectiveMatches";
 import { ParentCard } from "./route/ParentCard";
 import { RuleList } from "./route/RuleList";
+import { COMPACT_ABOVE, RuleTable } from "./route/RuleTable";
 import { isRouteRef, sameParentRef } from "./route/refs";
 import { Serves } from "./route/Serves";
 import { UpChain } from "./route/UpChain";
@@ -187,7 +188,11 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
             <h2 id="route-rules">
               {routeCopy.rules} <span className="note">{data.rules.length}</span>
             </h2>
-            <RuleList installId={id} kind={kind} rules={data.rules} serves={data.serves} />
+            {data.rules.length > COMPACT_ABOVE ? (
+              <RuleTable installId={id} kind={kind} rules={data.rules} serves={data.serves} />
+            ) : (
+              <RuleList installId={id} kind={kind} rules={data.rules} serves={data.serves} />
+            )}
           </Section>
           {delegation && data.effective?.length ? (
             <EffectiveMatches installId={id} edges={data.effective} truncated={data.effectiveTruncated} />

@@ -1,18 +1,19 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
 import candidateGolden from "../../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
 import restrictedGolden from "../../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
-import type { Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
+import type { BackendRef, Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
 import { routeCopy } from "../../copy/explorer";
 import { trafficCopy } from "../../copy/traffic";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
 import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
+import type { HealthState } from "../../theme/tokens";
 import { HEADER_H } from "./detailParts";
 import { RoutePage } from "./RoutePage";
 
@@ -663,4 +664,142 @@ it("from 1600 px the up-chain and parents render in the side column; below, at t
     view.unmount();
     vi.unstubAllGlobals();
   }
+});
+
+describe("a route with more than five rules", () => {
+  /** n rules, one Service each; rule 3 is an error, rule 5 a warning, rule 2 has no problem data, rule 7 is named. */
+  function longRoute(n: number): RouteDetail {
+    const d = detail(routeGolden);
+    const ref = d.rules[1]?.backendRefs[0] as BackendRef;
+    const states: Record<number, HealthState | undefined> = { 2: undefined, 3: "error", 5: "warning" };
+    d.rules = Array.from({ length: n }, (_, i) => {
+      const k = i + 1;
+      const letter = String.fromCharCode(96 + k);
+      const state = k in states ? states[k] : "healthy";
+      return {
+        index: i,
+        name: k === 7 ? "checkout" : undefined,
+        matches: [{ path: { type: "PathPrefix", value: `/store/${letter}` } }],
+        filters: k === 8 ? [{ type: "RequestHeaderModifier" }] : [],
+        backendRefs: [
+          {
+            ...ref,
+            ref: { ...ref.ref, name: `svc-${letter}` },
+            filters: [],
+            problem: state ? { state, signals: [] } : undefined,
+          },
+        ],
+      };
+    });
+    return d;
+  }
+  const rows = () => screen.queryAllByTestId("rule-row");
+  const openRegions = () => screen.queryAllByRole("region", { name: /^Rule \d+\b/ });
+  const rowButton = (n: number) => within(rows()[n - 1] as HTMLElement).getByRole("button");
+  /** The page's current query string, from a probe beside the page. */
+  function Probe() {
+    return <output data-testid="search">{useLocation().search}</output>;
+  }
+  function mountLong(rules: number, query = "") {
+    serve(api({ mid: longRoute(rules) }));
+    return renderWithTheme(
+      <Routes>
+        <Route
+          path="/i/:id/routes/:group/:kind/:ns/:name"
+          element={
+            <>
+              <RoutePage />
+              <Probe />
+            </>
+          }
+        />
+      </Routes>,
+      { path: `${MID}${query}` },
+    );
+  }
+
+  it("five rules render expanded as before, with no rows", async () => {
+    mountLong(5);
+    await loaded();
+    expect(openRegions()).toHaveLength(5);
+    expect(rows()).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: routeCopy.expandAll })).toBeNull();
+  });
+
+  it("nine rules render compact rows with the error and warning rules open; a row click toggles its rule", async () => {
+    mountLong(9);
+    await loaded();
+    expect(rows()).toHaveLength(9);
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 3", "Rule 5"]);
+    expect(rowButton(3)).toHaveAttribute("aria-expanded", "true");
+    expect(rowButton(1)).toHaveAttribute("aria-expanded", "false");
+    expect(rowButton(1)).toHaveAttribute("aria-controls");
+    // One line per rule: match, filter count, backends, state; no state without problem data.
+    expect(rows()[7]).toHaveTextContent("PathPrefix /store/h");
+    expect(rows()[7]).toHaveTextContent("1 filter");
+    expect(rows()[7]).toHaveTextContent("svc-h");
+    expect(within(rowButton(3)).getByText("Error")).toBeInTheDocument();
+    expect(within(rowButton(2)).queryByText(/Healthy|Error|Warning|Unknown/)).toBeNull();
+    expect(rows()[6]).toHaveTextContent("checkout");
+
+    await userEvent.click(rowButton(1));
+    expect(rowButton(1)).toHaveAttribute("aria-expanded", "true");
+    const body = screen.getByRole("region", { name: /^Rule 1\b/ });
+    expect(rowButton(1).getAttribute("aria-controls")).toBe(body.id);
+    expect(within(body).getByTestId("backend-svc-a")).toBeInTheDocument();
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("1,3,5");
+    await userEvent.click(rowButton(3));
+    expect(openRegions().map((r) => r.getAttribute("aria-label"))).toEqual(["Rule 1", "Rule 5"]);
+  });
+
+  it("Problems only keeps the rules with a problem and counts them", async () => {
+    mountLong(9);
+    await loaded();
+    await userEvent.click(screen.getByRole("button", { name: routeCopy.problemsOnly }));
+    expect(rows().map((r) => within(r).getByRole("button").textContent)).toEqual([
+      expect.stringContaining("Rule 3"),
+      expect.stringContaining("Rule 5"),
+    ]);
+    expect(screen.getByTestId("rule-count")).toHaveTextContent("2 of 9 rules");
+    expect(screen.getByTestId("search")).toHaveTextContent("problems=1");
+  });
+
+  it("the search matches paths and backend names, and says when nothing matches", async () => {
+    mountLong(9);
+    await loaded();
+    const box = screen.getByRole("searchbox", { name: routeCopy.searchRules });
+    await userEvent.type(box, "/store/h");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toHaveTextContent("Rule 8");
+    expect(screen.getByTestId("rule-count")).toHaveTextContent("1 of 9 rules");
+    await userEvent.clear(box);
+    await userEvent.type(box, "SVC-G");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toHaveTextContent("Rule 7");
+    await userEvent.type(box, "zzz");
+    expect(rows()).toHaveLength(0);
+    expect(screen.getByTestId("rule-empty")).toHaveTextContent(routeCopy.noRuleMatch);
+  });
+
+  it("?rule=7 opens rule 7 and scrolls it into view", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mountLong(9, "?rule=7");
+    await loaded();
+    expect(screen.getByRole("region", { name: /^Rule 7\b/ })).toBeInTheDocument();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(rows()[6]);
+    // jsdom has no scrollIntoView; the page calls it only when present.
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("Expand all opens every rule, Collapse all closes them", async () => {
+    mountLong(9);
+    await loaded();
+    await userEvent.click(screen.getByRole("button", { name: routeCopy.expandAll }));
+    expect(openRegions()).toHaveLength(9);
+    await userEvent.click(screen.getByRole("button", { name: routeCopy.collapseAll }));
+    expect(openRegions()).toHaveLength(0);
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("open")).toBe("none");
+  });
 });

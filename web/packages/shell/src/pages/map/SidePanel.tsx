@@ -125,6 +125,8 @@ function detailLink(installId: string, gateway: LinkedRef, n: MapNode): string |
   if (n.kind === "gateway" || n.action) return undefined;
   if (n.kind === "backend" && n.ref) return backendPath(installId, n.ref);
   if (n.kind === "listener" && !n.ref) return linkTarget(installId, gateway, undefined, { listener: n.name });
+  if (n.kind === "rule" && n.ref && n.rule !== undefined)
+    return linkTarget(installId, n.ref, undefined, { rule: String(n.rule + 1) });
   return n.ref ? objectPath(installId, n.ref) : undefined;
 }
 

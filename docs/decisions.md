@@ -1343,3 +1343,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** API v1 grows by an optional field on three detail bodies (additive). List rows keep D-063's four keys.
 
 **Alternatives:** Pick a condition in the SPA as the cause: rejected, R62. Add the id to the list rows' reason: rejected, the lists have no use for it.
+
+## D-081 — Long routes show their rules as a compact table (2026-11-13, 0.7.1)
+**Status:** accepted (user, 2026-11-13)
+
+**Context:** A route's detail page drew every rule open. With dozens of rules, finding one meant scrolling past all the others.
+
+**Decision:** Up to five rules, the page is unchanged. Above five, each rule is one fixed-height row (number and name, match summary, filter count, backends, state) that opens in place to the full rule. A rule's state is the worst `problem.state` of its backendRefs, as the map's rule node shows it; a rule with no problem data shows none. Error and warning rules start open. Above the rows: a Problems only chip, a search box (paths, header and query names and values, methods, filter types, backends) and Expand all / Collapse all. The URL keeps `problems=1`, `q=` and `open=` (1-based rule numbers, `none` when all are closed; absent means the default). `rule=N` opens rule N and scrolls to it, on either layout; the map's rule nodes, Traffic's route cells and a backend's explanations link with it.
+
+**Consequences:** No API change. The detail frame shares its URL params through a context, so a section never adds a second `useUrlParams`.
+
+**Alternatives:** Collapse every route's rules: rejected, short routes read best open. Keep the open rules in local state: rejected, reload and back would lose the place.

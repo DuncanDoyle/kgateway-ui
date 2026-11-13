@@ -260,6 +260,16 @@ export const routeCopy = {
   childRoutes: "Child routes",
   toggleChildren: (open: boolean) => (open ? "Hide child routes" : "Show child routes"), // S92
   noChildRoutes: "No reported child routes.", // S93
+  // The rule table of a route with more than five rules (D-081).
+  problemsOnly: "Problems only", // S771
+  searchRules: "Search rules", // S828
+  expandAll: "Expand all", // S829
+  collapseAll: "Collapse all", // S830
+  shownRules: (n: number, of: number) => `${n} of ${plural(of, ["rule", "rules"])}`, // S831
+  noRuleMatch: "No rule matches the search.", // S832
+  moreHeaders: (n: number) => `+${plural(n, ["header", "headers"])}`, // S833
+  moreQuery: (n: number) => `+${n} query`, // S834
+  filterCount: (n: number) => plural(n, ["filter", "filters"]), // S835
 };
 
 // region Computed facts (2.3). S111–S133; final wording from Task 48 (phase-2.3-wording.md).
