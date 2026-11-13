@@ -882,7 +882,7 @@ Measured on the reference machine, 5 runs per world:
 **Decision:**
 1. `GET …/diagnostics` is built per request from the published Model and the caller's view. Nothing per caller is retained.
 2. `ProcessSummary` is `{state, observed, ready?, desired?, version?, restricted?}`. `state` is the worst controller finding, 005 included; unknown when not observed and none fired (R62).
-3. `ProxySummary` is `{state, gateways, ready, rejecting, skew, restarting, notObserved}`, over visible Gateways. `state` is the worst known Gateway health in the row-state order; a healthy Gateway with unobserved proxies counts as unknown.
+3. `ProxySummary` is `{state, gateways, ready, rejecting, skew, restarting, notObserved, selfManaged}`, over visible Gateways. `selfManaged` counts Gateways with a KGWUI-010; they are also in `notObserved`. `state` is the worst known Gateway health in the row-state order; a healthy Gateway with unobserved proxies counts as unknown.
 4. `ProcessSummary` has no `restartsRecent`. A recent restart shows as a 019 group and on the Processes page, where `ProcessDTO.restartsRecent` is the named Pod's count.
 5. `dataPlane` is `{gateways, rejecting, unavailable?}`. `rejecting` counts Gateways with a 001 over every finding (§14 rule 18). `gateways` counts visible Gateways plus hidden ones a restricted 001 already names, so `rejecting` never exceeds it and no hidden count leaks. `withheld` waits for 024 (3.4).
 6. `DataPlaneDTO` on the Gateway page adds `rejecting`, `unavailable` (the xDS rejects check is not OK, so `rejecting: false` means unknown), `evidenceRestricted` and `proxyStats {available, unavailable?, reason?}` per Gateway. `snapshot` gains `by: "controller"`.

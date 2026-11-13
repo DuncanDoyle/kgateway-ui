@@ -45,12 +45,17 @@ type procSummary struct {
 	i     *engine.InstallModel
 	facts map[objects.Ref]*subjectFacts
 	ctrl  []string // running controller versions
+	// selfManaged are the Gateways with a KGWUI-010: kgateway runs no proxy for them.
+	selfManaged map[objects.Ref]bool
 }
 
 func newProcSummary(v *view, i *engine.InstallModel) *procSummary {
-	ps := &procSummary{v: v, i: i, facts: map[objects.Ref]*subjectFacts{}}
+	ps := &procSummary{v: v, i: i, facts: map[objects.Ref]*subjectFacts{}, selfManaged: map[objects.Ref]bool{}}
 	for k := range i.Health.Findings {
 		f := &i.Health.Findings[k]
+		if f.Resource != nil && f.Code == health.CodeSelfManagedProxy {
+			ps.selfManaged[*f.Resource] = true
+		}
 		if f.Resource == nil || !slices.Contains(processCodes, f.Code) {
 			continue
 		}
@@ -286,6 +291,9 @@ func (ps *procSummary) proxySummary() ProxySummary {
 		}
 		if !g.set.Observed {
 			out.NotObserved++
+		}
+		if ps.selfManaged[g.ref] {
+			out.SelfManaged++
 		}
 	}
 	// No visible Gateway is no signal, never green.

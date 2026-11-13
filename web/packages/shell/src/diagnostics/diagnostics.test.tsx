@@ -832,6 +832,49 @@ describe("ProcessLine", () => {
     expect(screen.getByText(diagnosticsCopy.gatewaysNotObserved(1))).toBeInTheDocument();
     expect(screen.getByText("Error")).toBeInTheDocument();
   });
+
+  it("the proxies line leaves self-managed Gateways out of the ready count", () => {
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{
+          state: "error",
+          gateways: 6,
+          ready: 4,
+          rejecting: 4,
+          skew: 0,
+          restarting: 0,
+          notObserved: 1,
+          selfManaged: 1,
+        }}
+      />,
+    );
+    expect(screen.getByText("4 of 5 Gateways ready")).toBeInTheDocument();
+    expect(screen.getByText("4 reject config")).toBeInTheDocument();
+    expect(screen.getByText("1 self-managed")).toBeInTheDocument();
+    expect(screen.queryByText(/not observed/)).toBeNull();
+  });
+
+  it("a proxies line of only self-managed Gateways shows no ready count", () => {
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{
+          state: "unknown",
+          gateways: 2,
+          ready: 0,
+          rejecting: 0,
+          skew: 0,
+          restarting: 0,
+          notObserved: 2,
+          selfManaged: 2,
+        }}
+      />,
+    );
+    expect(screen.getByText(diagnosticsCopy.selfManaged(2))).toBeInTheDocument();
+    expect(screen.queryByText(/Gateways ready/)).toBeNull();
+    expect(screen.queryByText(/not observed/)).toBeNull();
+  });
 });
 
 describe("ProcessTable", () => {

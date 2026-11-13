@@ -127,7 +127,8 @@ type ProcessSummary struct {
 }
 
 // ProxySummary counts the visible Gateways: those with every proxy ready, with
-// a reject, with version skew, with a restart, and whose proxies are not observed.
+// a reject, with version skew, with a restart, whose proxies are not observed, and whose
+// proxies are self-managed (KGWUI-010; also counted in NotObserved).
 // State is the worst known health of those Gateways; unknown when none is known.
 type ProxySummary struct {
 	State       health.State `json:"state"`
@@ -137,6 +138,7 @@ type ProxySummary struct {
 	Skew        int          `json:"skew"`
 	Restarting  int          `json:"restarting"`
 	NotObserved int          `json:"notObserved"`
+	SelfManaged int          `json:"selfManaged"`
 }
 
 // DataPlaneSummary counts Gateways with a KGWUI-001 over every finding, beside the visible Gateways

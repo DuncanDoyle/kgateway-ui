@@ -1091,7 +1091,16 @@ const diagnostics = shape<Diagnostics>(
           { state: healthState },
         ),
         proxies: shape<Diagnostics["processes"]["proxies"]>(
-          { state: "!", gateways: "!", ready: "!", rejecting: "!", skew: "!", restarting: "!", notObserved: "!" },
+          {
+            state: "!",
+            gateways: "!",
+            ready: "!",
+            rejecting: "!",
+            skew: "!",
+            restarting: "!",
+            notObserved: "!",
+            selfManaged: "?",
+          },
           {},
           { state: healthState },
         ),

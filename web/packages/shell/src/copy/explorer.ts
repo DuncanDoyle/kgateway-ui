@@ -438,7 +438,7 @@ export const diagnosticsCopy = {
   pod: "Pod", // S433
   rejectingSince: (ago: string) => `New rejects, started ${ago}`, // S434
   envoyResources: "Envoy resources", // S436
-  rejecting: (n: number) => `${n} rejecting`, // S397
+  rejecting: (n: number) => `${n} reject config`, // S397
   rejectingNow: "New rejects", // S434
   notRejecting: "No new rejects", // S435
   truncated: "and more", // S437
@@ -488,10 +488,11 @@ export const diagnosticsCopy = {
   versionHeader: "Version", // S406
   notObserved: "Not observed", // S363
   noGateways: "No Gateways you can view", // S395
-  gatewaysReady: (ready: number, total: number) => `${ready}/${total} Gateways ready`, // S396
+  gatewaysReady: (ready: number, total: number) => `${ready} of ${total} Gateways ready`, // S396
   skew: (n: number) => `${n} with version skew`, // S398
   restarting: (n: number) => `${n} restarted recently`, // S399
   gatewaysNotObserved: (n: number) => `${n} not observed`, // S364
+  selfManaged: (n: number) => `${n} self-managed`, // S824
   name: "Name",
   ready: "Ready", // S400
   notReady: "Not ready",

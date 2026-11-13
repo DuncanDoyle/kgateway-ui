@@ -660,7 +660,7 @@ Diagnostics    { install, verdict: { state, problems, counts, oldestSince?, reas
                  dataPlane: { gateways, rejecting, withheld?, unavailable? }, checks: CheckResult[], collectedAt }
                                                                 // withheld: Gateways with a 024 error (3.5); D-050
 ProcessSummary { state, observed, ready?, desired?, version?, restricted? }            // no restart count (D-050)
-ProxySummary   { state, gateways, ready, rejecting, skew, restarting, notObserved }
+ProxySummary   { state, gateways, ready, rejecting, skew, restarting, notObserved, selfManaged }  // selfManaged: 010s, also in notObserved
 ProcessSetDTO  { observed, desired?, ready?, processes: ProcessDTO[], rollout?: { progressing, reason? }, restricted? }
 ProcessDTO     { name, ready?, restarts?, restartsRecent?, lastStart?, termination?, waiting?, version?, probe? }
 GatewayProcesses { gateway: LinkedRef, health, set: ProcessSetDTO, rejects?: number, skew?: boolean }

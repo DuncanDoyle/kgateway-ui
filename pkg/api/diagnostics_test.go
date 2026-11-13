@@ -517,8 +517,9 @@ func TestProcessSetCountsOnlyWhenPodHidden(t *testing.T) {
 	if c := get[Diagnostics](t, srv, diagPath, 200).Processes.Controller; !c.Restricted || c.Version != "" || c.Desired == nil {
 		t.Fatalf("hidden controller summary %+v", c)
 	}
+	// lone is self-managed: counted as self-managed and not observed, never ready.
 	d := get[Diagnostics](t, h.srv, diagPath, 200).Processes
-	if d.Proxies != (ProxySummary{State: health.StateUnknown, Gateways: 3, Ready: 2, Skew: 1, Restarting: 1, NotObserved: 1}) || d.Controller.Version != "2.4.7" {
+	if d.Proxies != (ProxySummary{State: health.StateUnknown, Gateways: 3, Ready: 2, Skew: 1, Restarting: 1, NotObserved: 1, SelfManaged: 1}) || d.Controller.Version != "2.4.7" {
 		t.Fatalf("summaries %+v", d)
 	}
 }
