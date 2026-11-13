@@ -216,7 +216,6 @@ The evidence from Phases 6–8 (backends, policies, the route tester) is what ma
 - **A Headlamp plugin.** It would be a second surface; one surface comes first.
 - **A support-bundle export.** Revisit after Phase 11.
 - **Proxy endpoint view** (#35, D-069). Per-proxy endpoints, health and drift against Kubernetes and the controller, opt-in. After GA; needs an upstream kgateway option for read-only `/clusters`.
-- **The agentgateway data plane.** It has its own controller, so this roadmap covers the Envoy data plane only.
 - **GRPCRoute, TCPRoute and TLSRoute.** Not in Phase 2 scope (HTTPRoute first). Added when a phase design pulls them in.
 
 ## Assumptions
