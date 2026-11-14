@@ -38,6 +38,19 @@ None.
 - Reel of the whole phase, 7.5 MB, kept outside the repo. README "Traffic and backends"; `documentation-notes.md` topics.
 - Dependencies added: `@xyflow/react` only (approved).
 
+## Patch release v0.7.1
+Released 2026-11-14 from `f629b25`: fixes from a UI walkthrough, merged in #42 and #43. Decisions D-079 … D-083.
+
+| Area | Change |
+|---|---|
+| Overview | Whole Needs attention rows open their cause (D-079); "Config accepted"; the proxies line names Gateways |
+| Detail pages | A problem strip names the deciding finding (D-080); larger tabs; "namespace:" label |
+| Routes | Rules as a compact table, error and warning rules open (D-081); a route to a backend with a problem is at least warning (D-082) |
+| Map | Route nodes follow D-082 and their panel names the backend's finding (D-083) |
+| Findings | KGWUI-023 reads "This backend has no ready endpoints" |
+
+Reviews: `reviews/v0.7.1-codex.md` (findings 1, 2, 3, 5 and 6 fixed; 4 tracked) and `reviews/v0.7.1-map-codex.md` (1 fixed, 1 deferred to Phase 7).
+
 ## Notes for later phases
 - Phase 7 reuses the path model for policy attachment. Phase 11 fills the reserved rule Filters area and the proxy endpoint view (D-069).
 - `used=no` means "no visible consumers" (D-078 item 16).
@@ -50,11 +63,12 @@ None.
 - UX: selecting a backend at fit view re-centres it and the side panel clips route names.
 - UX: a node reads "Healthy" beside "1 of 1 paths through this node fail".
 - Queued for the user:
-  - KGWUI-023's title "Requests to this backend get 503" names a status code. A finding-copy decision.
+  - ~~KGWUI-023's title "Requests to this backend get 503" names a status code.~~ Retitled in v0.7.1.
   - A ref whose problem is a KGWUI-023 warning draws a plain blue share segment. Tint it, or leave share states to 013/014?
   - Class-only installs get no paths in Phase 6 (`summary.notComputed`). Derive them from route status?
-  - Add `@axe-core/playwright` (e2e-only devDependency) for automated accessibility checks?
+  - ~~Add `@axe-core/playwright` for automated accessibility checks?~~ Added in #37.
   - The map reserves a rule column, so the resting map is wider.
   - Export covers the whole drawn graph, not the viewport.
   - Review the D-078 deviations (status: pending user review).
 - snellius.dev sync for the user-visible changes (program P-006).
+- From v0.7.1: the Playwright hit-test check (`reviews/v0.7.1-codex.md` #4); the map cases D-083 cannot see, and two signals per route, for the Phase 7 design.
