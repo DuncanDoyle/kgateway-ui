@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { X } from "lucide-react";
 import { useContext, useEffect, useRef } from "react";
 import type { Endpoints, LinkedRef, PathRow } from "../../api/types";
+import { routeStateBackendCopy } from "../../copy/explorer";
 import { mapCopy } from "../../copy/map";
 import { cellCopy, signalText } from "../../copy/traffic";
 import { backendPath, linkTarget, objectPath } from "../../explore/objectPath";
@@ -175,7 +176,8 @@ interface SidePanelProps {
 
 /**
  * A map node's state, the paths through it by state, its own problems, a backend's endpoints, and links to its
- * detail and to Traffic (design §6.1). A node's state names only its own signals, so the path counts say what fails through it.
+ * detail and to Traffic (design §6.1). A node's state names only its own signals, plus a route's backend problems
+ * (D-082), so the path counts say what fails through it.
  */
 export function SidePanel({
   installId,
@@ -256,13 +258,23 @@ export function SidePanel({
       {stale ? null : (
         <>
           <h3>{mapCopy.problems}</h3>
-          {node.problems.length ? (
+          {node.problems.length || node.backendProblems?.length ? (
             <ul data-testid="map-panel-problems">
               {node.problems.map((s) => {
                 const text = signalText(s);
                 return (
                   <li key={`${s.kind}|${text}`}>
                     <HealthIcon state={s.state} size={14} />
+                    {text}
+                  </li>
+                );
+              })}
+              {/* A backend's finding makes the route warning (D-082). */}
+              {node.backendProblems?.map((s) => {
+                const text = `${routeStateBackendCopy["backend-problem"]}: ${signalText(s)}`;
+                return (
+                  <li key={`backend|${text}`}>
+                    <HealthIcon state="warning" size={14} />
                     {text}
                   </li>
                 );
