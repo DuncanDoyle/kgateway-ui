@@ -2,7 +2,7 @@
 
 ## Phase
 Phase: 7 — Identity & Access (inserted 2026-11-14, D-084)
-Base: f629b256b46898751285737d1e46a3ae7a5fc1e5 (v0.7.1)
+Base: 81a2c0b844677e9fa1f79b32b364066d4d17176b (main after #44)
 Docs: docs/phases/phase-7/
 Status: design
 
