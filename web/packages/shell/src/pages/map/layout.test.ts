@@ -152,7 +152,7 @@ it("rules with no backend end in a node of their written action, one per route",
   expect(ends.every((n) => n.ref === undefined)).toBe(true);
 });
 
-it("a node's state comes from the signals that name it, so a broken backend leaves its route healthy", () => {
+it("a node's state comes from the signals that name it; a broken backend makes its route warning (D-082)", () => {
   const svc = ref("Service", "svc-a");
   const g = buildGraph(
     [
@@ -169,7 +169,7 @@ it("a node's state comes from the signals that name it, so a broken backend leav
   );
   const state = (id: string) => g.nodes.find((n) => n.id === id)?.state;
   expect(state("b:/Service/shop/svc-a")).toBe("error");
-  expect(state("r:gateway.networking.k8s.io/HTTPRoute/shop/r1")).toBe("healthy");
+  expect(state("r:gateway.networking.k8s.io/HTTPRoute/shop/r1")).toBe("warning");
   expect(state("l:http")).toBe("unknown");
   expect(state("g:gateway.networking.k8s.io/Gateway/infra/edge")).toBe("healthy");
   expect(state("b:/Service/shop/svc-c")).toBe("warning");

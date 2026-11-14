@@ -1365,3 +1365,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** API v1, additive: a new flag and filter value, a reason kind, and `backend` on route reasons. Gateway and ListenerSet states are unchanged. A route to an idle Service now reads warning.
 
 **Alternatives:** Raise the route to the backend's severity: not taken, an error backend may carry only a small share of the traffic. Two signals per route, its own state and a separate traffic-path state (as the Gateway table's Data plane column): cleaner, since one badge now answers both "is it configured right" and "does its traffic work", but more UI work; a Phase 7 design question, covering `gateway-rejecting` too.
+
+## D-083 — Map route nodes follow D-082 (2026-11-14, 0.7.1)
+**Status:** accepted (user, 2026-11-14)
+
+**Context:** After D-082 a route to an idle Service reads warning on its page and in the lists, but its map node read healthy: a map node took only the signals that name it, and KGWUI-023 names the Service.
+
+**Decision:** On the map, a route node whose rows send to a backend with an error or warning finding is at least warning; a mirror target does not count. Its side panel lists each such finding as "Backend has a problem: …". The map computes it from the path rows it already loads, so a backend the caller may not view, or a row a state filter hides, does not raise it there.
+
+**Consequences:** No API change. The map and the route page agree for every path the map shows.
+
+**Alternatives:** Send each route's row state on path rows: exact, but changes `/paths` and its memory budget for a case the map rows already cover.

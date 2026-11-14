@@ -225,3 +225,29 @@ it("two hidden routes of one name are listed apart, by id and by the routes abov
     [chain("root", "b", "x"), "shop/b › shop/x"],
   ]);
 });
+
+it("a route whose backend has an error or warning finding is at least warning, as on its page (D-082)", () => {
+  const on = (b: string, state: "error" | "warning" | "unknown") =>
+    ({ state, signals: [{ kind: "finding", code: "KGWUI-023", ref: ref("Service", b), state }] }) as PathRow["problem"];
+  const own = { kind: "finding", code: "KGWUI-013", ref: ref("HTTPRoute", "bad"), state: "error" } as const;
+  const rows = [
+    row("http", ["api"], "idle", { problem: on("idle", "error") }),
+    row("http", ["slow"], "busy", { problem: on("busy", "warning") }),
+    row("http", ["copy"], "shadow", { problem: on("shadow", "error"), mirror: true, shareState: "mirror" }),
+    row("http", ["wait"], "new", { problem: on("new", "unknown") }),
+    row("http", ["bad"], "idle", { problem: { state: "error", signals: [own, ...on("idle", "error").signals] } }),
+  ];
+  const g = buildGraph(rows);
+  const node = (id: string) => g.nodes.find((n) => n.id === id);
+  // An error backend makes its route warning, not error; the backend keeps its own state.
+  expect([node(R("api"))?.state, node(B("idle"))?.state]).toEqual(["warning", "error"]);
+  expect(node(R("api"))?.backendProblems?.map((s) => s.code)).toEqual(["KGWUI-023"]);
+  expect(node(R("api"))?.problems).toEqual([]);
+  expect(node(R("slow"))?.state).toBe("warning");
+  // A mirror target and an unknown backend do not count; a route's own error still shows error.
+  expect([node(R("copy"))?.state, node(R("wait"))?.state, node(R("bad"))?.state]).toEqual([
+    "healthy",
+    "healthy",
+    "error",
+  ]);
+});

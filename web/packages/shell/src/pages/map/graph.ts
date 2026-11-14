@@ -40,6 +40,8 @@ export interface MapNode {
   rows: number[];
   /** The distinct row signals that name this node. */
   problems: PathSignal[];
+  /** A route node's backends' error and warning findings, which make it at least warning (D-082). */
+  backendProblems?: PathSignal[];
 }
 
 /**
@@ -136,7 +138,8 @@ const chainIds = (r: PathRow) =>
  * A delegated route shows under its own parent, with no listener edge, unless a route above it is collapsed; its id
  * is its chain from the root, so a route delegated from two parents shows under each. A route in expanded that ends a
  * row opens into one node per rule between it and the backends. A node's state is the worst of the row signals
- * that name it; a hidden route's signals go to its collapsed parent, listed under the hidden route's name.
+ * that name it; a hidden route's signals go to its collapsed parent, listed under the hidden route's name. A route
+ * that sends to a backend with an error or warning finding is at least warning (D-082).
  */
 export function buildGraph(
   rows: PathRow[],
@@ -247,6 +250,13 @@ export function buildGraph(
         n.state = worse(n.state, s.state);
         const k = signalKey(s);
         if (!n.problems.some((p) => signalKey(p) === k)) n.problems.push(s);
+      }
+      // A route whose backend has an error or warning finding is at least warning, as on its page (D-082).
+      const route = nodes.get(routes[routes.length - 1] ?? "");
+      if (route && !r.mirror && s.kind === "finding" && same(s.ref, r.backend) && RANK[s.state] >= RANK.warning) {
+        route.state = worse(route.state, "warning");
+        const list = route.backendProblems ?? [];
+        if (!list.some((p) => signalKey(p) === signalKey(s))) route.backendProblems = [...list, s];
       }
       explained = worse(explained, s.state);
     }

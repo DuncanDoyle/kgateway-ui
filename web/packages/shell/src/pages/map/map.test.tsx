@@ -593,7 +593,7 @@ it("the side panel of a backend with no ready endpoints says what fails through 
   expect(map.querySelectorAll(".react-flow__node.dim")).toHaveLength(0);
 });
 
-it("a route whose backend fails reads healthy itself, and its panel counts the failing paths through it", async () => {
+it("a route whose backend fails reads warning, names the backend problem, and counts the failing paths through it", async () => {
   const be1 = edgePaths().rows.find((r) => r.backend?.name === "be1") as PathRow;
   const signal = {
     kind: "finding" as const,
@@ -616,11 +616,13 @@ it("a route whose backend fails reads healthy itself, and its panel counts the f
   fireEvent.click(within(flowNode(map, "shop/backends")).getByTestId("map-node"));
   const panel = await screen.findByRole("complementary", { name: "Node details" });
   const through = edgePaths().rows.filter((r) => r.routes[0]?.name === "backends").length;
-  expect(panel).toHaveTextContent("Healthy");
+  expect(panel).toHaveTextContent("Warning");
   expect(within(panel).getByTestId("map-panel-counts")).toHaveTextContent(
     `1 of ${through} paths through this node fail`,
   );
-  expect(within(panel).getByText("Nothing on this node itself.")).toBeVisible();
+  expect(within(panel).getByTestId("map-panel-problems")).toHaveTextContent(
+    `Backend has a problem: Backend not accepted (${be1.backend?.kind} ${be1.backend?.namespace}/be1)`,
+  );
 });
 
 it("chips update the server query live and live in the URL", async () => {
