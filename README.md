@@ -31,7 +31,7 @@ Read this before you expose the UI.
 
 ```sh
 # Install the chart from ghcr
-helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.7.0 \
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.7.1 \
   -n snellius --create-namespace
 
 # Open the UI on http://localhost:8080
