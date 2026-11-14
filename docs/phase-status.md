@@ -1,13 +1,15 @@
 # Phase status
 
 ## Phase
-Phase: 7 — Policies & Filters
-Base: (set when the phase starts)
+Phase: 7 — Identity & Access (inserted 2026-11-14, D-084)
+Base: f629b256b46898751285737d1e46a3ae7a5fc1e5 (v0.7.1)
 Docs: docs/phases/phase-7/
-Status: not started
+Status: design
 
 ### Queue
-(none yet; the design comes first)
+- [ ] Design (`phases/phase-7/design.md`) ← CURRENT
+- [ ] Implementation plan
+- [ ] Codex review of design + plan, triage, user approval
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -23,20 +25,20 @@ Sub-phase: none
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
-Waiting on: (read the program file when Phase 7 starts)
-Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5), `v0.6.0` (2026-11-09, generic core, kgwctl#7; E8 break, kgwctl#6) and `v0.7.0` (2026-11-12): kgwctl's E2 requests #18 (`cache.ListOnce`) and #19 (namespace-scoped inputs) shipped and closed; notified kgwctl#8, program file updated (kgateway-tooling `fd99830`). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. An informational kgwctl compile job reports on every PR, never blocks.
-Open `cross-repo` issues (2026-11-13): here #15, #21 (xdsview E4/E5, for Phase 11); in kgwctl #1–#8 (notices from xdsview and this repo, consumer side).
-Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
+Waiting on: nothing (program file read 2026-11-14; no edge feeds Phase 7). To propose in the program file, with the user's approval: the D-084 renumbering of UI phases, and a new edge for the shared MCP tool set that kgwctl's local MCP uses (D-089). Open `cross-repo` issues here: #15, #21 (Phase 12).
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5), `v0.6.0` (2026-11-09, generic core, kgwctl#7; E8 break, kgwctl#6) and `v0.7.0` (2026-11-12): kgwctl's E2 requests #18 (`cache.ListOnce`) and #19 (namespace-scoped inputs) shipped and closed; notified kgwctl#8, program file updated (kgateway-tooling `fd99830`). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 8 (was 7 before D-084; program file not yet updated). An informational kgwctl compile job reports on every PR, never blocks.
+Open `cross-repo` issues (2026-11-13): here #15, #21 (xdsview E4/E5, for Phase 12); in kgwctl #1–#8 (notices from xdsview and this repo, consumer side).
+Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 12 (was 11 before D-084).
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
 - (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: phases/phase-1/reviews/phase-codex.md#5
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
-- (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md
+- (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — now Phase 7 scope (D-084) — src: phases/phase-1/phase-1.4-complete.md
 - (P3) kgateway#14998 (upstream): once the controller reports a selector that matches nothing, the 3.5 S7 computed rule can go — src: phases/phase-3/phase-3.5-complete.md
 - (P3) R59: proxy Pod ownership by UID needs a ReplicaSet watch; the name check (R50) stays until then — src: phases/phase-3/phase-3.2-complete.md
-- (P3) D-058 item 1: 023 proxy membership evidence needs a port-aware reverse mapping (xdsview `origin`, Phase 11) — src: phases/phase-3/phase-3.4-complete.md
-- (P3) D-058 item 6: DirectResponse status is not judged (Phase 7) — src: phases/phase-3/phase-3.4-complete.md
+- (P3) D-058 item 1: 023 proxy membership evidence needs a port-aware reverse mapping (xdsview `origin`, Phase 12) — src: phases/phase-3/phase-3.4-complete.md
+- (P3) D-058 item 6: DirectResponse status is not judged (Phase 8) — src: phases/phase-3/phase-3.4-complete.md
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039). Retained heap is +39.3 of 48 MiB (D-057); Phase 5 must keep the shared cache in the core — src: phases/phase-3/reviews/3.0-gate-codex.md#2
 - (P3) A live `warm_withheld` capture for KGWUI-024's error; on kind the gauge never outlasts a scrape — src: phases/phase-3/phase-3.4-complete.md
 - (P3) README Install: say that installing the chart needs rights to create a ClusterRole and ClusterRoleBinding (usually cluster-admin), since Kubernetes only lets you bind permissions you hold. Next release (2026-11-09)
