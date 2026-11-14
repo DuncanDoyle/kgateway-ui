@@ -1376,3 +1376,82 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** No API change. The map and the route page agree except in the cases above.
 
 **Alternatives:** Send each route's row state on path rows: exact, but a `/paths` API change in a patch release; left to Phase 7.
+
+## D-084 — New Phase 7: Identity & Access; Phases 7–13 become 8–14 (2026-11-14, roadmap)
+**Status:** accepted (user, 2026-11-14)
+
+**Context:** Snellius watches cluster state, and today whoever reaches it sees everything its ServiceAccount reads (D-013). For a release that can be promoted to enterprises, the user ranks authentication and authorisation above any new feature. Research (Kubernetes Dashboard, Headlamp, Kiali, Argo CD, Grafana, Rancher) and a Codex brainstorm agree on in-app OIDC plus Kubernetes SubjectAccessReview against the shared cache. The `Authorizer` seam and visible-only rows (D-077) already exist.
+
+**Decision:**
+1. **New Phase 7 — Identity & Access**, before Policies. Scope: local and secure modes (D-086), OIDC login with identity from TokenReview, per-object SubjectAccessReview behind the `Authorizer`, strict visibility on every page and computed view (D-085), two signals per route (D-087), sessions and an audit log. OpenShift's built-in OAuth follows after Phase 7, once a test cluster exists. Phase 7 ships as `v0.8.0`.
+2. **Renumbering.** Policies & Filters 7→8, Search & Route Tester 8→9, Security Posture 9→10, Metrics & Insights 10→11, Runtime Filter Chain 11→12, App-Team Views 12→13, AI-Assisted Diagnosis 13→14. As with D-061, closed records, older designs and earlier decisions keep the old numbers; this entry maps them. The program file's references to UI phases (E7 "UI Phase 7", E4/E5 "UI Phase 11") need the same shift; that is a separate commit in the coordination repo.
+3. "Per-user authentication and authorisation" leaves "Deferred". App-Team Views (now Phase 13) keeps only what goes beyond RBAC-driven visibility.
+
+**Consequences:** Policies, Search, Posture and the later phases each move one slot later. No code changes.
+
+**Alternatives:** A new number with a "Sequence: next" line, as Phase 14 has: no references break, but numbers stop showing the order; rejected by the user, since nothing after Phase 6 has started.
+
+## D-085 — Least privilege: visibility follows Kubernetes RBAC exactly (2026-11-14, Phase 7)
+**Status:** accepted (user, 2026-11-14); supersedes D-013 for secure mode
+
+**Context:** D-013 lets whoever reaches the UI see everything it shows. A stolen app-team session, or an agent driving it, would then read more than that user's RBAC allows. Several states derive from objects the viewer may not read: `gateway-rejecting`, and `backend-problem` (D-082), which today still gives a restricted viewer the warning and the finding code.
+
+**Decision:**
+1. New product principle 9, **least privilege**: in secure mode a person, or an agent acting for them, sees nothing beyond what their Kubernetes RBAC lets them read. Snellius has no permission model of its own and no curated summaries; platform teams control visibility with Roles and ClusterRoles only.
+2. **The rule:** with the viewer's readable objects and permissions unchanged, a change to an object they cannot read never changes what they see. It covers pages, lists, counts, facets, search, the map, exports, the API and every MCP form.
+3. A name written in an object the viewer can read (a backendRef in their route) stays visible as a reference. Snellius never confirms that the named object exists, nor shows its state.
+
+**Consequences:** D-013's allow-all model remains only as local mode (D-086). D-082 and D-083 change for restricted viewers through D-087; nothing changes for viewers who can read everything. Pages from before Phase 6 need the D-077 treatment.
+
+**Alternatives:** Curated health summaries for objects a team cannot read (for example the Gateway their route attaches to): rejected by the user. It overrides the platform team's RBAC implicitly and surprises them, and a compromised account would learn more than its RBAC allows.
+
+## D-086 — Local mode by default, secure mode for production (2026-11-14, Phase 7)
+**Status:** accepted (user, 2026-11-14)
+
+**Context:** Closed by default would cost the five-minute demo; open by default on a Service lets any pod or agent in the cluster read everything Snellius reads.
+
+**Decision:**
+1. **Local mode (default).** The UI and API listen only on 127.0.0.1 inside the pod, so only `kubectl port-forward` reaches them; that needs `pods/portforward` in the Snellius namespace. The binary enforces this, including against `extraArgs`; it refuses `hostNetwork` and stays out of a mesh by default. Probes get a separate listener with no data. A permanent banner, the Helm NOTES, a startup warning and a mode metric state what this mode exposes. Visibility is D-013's: everything Snellius reads.
+2. **Secure mode (production).** OIDC login (D-084) and visibility per D-085. It fails closed: missing configuration or an unavailable permission check gives "unavailable", never an open fallback. A Service-exposed listener, the `httpRoute` values or an ingress require it; the chart refuses them in local mode.
+3. Tests prove direct pod and Service access is refused in local mode, and pod and Service port-forward work.
+
+**Consequences:** The docs say plainly that anyone allowed to port-forward to Snellius sees everything it can read, including credentials kept outside Secrets.
+
+**Alternatives:** Refuse to run until an identity provider is configured: the safest, but it loses the demo. A `kubectl snellius` helper that passes the user's own token: least privilege without an IdP, but extra setup and no client-certificate kubeconfigs; not taken.
+
+## D-087 — Two signals per route move into Phase 7 (2026-11-14, Phase 7)
+**Status:** accepted (user, 2026-11-14)
+
+**Context:** Under D-085, a state that rolls up hidden objects leaks them, while a state from visible inputs alone can show green over broken traffic (D-006).
+
+**Decision:** The two-signal design item moves from Policies (now Phase 8) into Phase 7. Each route shows **route configuration**, from its own status and the objects the viewer can read, and **traffic path**, from the whole path (Gateway, listener, backends). When required evidence is unreadable, the traffic path reads unknown with "You don't have permission to check the whole path."; a fault the viewer can see still shows warning or error, with "Assessment incomplete with your current permissions." The note appears whether the hidden object exists, is healthy or has findings. `gateway-rejecting` and `backend-problem` move into the traffic path.
+
+**Consequences:** API v1 gains the path signal; the D-082 reason fields and the D-083 map rule follow the new contract for restricted viewers. Policies (Phase 8) adds inherited policy problems to the same signal.
+
+**Alternatives:** One state with the cause hidden (today): leaks hidden health. One state from visible inputs only: false green. Unknown for the whole route: nearly every app-team route, whose Gateway sits in an infra namespace.
+
+## D-088 — One operator app; features live where their question is asked (2026-11-14, roadmap)
+**Status:** accepted (user, 2026-11-14)
+
+**Context:** Later phases add policies, a route tester, posture, versions and CVEs, metrics, the filter chain and AI diagnosis. The user fears an overloaded dashboard. OpenShift merged its perspectives back in 4.19; Elastic users rejected its split navigation.
+
+**Decision:**
+1. Snellius stays one app for one audience: the platform operator. Security and compliance teams are not a target audience; they get machine-readable exports (#45), not UI.
+2. Each feature answers an operator question on the page where that question comes up. The overview keeps only what needs action now.
+3. Each phase design states its overview footprint. More than one new overview line needs a decision entry.
+4. A feature without data is hidden, not shown empty or disabled.
+
+**Consequences:** Versions and CVEs (Security Posture, now Phase 10) are an upgrade decision for kgateway, its Envoy and Snellius; image scanning stays with existing scanners.
+
+**Alternatives:** A second app with an app switcher, or one nav section per module: moves the overload instead of removing it; split only when audience, workflow or security boundary really differs.
+
+## D-089 — Agents: local MCP in kgwctl first, remote MCP after Phase 7 (2026-11-14, roadmap)
+**Status:** accepted (user, 2026-11-14)
+
+**Decision:**
+1. Every MCP form shares one tool set over the same Go packages and follows D-085: an agent never sees more than the person or identity it acts for, and its calls are audited.
+2. **Local MCP** in kgwctl (stdio) comes first: it reads with the user's kubeconfig, so the API server enforces their RBAC.
+3. **Remote MCP** on the Snellius server follows Phase 7: OAuth 2.1 resource server per the MCP spec, audience-bound tokens, never forwarded. It serves hosted agents without Kubernetes credentials, web-based AI clients, people with SSO but no kubectl, and data only the server holds.
+4. kgwctl itself stays on kubeconfig (exec plugins such as kubelogin). It reports forbidden reads and never turns missing evidence into healthy. A browser or device-code login comes only if it ever calls a Snellius server.
+
+**Consequences:** The MCP server milestone splits into the two forms above.

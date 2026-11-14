@@ -1,6 +1,6 @@
 # Snellius — Roadmap
 
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-14
 
 **Program:** [kgateway-tooling program.md](https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md)
 
@@ -15,13 +15,15 @@ These apply to every phase. A phase design that breaks one needs a `decisions.md
 3. **Health is the home page.** It starts thin in Phase 1, and every later phase feeds new signals into it.
 4. **Speak Gateway API; never re-implement translation.**
    - Gateway API resources and their status are the primary source, presented in the user's language.
-   - A route that is Accepted and Programmed is treated as active as specified; the UI does not verify the data plane against the spec. It does show every signal that contradicts that status — xDS rejects, dropped or replaced rules, proxy readiness, and (Phase 11) differences between the config the controller sent and the config Envoy accepted — and never reports green while one of them is active (D-006).
+   - A route that is Accepted and Programmed is treated as active as specified; the UI does not verify the data plane against the spec. It does show every signal that contradicts that status — xDS rejects, dropped or replaced rules, proxy readiness, and (Phase 12) differences between the config the controller sent and the config Envoy accepted — and never reports green while one of them is active (D-006).
    - Envoy/xDS config is evidence, not vocabulary. It is used only where Gateway API objects cannot answer the question, such as filter order or rejected config, and is always mapped back to the Gateway API objects that produced it.
    - The UI must never re-implement kgateway translation logic.
 5. **Built for 1000s of routes.** From Phase 2 on, indexing, filtering and pagination happen on the server. A whole-cluster graph is never a landing page.
 6. **Works without an external metrics backend**, and gets richer when one is present. The first integration targets PromQL-compatible backends (Prometheus, Thanos, Mimir, VictoriaMetrics, …), behind an interface that downstreams can implement for others (D-007).
 7. **Extensible.** Resource kinds, health checks, analyzers and pages register through a registry. A downstream distribution adds to it without touching core code (D-003).
 8. **Never handles secret material.** The default RBAC has no Secret read access.
+9. **Least privilege.** In secure mode a person, or an agent acting for them, sees nothing beyond what their Kubernetes RBAC lets them read. A change to an object the viewer cannot read never changes what they see. Snellius has no permission model of its own (D-085).
+10. **One operator app.** Each feature answers an operator question on the page where that question comes up; the overview keeps only what needs action now, and each phase design states its overview footprint (D-088).
 
 ## UX & visual design
 **Baseline:** the frontend design and frontend conventions guidelines that the agent tooling applies to this project:
@@ -39,7 +41,7 @@ These apply to every phase. A phase design that breaks one needs a `decisions.md
    - Dense tables stay usable at 1000s of rows.
 
 ## Phases
-Phases 4 and 5 were inserted on 2026-11-07 (D-061); the old Phases 4–11 are now 6–13. Closed records keep the old numbers; D-061 maps them.
+Phases 4 and 5 were inserted on 2026-11-07 (D-061); the old Phases 4–11 became 6–13. Phase 7 was inserted on 2026-11-14 (D-084); the old Phases 7–13 are now 8–14. Closed records keep the old numbers; D-061 and D-084 map them.
 
 
 ### Phase 1 — Foundation & Overview
@@ -72,7 +74,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - xDS rejects (NACKs) per gateway;
 - controller and proxy pod health.
 - "Pod health" is "process health": restarts and readiness come from the provider (D-016).
-- A deterministic **suggested fix** where the evidence leaves exactly one correct change, such as the missing ReferenceGrant as YAML. No model: this is the first layer of AI-assisted diagnosis (Phase 13).
+- A deterministic **suggested fix** where the evidence leaves exactly one correct change, such as the missing ReferenceGrant as YAML. No model: this is the first layer of AI-assisted diagnosis (Phase 14).
 
 Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier. Decided in 3.1 (2026-11-02): keep the immutable full recompute, with per-check memoization (D-027).
 
@@ -111,9 +113,23 @@ Why now: about 60% of the code is already generic, and the refactor is cheaper b
 - A Backends list (kgateway `Backend` objects, Kubernetes Services and any other kind a route sends traffic to). Selecting one shows every route that routes to it, through which Gateways, listeners and hostnames: how this backend is exposed. It is the inverse of the route page's "other routes using this backend" (user, 2026-11-07).
 - Must work with `Backend` status alone; Services and EndpointSlices are optional (D-016). Envoy cluster and endpoint health from the proxies moves to the proxy endpoint view after GA (D-069, #35); Phase 6 keeps the seams for it.
 
-### Phase 7 — Policies & Filters
+### Phase 7 — Identity & Access
 **Status:** Not started
 **Docs:** `docs/phases/phase-7/`
+
+Inserted 2026-11-14 (D-084): authentication and authorisation come before any new feature. Ships as `v0.8.0`. Visibility follows Kubernetes RBAC exactly (principle 9, D-085).
+- **Local mode (default):** UI and API on 127.0.0.1 in the pod, reachable only by `kubectl port-forward`, with a banner; whoever may port-forward sees everything Snellius reads (D-086).
+- **Secure mode (production):** OIDC login through the issuer the cluster trusts; identity from TokenReview, with the cluster's claim mapping copied as a fallback and checked at startup; access from SubjectAccessReview per object, cached briefly; fails closed. Exposing Snellius on a Service or HTTPRoute requires it. OpenShift's built-in OAuth follows after this phase, once a test cluster exists (user, 2026-11-14).
+- **Visibility everywhere:** pages, lists, counts, facets, search, the map, exports and the API follow D-085's rule; pages from before Phase 6 get the D-077 treatment.
+- **Two signals per route** (D-087): route configuration and traffic path. The traffic path reads unknown or incomplete when parts are hidden; `gateway-rejecting` and `backend-problem` move into it.
+- **Sessions:** authorization code with PKCE, server-held tokens, idle and absolute expiry, CSRF protection.
+- **Audit log:** a separate stream with a documented schema. On by default: security events, MCP calls, deliberate reads (detail, YAML, export) and list access summarised per session. Opt-in: a disclosure profile and every request.
+- **Contract for agents** (D-089): every MCP form uses the same filter and audit records. The remote MCP server follows this phase.
+- Not in scope: remote MCP, multi-cluster, a trusted-proxy identity mode (added when a user needs it), views beyond RBAC.
+
+### Phase 8 — Policies & Filters
+**Status:** Not started
+**Docs:** `docs/phases/phase-8/`
 
 For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - where it is attached;
@@ -123,11 +139,11 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 **Design question:** kgateway's merge semantics are translation logic (principle 4). The effective view must be built from policy ancestor status (`Merged`, `Overridden`, …), not from our own merge implementation. If that status is insufficient, the gap is raised upstream.
 
-**Design item (user, 2026-11-13): two signals per route.** Each route gets its own state and a separate traffic-path state, as the Gateway table's Data plane column sits beside its state. `gateway-rejecting` and `backend-problem` (D-082) move from the state into the path signal, and policy problems inherited from a parent join it. Phase 10 adds observed traffic (errors, 5xx) to the same signal.
+Policy problems inherited from a parent join the route's traffic-path signal, which Phase 7 introduces (D-087). Phase 11 adds observed traffic (errors, 5xx) to the same signal.
 
-### Phase 8 — Search & Route Tester
+### Phase 9 — Search & Route Tester
 **Status:** Not started
-**Docs:** `docs/phases/phase-8/`
+**Docs:** `docs/phases/phase-9/`
 
 - Search across 100s of hostnames and 1000s of paths.
 - "Why does this request go here?": given a host, path, method and headers, show the winning listener, route and rule, and its backends.
@@ -138,9 +154,9 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 **Design question:** route precedence is defined by the Gateway API spec, so evaluating it over accepted routes is "speaking Gateway API". kgateway-specific behaviour (delegation, rule replacement) is the risk. The design decides whether the controller's xDS snapshot is used as a cross-check.
 
-### Phase 9 — Security Posture
+### Phase 10 — Security Posture
 **Status:** Not started
-**Docs:** `docs/phases/phase-9/`
+**Docs:** `docs/phases/phase-10/`
 
 - TLS, mTLS and backend TLS indicators on flows (lock icons).
 - Listener TLS modes.
@@ -152,11 +168,13 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 1. Show when a newer release, patch releases first, exists for Snellius itself and for each observed platform (kgateway, and any distribution a downstream adds through an extension seam).
 2. Later: list the CVEs the running versions are affected by (critical, high and maybe medium), and whether an upgrade fixes them.
 
+This is an upgrade decision for the operator (D-088), covering kgateway, its Envoy and Snellius. Image scanning stays with existing scanners. Security and compliance teams get machine-readable exports, not UI (#45).
+
 **Design questions:** this is the UI's first outbound call, so it is opt-in and must work air-gapped (an offline feed or a mirror URL); which sources to trust (release feeds, OSV or GitHub advisories) and how to show their freshness; image digests versus version tags; how a downstream plugs in its own release and advisory feed.
 
-### Phase 10 — Metrics & Insights
+### Phase 11 — Metrics & Insights
 **Status:** Not started
-**Docs:** `docs/phases/phase-10/`
+**Docs:** `docs/phases/phase-11/`
 
 - Golden metrics (traffic, errors, latency) shown in context on gateway and route pages, sourced from the proxy and controller metrics endpoints.
 - An optional integration with a PromQL-compatible metrics backend for longer windows, with links out to Grafana for history.
@@ -164,34 +182,34 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 **Design question:** where this UI's job stops and the job of the metrics platform starts.
 
-### Phase 11 — Runtime Filter Chain
+### Phase 12 — Runtime Filter Chain
 **Status:** Not started
-**Docs:** `docs/phases/phase-11/`
+**Docs:** `docs/phases/phase-12/`
 
 - The actual Envoy HTTP filter chain and filter order per route, mapped back to the Gateway API and policy resources that produced it.
 - Intended configuration (the controller's xDS snapshot) compared with the configuration Envoy accepted.
 - Builds on the `pkg/envoy` library of [xdsview](https://github.com/DuncanDoyle/xdsview) (xdsview Phase 4, v0.1.0). xdsview owns the mapping from Envoy names to Gateway API refs, and `computed.EnvoyNamer` delegates to it (program P-001, edges E4/E5).
 - Easier standalone, because the admin server (9095) and Envoy admin are local (D-016).
 
-### Phase 12 — App-Team Views
+### Phase 13 — App-Team Views
 **Status:** Not started
-**Docs:** `docs/phases/phase-12/`
-
-- OIDC login and impersonation.
-- Namespace-scoped views, so an application developer sees only their own routes and their health.
-- SubjectAccessReview and impersonation are one `Authorizer`, behind a `kubernetes-rbac` capability; a neutral authorisation story is a Phase 12 design question (D-016).
-
-### Phase 13 — AI-Assisted Diagnosis
-**Status:** Not started
-**Sequence:** after Phase 8, before Phase 9. It keeps the last number so references to Phases 9–12 stay valid.
 **Docs:** `docs/phases/phase-13/`
+
+Login and RBAC-driven visibility arrive in Phase 7. This phase adds what an application developer needs on top:
+- Views centred on their own namespaces: their routes, their health and their traffic paths, without the platform-wide pages.
+- A neutral authorisation story for platforms that are not plain Kubernetes RBAC is a design question (D-016).
+
+### Phase 14 — AI-Assisted Diagnosis
+**Status:** Not started
+**Sequence:** after Phase 9, before Phase 10. It keeps the last number so references to Phases 10–13 stay valid.
+**Docs:** `docs/phases/phase-14/`
 
 "Explain this problem and suggest a fix", on a finding, a Gateway or a route. It builds on three layers:
 1. Deterministic suggested fixes (Phase 3), which need no model.
 2. The MCP server milestone, which lets any agent reason over the UI's data.
 3. In this phase, an assistant inside the UI, behind a pluggable model provider. Any OpenAI-compatible endpoint works, which includes a local model, so no data has to leave the network.
 
-The evidence from Phases 6–8 (backends, policies, the route tester) is what makes its suggestions good, which is why it comes after Phase 8.
+The evidence from Phases 6–9 (backends, policies, the route tester) is what makes its suggestions good, which is why it comes after Phase 9.
 
 **Constraints, from the product principles:**
 - Optional and off by default, behind a provider interface like the metrics backend (principle 6, D-007).
@@ -202,19 +220,20 @@ The evidence from Phases 6–8 (backends, policies, the route tester) is what ma
 
 **Design questions:** offline validation of suggested YAML (CRD schemas; a server-side dry-run needs write access); whether a kgateway debugging skill ships with the MCP server; how suggestions are evaluated before release.
 
-**Idea to design (user, 2026-11-08): the agent proposes a test request.** To confirm a hypothesis ("the 503 is the empty endpoint slice"), the assistant proposes one route-tester request (Phase 8). A human reviews it and clicks Send; the agent never sends traffic itself. Same guardrails as D-064. The response goes back to the assistant as evidence. It is one request to confirm a diagnosis, not a test run.
+**Idea to design (user, 2026-11-08): the agent proposes a test request.** To confirm a hypothesis ("the 503 is the empty endpoint slice"), the assistant proposes one route-tester request (Phase 9). A human reviews it and clicks Send; the agent never sends traffic itself. Same guardrails as D-064. The response goes back to the assistant as evidence. It is one request to confirm a diagnosis, not a test run.
 
 ## Milestones outside the phase sequence
 - **Extension seam proof (after Phase 2):** runs as Phase 3 sub-phase 3.0 (2026-11-01). Besides kinds and detection, it adds the seams a downstream needs to ship a whole feature without forking: API endpoints, background collectors, check inputs, capabilities, a published shell package, in-page slots and chart extension values. `examples/downstream` uses every seam and runs in CI, so the proof is kept rather than thrown away. This validates D-003 before later phases build on it.
-- **MCP server (after Phase 3):** API v1 exposed as MCP tools: installs, findings with their evidence and suggested fixes, and the computed views. It grows as later phases add API, such as the route tester (Phase 8). It is a thin, read-only adapter over the API. It goes through the same `Authorizer` and adds no new data access. Any agent, cloud or local, can then diagnose a kgateway install and propose fixes. Needs Phase 3.1's stable finding IDs, and API v1 released.
-- **User manual (before Phase 13, user 2026-11-06):** user-facing documentation, written before Phase 13 (AI-Assisted Diagnosis), since its suggestions point users at it. It draws on `docs/documentation-notes.md`, and includes a scalability section: what the UI watches and holds in memory per kind, why some watches are cluster-wide (Services and EndpointSlices, D-031), and measured sizing per cluster size.
+- **MCP server, in two forms (D-089):** one read-only tool set (installs, findings with evidence and suggested fixes, the computed views), growing as later phases add API such as the route tester (Phase 9). An agent never sees more than the person or identity it acts for, and its calls are audited.
+  1. **Local MCP in kgwctl (first):** stdio, reads with the user's kubeconfig, so the API server enforces their RBAC.
+  2. **Remote MCP on Snellius (after Phase 7):** OAuth 2.1 resource server per the MCP spec, through the same `Authorizer` and audit log. For hosted agents without Kubernetes credentials, web-based AI clients, and people with SSO but no kubectl.
+- **User manual (before Phase 14, user 2026-11-06):** user-facing documentation, written before Phase 14 (AI-Assisted Diagnosis), since its suggestions point users at it. It draws on `docs/documentation-notes.md`, and includes a scalability section: what the UI watches and holds in memory per kind, why some watches are cluster-wide (Services and EndpointSlices, D-031), and measured sizing per cluster size.
 
 ## Deferred / out of roadmap
-- **Per-user authentication and authorisation** (D-013). OIDC login, Kubernetes SubjectAccessReview per request against the shared cache, with health roll-ups that still show which resource is wrong when the user may not see its details (D-013). It plugs into the Phase 1 `Authorizer` seam. Required before the UI reads Secrets (Phase 9 certificate details).
-- **Pre-apply "what-if" analysis of pasted YAML** (like gwctl `analyze -f`). Valuable, but write-path adjacent; revisit after Phase 8.
+- **Pre-apply "what-if" analysis of pasted YAML** (like gwctl `analyze -f`). Valuable, but write-path adjacent; revisit after Phase 9.
 - **A kgateway CLI** is now a planned separate project. It imports `pkg/cache` and `pkg/engine` for a one-shot load (edge E2) and the Phase 3.3 analyzer as a package (edge E3). The MCP server milestone covers part of this need.
 - **A Headlamp plugin.** It would be a second surface; one surface comes first.
-- **A support-bundle export.** Revisit after Phase 11.
+- **A support-bundle export.** Revisit after Phase 12.
 - **Proxy endpoint view** (#35, D-069). Per-proxy endpoints, health and drift against Kubernetes and the controller, opt-in. After GA; needs an upstream kgateway option for read-only `/clusters`.
 - **GRPCRoute, TCPRoute and TLSRoute.** Not in Phase 2 scope (HTTPRoute first). Added when a phase design pulls them in.
 
