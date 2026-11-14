@@ -228,6 +228,20 @@ export function buildGraph(
 
     // Each signal raises the state of the node it names; a row state no signal explains goes to its last node.
     const ids: RowIds = { gateway, listener, routes, end };
+    // Lists s on collapsed node n under hidden route k, by the hidden routes' names.
+    const hide = (n: MapNode, k: number, s: PathSignal) => {
+      const by = hiddenProblems.get(n.id) ?? new Map();
+      hiddenProblems.set(n.id, by);
+      const id = chain[k] as string;
+      const route = r.routes
+        .slice(shown, k + 1)
+        .map((x) => refLabel(x))
+        .join(" › ");
+      const list = by.get(id) ?? { id, route, signals: [] };
+      by.set(id, list);
+      const key = signalKey(s);
+      if (!list.signals.some((p: PathSignal) => signalKey(p) === key)) list.signals.push(s);
+    };
     let explained: HealthState = "healthy";
     for (const s of r.problem.signals) {
       const n = nodes.get(signalNode(s, r, ids));
@@ -235,28 +249,20 @@ export function buildGraph(
       if (n && k >= shown) {
         // A hidden route's signal raises its collapsed parent and is listed under the hidden route.
         n.state = worse(n.state, s.state);
-        const by = hiddenProblems.get(n.id) ?? new Map();
-        hiddenProblems.set(n.id, by);
-        const id = chain[k] as string;
-        const route = r.routes
-          .slice(shown, k + 1)
-          .map((x) => refLabel(x))
-          .join(" › ");
-        const list = by.get(id) ?? { id, route, signals: [] };
-        by.set(id, list);
-        const key = signalKey(s);
-        if (!list.signals.some((p: PathSignal) => signalKey(p) === key)) list.signals.push(s);
+        hide(n, k, s);
       } else if (n) {
         n.state = worse(n.state, s.state);
         const k = signalKey(s);
         if (!n.problems.some((p) => signalKey(p) === k)) n.problems.push(s);
       }
       // A route whose backend has an error or warning finding is at least warning, as on its page (D-082).
+      // A hidden route's goes to its collapsed parent, listed under the hidden route.
       const route = nodes.get(routes[routes.length - 1] ?? "");
       if (route && !r.mirror && s.kind === "finding" && same(s.ref, r.backend) && RANK[s.state] >= RANK.warning) {
         route.state = worse(route.state, "warning");
         const list = route.backendProblems ?? [];
-        if (!list.some((p) => signalKey(p) === signalKey(s))) route.backendProblems = [...list, s];
+        if (shown < chain.length) hide(route, chain.length - 1, s);
+        else if (!list.some((p) => signalKey(p) === signalKey(s))) route.backendProblems = [...list, s];
       }
       explained = worse(explained, s.state);
     }

@@ -251,3 +251,19 @@ it("a route whose backend has an error or warning finding is at least warning, a
     "error",
   ]);
 });
+
+it("a hidden route's backend problem raises its collapsed parent and is listed under the hidden route", () => {
+  const sig = { kind: "finding", code: "KGWUI-023", ref: ref("Service", "idle"), state: "error" } as const;
+  const rows = [row("http", ["root", "child"], "idle", { problem: { state: "error", signals: [sig] } })];
+  const open = buildGraph(rows);
+  // Expanded, the child route is warning and the delegating root is not (D-082).
+  expect(open.nodes.find((n) => n.id === chain("root", "child"))?.state).toBe("warning");
+  expect(open.nodes.find((n) => n.id === R("root"))?.state).toBe("healthy");
+  const shut = buildGraph(rows, new Set(), { collapsed: new Set([R("root")]) });
+  const root = shut.nodes.find((n) => n.id === R("root"));
+  expect(root?.state).toBe("warning");
+  expect(root?.backendProblems).toBeUndefined();
+  expect(root?.hiddenProblems?.map((h) => [h.id, h.signals.map((s) => s.code)])).toEqual([
+    [chain("root", "child"), ["KGWUI-023"]],
+  ]);
+});

@@ -1371,8 +1371,8 @@ Measured on the reference machine, 5 runs per world:
 
 **Context:** After D-082 a route to an idle Service reads warning on its page and in the lists, but its map node read healthy: a map node took only the signals that name it, and KGWUI-023 names the Service.
 
-**Decision:** On the map, a route node whose rows send to a backend with an error or warning finding is at least warning; a mirror target does not count. Its side panel lists each such finding as "Backend has a problem: …". The map computes it from the path rows it already loads, so a backend the caller may not view, or a row a state filter hides, does not raise it there.
+**Decision:** On the map, a route node whose rows send to a backend with an error or warning finding is at least warning; a mirror target does not count. Its side panel lists each such finding as "Backend has a problem: …". A collapsed route takes its hidden routes' backend problems, listed under the hidden route. The map computes it from the backend signals on the path rows it loads. Those leave out a weight-0 Service ref's findings and findings on another port of the Service, and a row the caller may not view or a state filter hides; D-082 counts them all, so in those cases the map route node stays healthy while its page reads warning. The Phase 7 two-signal design takes this up.
 
-**Consequences:** No API change. The map and the route page agree for every path the map shows.
+**Consequences:** No API change. The map and the route page agree except in the cases above.
 
-**Alternatives:** Send each route's row state on path rows: exact, but changes `/paths` and its memory budget for a case the map rows already cover.
+**Alternatives:** Send each route's row state on path rows: exact, but a `/paths` API change in a patch release; left to Phase 7.
