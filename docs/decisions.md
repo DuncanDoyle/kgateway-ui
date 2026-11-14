@@ -1380,7 +1380,7 @@ Measured on the reference machine, 5 runs per world:
 ## D-084 — New Phase 7: Identity & Access; Phases 7–13 become 8–14 (2026-11-14, roadmap)
 **Status:** accepted (user, 2026-11-14)
 
-**Context:** Snellius watches cluster state, and today whoever reaches it sees everything its ServiceAccount reads (D-013). For a release that can be promoted to enterprises, the user ranks authentication and authorisation above any new feature. Research (Kubernetes Dashboard, Headlamp, Kiali, Argo CD, Grafana, Rancher) and a Codex brainstorm agree on in-app OIDC plus Kubernetes SubjectAccessReview against the shared cache. The `Authorizer` seam and visible-only rows (D-077) already exist.
+**Context:** Snellius watches cluster state, and today whoever reaches it sees everything its ServiceAccount reads (D-013). For a release that large organisations can adopt, the user ranks authentication and authorisation above any new feature. Research (Kubernetes Dashboard, Headlamp, Kiali, Argo CD, Grafana, Rancher) and a Codex brainstorm agree on in-app OIDC plus Kubernetes SubjectAccessReview against the shared cache. The `Authorizer` seam and visible-only rows (D-077) already exist.
 
 **Decision:**
 1. **New Phase 7 — Identity & Access**, before Policies. Scope: local and secure modes (D-086), OIDC login with identity from TokenReview, per-object SubjectAccessReview behind the `Authorizer`, strict visibility on every page and computed view (D-085), two signals per route (D-087), sessions and an audit log. OpenShift's built-in OAuth follows after Phase 7, once a test cluster exists. Phase 7 ships as `v0.8.0`.
