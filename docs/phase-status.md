@@ -25,7 +25,7 @@ Sub-phase: none
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
-Waiting on: nothing (program file read 2026-11-14; no edge feeds Phase 7). To propose in the program file, with the user's approval: the D-084 renumbering of UI phases, and a new edge for the shared MCP tool set that kgwctl's local MCP uses (D-089). Open `cross-repo` issues here: #15, #21 (Phase 12).
+Waiting on: nothing (program file read 2026-11-14; no edge feeds Phase 7). Program file updated for the D-084 renumbering and the new edge E10 (kgwctl local MCP, D-089): kgateway-tooling `6612f3d`. Open `cross-repo` issues here: #15, #21 (Phase 12). Phase 7 ships as `v0.8.0` (user, 2026-11-14).
 Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3), updated in `v0.4.0` (kgwctl#4), `v0.5.0` (module `github.com/DuncanDoyle/snellius`, kgwctl#5), `v0.6.0` (2026-11-09, generic core, kgwctl#7; E8 break, kgwctl#6) and `v0.7.0` (2026-11-12): kgwctl's E2 requests #18 (`cache.ListOnce`) and #19 (namespace-scoped inputs) shipped and closed; notified kgwctl#8, program file updated (kgateway-tooling `fd99830`). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 8 (was 7 before D-084; program file not yet updated). An informational kgwctl compile job reports on every PR, never blocks.
 Open `cross-repo` issues (2026-11-13): here #15, #21 (xdsview E4/E5, for Phase 12); in kgwctl #1–#8 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 12 (was 11 before D-084).

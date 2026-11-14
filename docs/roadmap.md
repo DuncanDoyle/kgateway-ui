@@ -117,9 +117,9 @@ Why now: about 60% of the code is already generic, and the refactor is cheaper b
 **Status:** Not started
 **Docs:** `docs/phases/phase-7/`
 
-Inserted 2026-11-14 (D-084): authentication and authorisation come before any new feature. Visibility follows Kubernetes RBAC exactly (principle 9, D-085).
+Inserted 2026-11-14 (D-084): authentication and authorisation come before any new feature. Ships as `v0.8.0`. Visibility follows Kubernetes RBAC exactly (principle 9, D-085).
 - **Local mode (default):** UI and API on 127.0.0.1 in the pod, reachable only by `kubectl port-forward`, with a banner; whoever may port-forward sees everything Snellius reads (D-086).
-- **Secure mode (production):** OIDC login through the issuer the cluster trusts; identity from TokenReview, with the cluster's claim mapping copied as a fallback and checked at startup; access from SubjectAccessReview per object, cached briefly; fails closed. Exposing Snellius on a Service or HTTPRoute requires it. OpenShift's built-in OAuth follows, in this phase if testing allows.
+- **Secure mode (production):** OIDC login through the issuer the cluster trusts; identity from TokenReview, with the cluster's claim mapping copied as a fallback and checked at startup; access from SubjectAccessReview per object, cached briefly; fails closed. Exposing Snellius on a Service or HTTPRoute requires it. OpenShift's built-in OAuth follows after this phase, once a test cluster exists (user, 2026-11-14).
 - **Visibility everywhere:** pages, lists, counts, facets, search, the map, exports and the API follow D-085's rule; pages from before Phase 6 get the D-077 treatment.
 - **Two signals per route** (D-087): route configuration and traffic path. The traffic path reads unknown or incomplete when parts are hidden; `gateway-rejecting` and `backend-problem` move into it.
 - **Sessions:** authorization code with PKCE, server-held tokens, idle and absolute expiry, CSRF protection.
